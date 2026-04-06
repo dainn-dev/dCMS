@@ -1,0 +1,11 @@
+# Environment
+.ENV
+.env
+.env.local
+.env.*.local
+
+# Claude Code — local overrides (không commit)
+.claude/settings.local.json
+
+# MCP config chứa API keys — không commit
+.mcp.json
