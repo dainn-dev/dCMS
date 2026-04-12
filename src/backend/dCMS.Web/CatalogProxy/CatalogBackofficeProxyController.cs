@@ -1,10 +1,12 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Umbraco.Cms.Core.Security;
+using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Web.BackOffice.Controllers;
 using Umbraco.Cms.Web.Common.Attributes;
 
@@ -19,17 +21,20 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
     private readonly IOptions<CatalogProxyOptions> _catalogOptions;
     private readonly CatalogJwtIssuer _jwtIssuer;
     private readonly IBackOfficeSecurityAccessor _backOfficeSecurity;
+    private readonly IUserService _userService;
 
     public CatalogBackofficeProxyController(
         IHttpClientFactory httpClientFactory,
         IOptions<CatalogProxyOptions> catalogOptions,
         CatalogJwtIssuer jwtIssuer,
-        IBackOfficeSecurityAccessor backOfficeSecurity)
+        IBackOfficeSecurityAccessor backOfficeSecurity,
+        IUserService userService)
     {
         _httpClientFactory = httpClientFactory;
         _catalogOptions = catalogOptions;
         _jwtIssuer = jwtIssuer;
         _backOfficeSecurity = backOfficeSecurity;
+        _userService = userService;
     }
 
     /// <summary>Proxies anonymous Catalog storefront slug-check (no JWT).</summary>
@@ -58,6 +63,27 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
         };
     }
 
+    /// <summary>Roles embedded in Catalog JWT for the current Umbraco user (DAI-296 UI gating).</summary>
+    [HttpGet]
+    public IActionResult ForwardIdentity()
+    {
+        var user = BackOfficeUserResolver.GetCurrentIUser(_backOfficeSecurity, _userService);
+        if (user is null)
+            return Unauthorized();
+
+        var roles = CatalogBackofficeRoleMapping.GetDcmsRolesForCatalogJwt(user);
+        return Ok(new
+        {
+            data = new
+            {
+                roles,
+                canRunCatalogApprovalActions = CatalogBackofficeRoleMapping.CanRunCatalogApprovalActions(roles),
+                canCatalogWrite = CatalogBackofficeRoleMapping.CanCatalogWrite(roles)
+            },
+            error = (object?)null
+        });
+    }
+
     /// <summary>Forward GET/POST/PUT/DELETE to <c>/api/v1/tenants/{tenant}/stores/{store}/products…</c> with Catalog JWT.</summary>
     [HttpPost]
     public async Task<IActionResult> Forward([FromBody] CatalogForwardRequest request, CancellationToken cancellationToken)
@@ -66,11 +92,11 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
             return BadRequest("method is required.");
 
         if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsPost(request.Method) && !HttpMethods.IsPut(request.Method) &&
-            !HttpMethods.IsDelete(request.Method))
-            return BadRequest("method must be GET, POST, PUT, or DELETE.");
+            !HttpMethods.IsDelete(request.Method) && !HttpMethods.IsPatch(request.Method))
+            return BadRequest("method must be GET, POST, PUT, PATCH, or DELETE.");
 
         if (!CatalogProxyPathValidator.IsAllowed(request.Path ?? ""))
-            return BadRequest("path is not allowed for proxy (products/*, categories, variant-axes).");
+            return BadRequest("path is not allowed for proxy (products/*, categories, variant-axes, store-catalog-settings).");
 
         if (!TryResolveScope(request.TenantId, request.StoreId, out var tenant, out var store, out var badRequest))
             return badRequest!;
@@ -80,10 +106,11 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
             return Unauthorized();
 
         var subject = user.Id.ToString();
+        var iUser = BackOfficeUserResolver.GetCurrentIUser(_backOfficeSecurity, _userService);
         string token;
         try
         {
-            token = _jwtIssuer.CreateForBackOfficeUser(subject, tenant, store);
+            token = _jwtIssuer.CreateForBackOfficeUser(iUser, subject, tenant, store);
         }
         catch (InvalidOperationException ex)
         {
@@ -96,13 +123,35 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
 
         using var msg = new HttpRequestMessage(new HttpMethod(request.Method.ToUpperInvariant()), url);
         msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        msg.Headers.TryAddWithoutValidation("X-Tenant-Id", tenant);
+        msg.Headers.TryAddWithoutValidation("X-Store-Id", store);
         if (Request.Headers.TryGetValue("Idempotency-Key", out var idem) && !StringValues.IsNullOrEmpty(idem))
             msg.Headers.TryAddWithoutValidation("Idempotency-Key", idem.ToString());
 
-        if (request.Body is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } body &&
-            !HttpMethods.IsGet(request.Method) && !HttpMethods.IsDelete(request.Method))
+        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsDelete(request.Method))
         {
-            msg.Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(request.BinaryBodyBase64))
+            {
+                byte[] bytes;
+                try
+                {
+                    bytes = WebEncoders.Base64UrlDecode(request.BinaryBodyBase64);
+                }
+                catch
+                {
+                    bytes = Convert.FromBase64String(request.BinaryBodyBase64);
+                }
+
+                var ct = string.IsNullOrWhiteSpace(request.BinaryContentType)
+                    ? "application/octet-stream"
+                    : request.BinaryContentType.Trim();
+                msg.Content = new ByteArrayContent(bytes);
+                msg.Content.Headers.ContentType = new MediaTypeHeaderValue(ct);
+            }
+            else if (request.Body is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } body)
+            {
+                msg.Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json");
+            }
         }
 
         var client = _httpClientFactory.CreateClient("dcmsCatalog");
@@ -144,4 +193,9 @@ public sealed class CatalogForwardRequest
     public string? TenantId { get; set; }
     public string? StoreId { get; set; }
     public JsonElement? Body { get; set; }
+
+    /// <summary>Optional raw body for PUT uploads (US-14 images). Standard base64 or base64url.</summary>
+    public string? BinaryBodyBase64 { get; set; }
+
+    public string? BinaryContentType { get; set; }
 }

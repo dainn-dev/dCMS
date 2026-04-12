@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Json;
 using dCMS.AspNetCore.Auth;
 using dCMS.Catalog.Api.Http;
@@ -22,19 +23,25 @@ public static class ProductRoutes
 
         Auth(g.MapGet("", SearchProducts), auth, write: false);
         Auth(g.MapGet("{productId}/variants", ListVariants), auth, write: false);
+        Auth(g.MapGet("{productId}/approval-comments", ListApprovalComments), auth, write: false);
+        Auth(g.MapPost("{productId}/approval-comments", PostApprovalComment), auth, write: true);
         Auth(g.MapGet("{productId}", GetProduct), auth, write: false);
-        Auth(g.MapPost("bulk", BulkCreateProducts), auth, write: true);
+        Auth(g.MapPost("bulk", BulkPostProducts), auth, write: true);
         Auth(g.MapPut("bulk", BulkUpdateProducts), auth, write: true);
         Auth(g.MapPost("", CreateProduct), auth, write: true);
         Auth(g.MapPut("{productId}", UpdateProduct), auth, write: true);
         Auth(g.MapPatch("{productId}", UpdateProduct), auth, write: true);
         Auth(g.MapDelete("{productId}", DeleteProductAsArchive), auth, write: true);
         Auth(g.MapPost("{productId}/submit-for-approval", SubmitForApproval), auth, write: true);
+        AuthApproval(g.MapPost("{productId}/approve", ApprovePending), auth);
+        AuthApproval(g.MapPost("{productId}/request-changes", RequestChanges), auth);
+        AuthApproval(g.MapPost("{productId}/reject", RejectPending), auth);
         Auth(g.MapPost("{productId}/publish", PublishProduct), auth, write: true);
         Auth(g.MapPost("{productId}/hide", HideProduct), auth, write: true);
         Auth(g.MapPost("{productId}/unhide", UnhideProduct), auth, write: true);
         Auth(g.MapPost("{productId}/archive", ArchiveProduct), auth, write: true);
         Auth(g.MapPost("{productId}/variants/generate", GenerateVariants), auth, write: true);
+        Auth(g.MapPost("{productId}/variants", CreateManualVariant), auth, write: true);
         Auth(g.MapPut("{productId}/variants/{variantId}", UpdateVariant), auth, write: true);
     }
 
@@ -44,6 +51,26 @@ public static class ProductRoutes
         authEnabled
             ? builder.RequireAuthorization(write ? DcmsPolicies.CatalogWrite : DcmsPolicies.CatalogRead)
             : builder;
+
+    private static RouteHandlerBuilder AuthApproval(RouteHandlerBuilder builder, bool authEnabled) =>
+        authEnabled ? builder.RequireAuthorization(DcmsPolicies.CatalogApproval) : builder;
+
+    private static string ActorUserId(ClaimsPrincipal user) =>
+        user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+
+    private static string ActorCatalogRole(ClaimsPrincipal user)
+    {
+        if (user.IsInRole(DcmsRoles.SuperAdmin)) return DcmsRoles.SuperAdmin;
+        if (user.IsInRole(DcmsRoles.ChainAdmin)) return DcmsRoles.ChainAdmin;
+        if (user.IsInRole(DcmsRoles.BrandManager)) return DcmsRoles.BrandManager;
+        if (user.IsInRole(DcmsRoles.StoreManager)) return DcmsRoles.StoreManager;
+        if (user.IsInRole(DcmsRoles.StoreStaff)) return DcmsRoles.StoreStaff;
+        return "user";
+    }
+
+    private static bool CanBypassStoreApprovalGate(ClaimsPrincipal user) =>
+        user.IsInRole(DcmsRoles.SuperAdmin) || user.IsInRole(DcmsRoles.ChainAdmin) ||
+        user.IsInRole(DcmsRoles.BrandManager);
 
     /// <summary>US-6/7: Elasticsearch search + filters/facets; optional Redis cache (30s) when <c>ConnectionStrings:Redis</c> is set.</summary>
     private static async Task<IResult> SearchProducts(
@@ -169,7 +196,47 @@ public static class ProductRoutes
             var list = await products.ListVariantsAsync(productId, tenantId, storeId, cancellationToken).ConfigureAwait(false);
             return ApiEnvelope.Ok(new
             {
-                items = list.Select(v => new { id = v.Id, sku = v.Sku, combinationHash = v.CombinationHash, status = v.Status, sortOrder = v.SortOrder }).ToList()
+                items = list.Select(v => new
+                {
+                    id = v.Id,
+                    sku = v.Sku,
+                    combinationHash = v.CombinationHash,
+                    combinationCanonical = v.CombinationCanonical,
+                    status = v.Status,
+                    sortOrder = v.SortOrder,
+                    basePriceAmount = v.BasePriceAmount
+                }).ToList()
+            });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+    }
+
+    private static async Task<IResult> ListApprovalComments(
+        string tenantId,
+        string storeId,
+        string productId,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var list = await products.ListApprovalCommentsAsync(productId, tenantId, storeId, cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new
+            {
+                items = list.Select(c => new
+                {
+                    id = c.Id,
+                    userId = c.UserId,
+                    userName = c.UserId,
+                    role = c.Role,
+                    message = c.Message,
+                    type = c.Type,
+                    createdAt = c.CreatedAt
+                }).ToList()
             });
         }
         catch (ProductNotFoundException ex)
@@ -266,6 +333,7 @@ public static class ProductRoutes
     }
 
     private static async Task<IResult> SubmitForApproval(
+        HttpContext http,
         string tenantId,
         string storeId,
         string productId,
@@ -274,7 +342,9 @@ public static class ProductRoutes
     {
         try
         {
-            await products.SubmitForApprovalAsync(productId, tenantId, storeId, DateTimeOffset.UtcNow, cancellationToken)
+            await products
+                .SubmitForApprovalAsync(productId, tenantId, storeId, ActorUserId(http.User), ActorCatalogRole(http.User),
+                    DateTimeOffset.UtcNow, cancellationToken)
                 .ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.PendingApproval.ToPersistedValue() });
         }
@@ -288,7 +358,42 @@ public static class ProductRoutes
         }
     }
 
+    private static async Task<IResult> PostApprovalComment(
+        HttpContext http,
+        string tenantId,
+        string storeId,
+        string productId,
+        ApprovalCommentBody? body,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Message))
+            return ApiEnvelope.Error("validation_error", "Message is required.", StatusCodes.Status400BadRequest);
+
+        try
+        {
+            await products
+                .AddApprovalCommentAsync(productId, tenantId, storeId, body.Message!, ActorUserId(http.User), ActorCatalogRole(http.User),
+                    DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { id = productId });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (InvalidProductStateException ex)
+        {
+            return ApiEnvelope.Error("invalid_state", ex.Message, StatusCodes.Status400BadRequest);
+        }
+        catch (ArgumentException ex)
+        {
+            return ApiEnvelope.Error("validation_error", ex.Message, StatusCodes.Status400BadRequest);
+        }
+    }
+
     private static async Task<IResult> PublishProduct(
+        HttpContext http,
         string tenantId,
         string storeId,
         string productId,
@@ -297,6 +402,18 @@ public static class ProductRoutes
     {
         try
         {
+            var product = await products.GetProductForStoreAsync(productId, tenantId, storeId, cancellationToken).ConfigureAwait(false);
+            if (product is null)
+                return ApiEnvelope.Error("not_found", "Product not found.", StatusCodes.Status404NotFound);
+
+            var approvalRequired = await products.GetStoreApprovalRequiredAsync(tenantId, storeId, cancellationToken).ConfigureAwait(false);
+            if (approvalRequired && product.Status == ProductStatus.Draft && !CanBypassStoreApprovalGate(http.User))
+            {
+                return ApiEnvelope.Error("approval_required",
+                    "This store requires submit-for-approval before publish (or use an elevated catalog role).",
+                    StatusCodes.Status400BadRequest);
+            }
+
             await products.PublishProductAsync(productId, tenantId, storeId, DateTimeOffset.UtcNow, cancellationToken)
                 .ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.Active.ToPersistedValue() });
@@ -304,6 +421,113 @@ public static class ProductRoutes
         catch (ProductNotFoundException ex)
         {
             return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (InvalidProductStateException ex)
+        {
+            return ApiEnvelope.Error("invalid_state", ex.Message, StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static string PrimaryApprovalRole(ClaimsPrincipal user)
+    {
+        if (user.IsInRole(DcmsRoles.SuperAdmin)) return DcmsRoles.SuperAdmin;
+        if (user.IsInRole(DcmsRoles.ChainAdmin)) return DcmsRoles.ChainAdmin;
+        if (user.IsInRole(DcmsRoles.BrandManager)) return DcmsRoles.BrandManager;
+        return "approver";
+    }
+
+    private static async Task<IResult> ApprovePending(
+        HttpContext http,
+        string tenantId,
+        string storeId,
+        string productId,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        var userId = http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+        var role = PrimaryApprovalRole(http.User);
+        try
+        {
+            await products
+                .ApprovePendingProductAsync(productId, tenantId, storeId, userId, role, DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.Active.ToPersistedValue() });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (InvalidProductStateException ex)
+        {
+            return ApiEnvelope.Error("invalid_state", ex.Message, StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> RequestChanges(
+        HttpContext http,
+        string tenantId,
+        string storeId,
+        string productId,
+        ApprovalActionCommentBody? body,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Comment))
+            return ApiEnvelope.Error("validation_error", "Comment is required.", StatusCodes.Status400BadRequest);
+
+        var userId = http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+        var role = PrimaryApprovalRole(http.User);
+        try
+        {
+            await products
+                .RequestChangesOnPendingProductAsync(productId, tenantId, storeId, body.Comment!, userId, role,
+                    DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.Draft.ToPersistedValue() });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (ArgumentException ex)
+        {
+            return ApiEnvelope.Error("validation_error", ex.Message, StatusCodes.Status400BadRequest);
+        }
+        catch (InvalidProductStateException ex)
+        {
+            return ApiEnvelope.Error("invalid_state", ex.Message, StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> RejectPending(
+        HttpContext http,
+        string tenantId,
+        string storeId,
+        string productId,
+        ApprovalActionCommentBody? body,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Comment))
+            return ApiEnvelope.Error("validation_error", "Comment is required.", StatusCodes.Status400BadRequest);
+
+        var userId = http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+        var role = PrimaryApprovalRole(http.User);
+        try
+        {
+            await products
+                .RejectPendingProductAsync(productId, tenantId, storeId, body.Comment!, userId, role, DateTimeOffset.UtcNow,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.Draft.ToPersistedValue() });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (ArgumentException ex)
+        {
+            return ApiEnvelope.Error("validation_error", ex.Message, StatusCodes.Status400BadRequest);
         }
         catch (InvalidProductStateException ex)
         {
@@ -423,23 +647,33 @@ public static class ProductRoutes
         ProductService products, CancellationToken cancellationToken) =>
         ArchiveProduct(tenantId, storeId, productId, products, cancellationToken);
 
-    private static async Task<IResult> BulkCreateProducts(
+    private static async Task<IResult> BulkPostProducts(
         string tenantId,
         string storeId,
-        BulkCreateBody body,
+        BulkPostBody body,
         ProductService products,
         CancellationToken cancellationToken)
     {
-        if (body.Items is null || body.Items.Count == 0)
-            return ApiEnvelope.Error("validation_error", "Items are required.", StatusCodes.Status400BadRequest);
-        if (body.Items.Count > BulkMaxItems)
+        var createCount = body.Items?.Count ?? 0;
+        var priceCount = body.VariantPrices?.Count ?? 0;
+        if (createCount > 0 && priceCount > 0)
+            return ApiEnvelope.Error("validation_error", "Send either items (create) or variantPrices, not both.",
+                StatusCodes.Status400BadRequest);
+        if (createCount == 0 && priceCount == 0)
+            return ApiEnvelope.Error("validation_error", "Items or variantPrices is required.", StatusCodes.Status400BadRequest);
+
+        if (priceCount > 0)
+            return await BulkUpdateVariantPrices(tenantId, storeId, body.VariantPrices!, products, cancellationToken)
+                .ConfigureAwait(false);
+
+        if (createCount > BulkMaxItems)
             return ApiEnvelope.Error("validation_error", $"At most {BulkMaxItems} items per request.",
                 StatusCodes.Status400BadRequest);
 
         var succeeded = new List<object>();
         var failed = new List<object>();
         var now = DateTimeOffset.UtcNow;
-        for (var i = 0; i < body.Items.Count; i++)
+        for (var i = 0; i < body.Items!.Count; i++)
         {
             var item = body.Items[i];
             try
@@ -458,6 +692,26 @@ public static class ProductRoutes
 
         return ApiEnvelope.Ok(new { succeeded, failed },
             new { requested = body.Items.Count, succeeded = succeeded.Count, failed = failed.Count });
+    }
+
+    private static async Task<IResult> BulkUpdateVariantPrices(
+        string tenantId,
+        string storeId,
+        List<BulkVariantPriceRow> rows,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        if (rows.Count > BulkMaxItems)
+            return ApiEnvelope.Error("validation_error", $"At most {BulkMaxItems} variant price rows per request.",
+                StatusCodes.Status400BadRequest);
+
+        var now = DateTimeOffset.UtcNow;
+        var items = rows.Select(r => (r.ProductId, r.VariantId, r.BasePriceAmount)).ToList();
+        var (succeeded, failed) =
+            await products.BulkUpdateVariantPricesAsync(tenantId, storeId, items, now, cancellationToken)
+                .ConfigureAwait(false);
+        return ApiEnvelope.Ok(new { succeeded, failed },
+            new { requested = rows.Count, succeeded = succeeded.Count, failed = failed.Count });
     }
 
     private static async Task<IResult> BulkUpdateProducts(
@@ -504,6 +758,62 @@ public static class ProductRoutes
             new { requested = body.Items.Count, succeeded = succeeded.Count, failed = failed.Count });
     }
 
+    private static async Task<IResult> CreateManualVariant(
+        string tenantId,
+        string storeId,
+        string productId,
+        CreateManualVariantBody body,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var v = await products
+                .CreateManualVariantAsync(productId, tenantId, storeId, body.Sku ?? "", body.CombinationHash ?? "",
+                    body.CombinationCanonical, body.BasePriceAmount ?? 0, body.Status ?? "active", DateTimeOffset.UtcNow,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new
+            {
+                id = v.Id,
+                productId = v.ProductId,
+                sku = v.Sku,
+                combinationHash = v.CombinationHash,
+                combinationCanonical = v.CombinationCanonical,
+                status = v.Status,
+                sortOrder = v.SortOrder,
+                basePriceAmount = v.BasePriceAmount
+            });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (InvalidProductStateException ex)
+        {
+            return ApiEnvelope.Error("invalid_state", ex.Message, StatusCodes.Status400BadRequest);
+        }
+        catch (ArgumentException ex)
+        {
+            return ApiEnvelope.Error("validation_error", ex.Message, StatusCodes.Status400BadRequest);
+        }
+        catch (DuplicateVariantSkuException ex)
+        {
+            return ApiEnvelope.Error("duplicate_variant_sku", ex.Message, StatusCodes.Status409Conflict);
+        }
+        catch (DuplicateVariantCombinationHashException ex)
+        {
+            return Results.Json(
+                new
+                {
+                    data = (object?)null,
+                    meta = new { conflictingVariantId = ex.ConflictingVariantId, combinationHash = body.CombinationHash },
+                    error = new { code = "duplicate_combination_hash", message = ex.Message }
+                },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
     private static async Task<IResult> UpdateVariant(
         string tenantId,
         string storeId,
@@ -516,7 +826,7 @@ public static class ProductRoutes
         try
         {
             await products.UpdateVariantAsync(variantId, productId, tenantId, storeId, body.Sku, body.Status,
-                body.SortOrder, cancellationToken).ConfigureAwait(false);
+                body.SortOrder, body.BasePriceAmount, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = variantId, productId });
         }
         catch (ProductNotFoundException ex)
@@ -541,12 +851,21 @@ public static class ProductRoutes
 
     public sealed record VariantAxisJson(int AttributeId, List<int>? ValueIds);
 
-    public sealed record BulkCreateBody(List<CreateProductBody>? Items);
+    public sealed record BulkPostBody(List<CreateProductBody>? Items, List<BulkVariantPriceRow>? VariantPrices);
+
+    public sealed record BulkVariantPriceRow(string ProductId, string VariantId, long BasePriceAmount);
 
     public sealed record BulkUpdateItem(string ProductId, int CategoryId, string NameJson, string? DescriptionJson,
         string Slug);
 
     public sealed record BulkUpdateBody(List<BulkUpdateItem>? Items);
 
-    public sealed record UpdateVariantBody(string? Sku, string? Status, int? SortOrder);
+    public sealed record UpdateVariantBody(string? Sku, string? Status, int? SortOrder, long? BasePriceAmount);
+
+    public sealed record CreateManualVariantBody(string? Sku, string? CombinationHash, string? CombinationCanonical,
+        long? BasePriceAmount, string? Status);
+
+    public sealed record ApprovalActionCommentBody(string? Comment);
+
+    public sealed record ApprovalCommentBody(string? Message);
 }

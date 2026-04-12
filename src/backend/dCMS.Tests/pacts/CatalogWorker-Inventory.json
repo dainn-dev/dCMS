@@ -1,0 +1,42 @@
+{
+  "consumer": {
+    "name": "CatalogWorker"
+  },
+  "interactions": [
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "quantity": 42,
+          "reservedQuantity": 3,
+          "storeId": "s1",
+          "tenantId": "t1",
+          "variantId": "00000000-0000-0000-0000-000000000001",
+          "warehouseId": "00000000-0000-0000-0000-000000000002"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockUpdated.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "variant has stock rows"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    }
+  ],
+  "metadata": {
+    "pactRust": {
+      "ffi": "0.4.23",
+      "models": "1.2.5"
+    },
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  },
+  "provider": {
+    "name": "Inventory"
+  }
+}

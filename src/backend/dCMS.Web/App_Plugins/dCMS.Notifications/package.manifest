@@ -1,0 +1,11 @@
+{
+  "name": "dCMS Notifications",
+  "version": "1.0.0",
+  "allowPackageTelemetry": false,
+  "javascript": [
+    "/App_Plugins/dCMS.CatalogRbac/dcms-catalog-rbac.js",
+    "/App_Plugins/dCMS.CatalogRbac/dcms-http-error-interceptor.js",
+    "/App_Plugins/dCMS.Notifications/notification-bell.js"
+  ],
+  "css": ["/App_Plugins/dCMS.Notifications/notification-bell.css"]
+}

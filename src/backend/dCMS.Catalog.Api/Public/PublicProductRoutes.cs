@@ -259,6 +259,7 @@ public static class PublicProductRoutes
             {
                 variantId = v.Id,
                 sku = v.Sku,
+                basePriceAmount = v.BasePriceAmount,
                 inStock = string.Equals(v.Status, "active", StringComparison.OrdinalIgnoreCase)
             };
         }

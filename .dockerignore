@@ -1,0 +1,6 @@
+# Build context is repo root (see infra/docker-compose.yml). Exclude artifacts so Linux container restore/publish stays clean.
+**/bin/
+**/obj/
+**/.vs/
+**/node_modules/
+.git/

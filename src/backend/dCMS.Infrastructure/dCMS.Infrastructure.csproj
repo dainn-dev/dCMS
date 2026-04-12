@@ -38,6 +38,9 @@
     <None Update="Migrations\009_CreateAuditAndNotifications.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Migrations\013_CreateStoreCatalogSettings.sql">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

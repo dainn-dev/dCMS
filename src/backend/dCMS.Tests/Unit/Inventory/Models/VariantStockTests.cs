@@ -67,4 +67,14 @@ public sealed class VariantStockTests
         stock.Adjust(-10);
         stock.Quantity.Should().Be(40);
     }
+
+    [Fact]
+    public void Adjust_ReductionBeyondOnHand_ThrowsOutOfStockException()
+    {
+        var stock = MakeStock(10, 0);
+        var act = () => stock.Adjust(-15);
+        var ex = act.Should().Throw<OutOfStockException>().Which;
+        ex.Requested.Should().Be(15);
+        ex.Available.Should().Be(10);
+    }
 }

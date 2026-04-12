@@ -1,3 +1,5 @@
+using dCMS.Inventory.Models;
+
 namespace dCMS.Inventory.Commands;
 
 public sealed record AdjustStockCommand(
@@ -7,7 +9,8 @@ public sealed record AdjustStockCommand(
     string WarehouseId,
     int Delta,
     string CreatedBy,
-    string? ReferenceId);
+    string? ReferenceId,
+    StockMovementType MovementType = StockMovementType.Adjustment);
 
 public sealed record ReserveStockCommand(
     string TenantId,

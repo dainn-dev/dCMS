@@ -26,7 +26,11 @@ public sealed class CatalogVariantPgFixture : IAsyncLifetime
         await using var conn = new NpgsqlConnection(_container.GetConnectionString());
         await conn.OpenAsync();
         var baseDir = AppContext.BaseDirectory;
-        foreach (var name in new[] { "001_CreateCategories.sql", "003_CreateProducts.sql", "004_CreateVariants.sql", "010_AddCombinationCanonical.sql" })
+        foreach (var name in new[]
+                 {
+                     "001_CreateCategories.sql", "003_CreateProducts.sql", "004_CreateVariants.sql",
+                     "010_AddCombinationCanonical.sql", "012_AddVariantBasePriceAndProductImages.sql"
+                 })
         {
             var path = Path.Combine(baseDir, "Migrations", name);
             var script = await File.ReadAllTextAsync(path);

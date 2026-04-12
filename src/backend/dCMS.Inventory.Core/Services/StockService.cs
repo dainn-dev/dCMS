@@ -21,7 +21,7 @@ public sealed class StockService(IInventoryStockPersistence persistence)
             {
                 stock.Adjust(command.Delta);
                 return StockMovement.ForAppend(command.VariantId, command.WarehouseId, command.Delta,
-                    StockMovementType.Adjustment, command.CreatedBy, command.ReferenceId, now);
+                    command.MovementType, command.CreatedBy, command.ReferenceId, now);
             },
             cancellationToken);
 

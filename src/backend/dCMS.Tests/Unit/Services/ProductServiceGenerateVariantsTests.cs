@@ -1,5 +1,6 @@
 using dCMS.Core.Commands;
 using dCMS.Core.Models;
+using dCMS.Core.Notifications;
 using dCMS.Core.Persistence;
 using dCMS.Core.Services;
 using FluentAssertions;
@@ -26,7 +27,7 @@ public sealed class ProductServiceGenerateVariantsTests
         persistence.Setup(x => x.SaveNewVariantsWithProductAsync(It.IsAny<Product>(), It.IsAny<IReadOnlyList<ProductVariant>>(),
             It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
-        var svc = new ProductService(persistence.Object);
+        var svc = new ProductService(persistence.Object, NullProductNotificationSink.Instance);
         var axes = new[]
         {
             new Axis(2, new[] { 5, 6 })
@@ -52,7 +53,7 @@ public sealed class ProductServiceGenerateVariantsTests
         persistence.Setup(x => x.GetByIdAsync(product.Id, "t1", It.IsAny<CancellationToken>())).ReturnsAsync(product);
         persistence.Setup(x => x.GetVariantCombinationHashesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HashSet<string>());
-        var svc = new ProductService(persistence.Object);
+        var svc = new ProductService(persistence.Object, NullProductNotificationSink.Instance);
 
         var result = await svc.GenerateVariantsAsync(
             new GenerateVariantsCommand(product.Id, "t1", "s1", Array.Empty<Axis>(), "sku"), Now);

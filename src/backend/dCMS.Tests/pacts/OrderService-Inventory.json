@@ -1,0 +1,287 @@
+{
+  "consumer": {
+    "name": "OrderService"
+  },
+  "interactions": [
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReleased.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "order cancelled after reservation"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReleased.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "order cancelled after reservation"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReleased.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "order cancelled after reservation"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReleased.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "order cancelled after reservation"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "reason": "insufficient_stock",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReservationFailed.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "requested quantity unavailable"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000020",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "StockReserved.v1 from inventory outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "order has line items pending allocation"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    }
+  ],
+  "metadata": {
+    "pactRust": {
+      "ffi": "0.4.23",
+      "models": "1.2.5"
+    },
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  },
+  "provider": {
+    "name": "Inventory"
+  }
+}

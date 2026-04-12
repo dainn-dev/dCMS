@@ -1,11 +1,17 @@
 using System.Threading.RateLimiting;
+using dCMS.Catalog.Api;
 using dCMS.AspNetCore.Auth;
 using dCMS.Catalog.Api.Categories;
 using dCMS.Catalog.Api.VariantAxes;
 using dCMS.Catalog.Api.Middleware;
+using dCMS.Catalog.Api.Notifications;
 using dCMS.Catalog.Api.Public;
 using dCMS.Catalog.Api.Products;
+using dCMS.Catalog.Api.Services;
+using dCMS.Catalog.Api.Storage;
+using dCMS.Catalog.Api.Stores;
 using dCMS.Core.Caching;
+using dCMS.Core.Notifications;
 using dCMS.Core.Persistence;
 using dCMS.Core.Search;
 using dCMS.Core.Services;
@@ -54,7 +60,14 @@ builder.Services.AddSingleton<IProductSearchQuery>(sp =>
 });
 
 builder.Services.AddSingleton<ICatalogPersistence>(_ => new SqlCatalogPersistence(catalogCs));
+builder.Services.AddSingleton<IProductImagePersistence>(_ => new SqlProductImagePersistence(catalogCs));
+builder.Services.Configure<CatalogMediaOptions>(builder.Configuration.GetSection("Catalog:Media"));
+builder.Services.Configure<ProductImageS3Options>(builder.Configuration.GetSection("Catalog:S3:ProductImages"));
+builder.Services.AddSingleton<ProductImageS3Signer>();
+builder.Services.Configure<CatalogNotificationOptions>(builder.Configuration.GetSection(CatalogNotificationOptions.SectionName));
+builder.Services.AddSingleton<IProductNotificationSink, ProductNotificationSink>();
 builder.Services.AddScoped<ProductService>();
+builder.Services.AddScoped<NotificationService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
 
 builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
@@ -123,6 +136,9 @@ app.UseRateLimiter();
 app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapProductRoutes(builder.Configuration);
+app.MapStoreCatalogSettingsRoutes(builder.Configuration);
+app.MapNotificationRoutes(builder.Configuration);
+app.MapProductImageRoutes(builder.Configuration);
 app.MapCategoryRoutes(builder.Configuration);
 app.MapVariantAxesRoutes(builder.Configuration);
 app.MapPublicProductRoutes();

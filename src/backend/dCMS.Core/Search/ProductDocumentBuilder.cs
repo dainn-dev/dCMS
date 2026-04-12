@@ -20,7 +20,7 @@ public static class ProductDocumentBuilder
             var stock = input.StockByVariantId.TryGetValue(v.Id, out var s)
                 ? s
                 : new VariantStockSummary(0, false);
-            var basePrice = new MoneyAmount(0, input.StoreCurrency);
+            var basePrice = new MoneyAmount(Math.Max(0, v.BasePriceAmount), input.StoreCurrency);
             if (basePrice.Amount < minBase)
                 minBase = basePrice.Amount;
 

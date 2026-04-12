@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "allowPackageTelemetry": false,
   "javascript": [
+    "/App_Plugins/dCMS.CatalogRbac/dcms-catalog-rbac.js",
+    "/App_Plugins/dCMS.CatalogRbac/dcms-http-error-interceptor.js",
+    "/App_Plugins/dCMS.ProductWizard/papaparse.min.js",
     "/App_Plugins/dCMS.ProductWizard/productwizard.controller.js"
   ],
   "css": [],

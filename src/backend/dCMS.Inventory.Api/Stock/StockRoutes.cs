@@ -3,6 +3,7 @@ using dCMS.Core.Exceptions;
 using dCMS.Inventory.Api.Http;
 using dCMS.Inventory.Commands;
 using dCMS.Inventory.Exceptions;
+using dCMS.Inventory.Models;
 using dCMS.Inventory.Persistence;
 using dCMS.Inventory.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -34,14 +35,15 @@ public static class StockRoutes
     private static RouteHandlerBuilder Auth(RouteHandlerBuilder builder, bool authEnabled) =>
         authEnabled ? builder.RequireAuthorization(DcmsPolicies.InventoryWrite) : builder;
 
-    private sealed record AdjustBody(string VariantId, string WarehouseId, int Delta, string? CreatedBy, string? ReferenceId);
+    private sealed record AdjustBody(string? VariantId, string? WarehouseId, int Delta, string? CreatedBy, string? ReferenceId,
+        string? MovementType, string? Note);
 
     private sealed record ReserveBody(string VariantId, string WarehouseId, int Quantity, string? CreatedBy, string? ReferenceId);
 
     private sealed record ReleaseBody(string VariantId, string WarehouseId, int Quantity, string? CreatedBy, string? ReferenceId);
 
     private sealed record StockBulkItem(string Op, string VariantId, string WarehouseId, int? Delta, int? Quantity, string? CreatedBy,
-        string? ReferenceId);
+        string? ReferenceId, string? MovementType, string? Note);
 
     private sealed record StockBulkBody(List<StockBulkItem>? Items, string? CreatedBy, string? ReferenceId);
 
@@ -113,9 +115,11 @@ public static class StockRoutes
                             continue;
                         }
 
+                        var bulkMovementType = ParseAdjustMovementType(item.MovementType);
+                        var bulkReference = MergeAdjustReference(referenceId, item.Note);
                         await stock.AdjustStockAsync(
                                 new AdjustStockCommand(tenantId, storeId, variantId, warehouseId, item.Delta.Value, createdBy,
-                                    referenceId), now, cancellationToken)
+                                    bulkReference, bulkMovementType), now, cancellationToken)
                             .ConfigureAwait(false);
                         succeeded.Add(new { index = i, op = "adjust", variantId, warehouseId });
                         break;
@@ -187,9 +191,11 @@ public static class StockRoutes
 
         try
         {
+            var movementType = ParseAdjustMovementType(body.MovementType);
+            var reference = MergeAdjustReference(body.ReferenceId, body.Note);
             await stock.AdjustStockAsync(
                 new AdjustStockCommand(tenantId, storeId, body.VariantId.Trim(), body.WarehouseId.Trim(), body.Delta,
-                    string.IsNullOrWhiteSpace(body.CreatedBy) ? "api" : body.CreatedBy.Trim(), body.ReferenceId?.Trim()),
+                    string.IsNullOrWhiteSpace(body.CreatedBy) ? "api" : body.CreatedBy.Trim(), reference, movementType),
                 DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
             return ApiEnvelope.Ok(new { ok = true });
         }
@@ -199,7 +205,7 @@ public static class StockRoutes
         }
         catch (OutOfStockException ex)
         {
-            return ApiEnvelope.Error("out_of_stock", ex.Message, StatusCodes.Status422UnprocessableEntity);
+            return OutOfStockEnvelope(ex);
         }
         catch (StockInvariantException ex)
         {
@@ -210,6 +216,35 @@ public static class StockRoutes
             return ApiEnvelope.Error("concurrency", ex.Message, StatusCodes.Status409Conflict);
         }
     }
+
+    private static StockMovementType ParseAdjustMovementType(string? raw) =>
+        (raw ?? "").Trim().ToLowerInvariant() switch
+        {
+            "import" => StockMovementType.Import,
+            "return" => StockMovementType.Return,
+            "adjustment" => StockMovementType.Adjustment,
+            _ => StockMovementType.Adjustment
+        };
+
+    private static string? MergeAdjustReference(string? baseReference, string? note)
+    {
+        var br = (baseReference ?? "").Trim();
+        var n = (note ?? "").Trim();
+        if (br.Length == 0 && n.Length == 0)
+            return null;
+        if (n.Length == 0)
+            return br.Length <= 512 ? br : br[..512];
+        if (br.Length == 0)
+            return n.Length <= 512 ? n : n[..512];
+        var combined = br + " | " + n;
+        return combined.Length <= 512 ? combined : combined[..512];
+    }
+
+    private static IResult OutOfStockEnvelope(OutOfStockException ex) =>
+        ApiEnvelope.Error("out_of_stock", ex.Message, StatusCodes.Status422UnprocessableEntity,
+            ex.Requested is null
+                ? null
+                : new { requested = ex.Requested, available = ex.Available, variantId = ex.VariantId });
 
     private static async Task<IResult> ReserveStock(
         string tenantId,
@@ -239,7 +274,7 @@ public static class StockRoutes
         }
         catch (OutOfStockException ex)
         {
-            return ApiEnvelope.Error("out_of_stock", ex.Message, StatusCodes.Status422UnprocessableEntity);
+            return OutOfStockEnvelope(ex);
         }
         catch (StockInvariantException ex)
         {

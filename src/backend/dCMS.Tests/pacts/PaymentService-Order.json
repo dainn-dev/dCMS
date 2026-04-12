@@ -1,0 +1,61 @@
+{
+  "consumer": {
+    "name": "PaymentService"
+  },
+  "interactions": [
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000030",
+          "paymentId": "00000000-0000-0000-0000-000000000031",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "PaymentCompleted.v1 from order outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "payment provider captured funds"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    },
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "orderId": "00000000-0000-0000-0000-000000000030",
+          "reason": "card_declined",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "PaymentFailed.v1 from order outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "payment provider rejected charge"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    }
+  ],
+  "metadata": {
+    "pactRust": {
+      "ffi": "0.4.23",
+      "models": "1.2.5"
+    },
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  },
+  "provider": {
+    "name": "Order"
+  }
+}

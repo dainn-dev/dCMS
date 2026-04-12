@@ -1,0 +1,12 @@
+{
+  "name": "dcms-frontend",
+  "private": true,
+  "description": "Playwright E2E for dCMS (Umbraco backoffice + catalog wizard).",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1"
+  }
+}

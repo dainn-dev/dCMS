@@ -1,5 +1,8 @@
-# dCMS local stack: PostgreSQL, RabbitMQ, Elasticsearch, Catalog API, Inventory API, Catalog Worker.
+# dCMS local stack (DAI-301 / M0): PostgreSQL (4 DBs), RabbitMQ, Redis, Elasticsearch, Catalog.Api, Inventory.Api,
+# Order.Api + Payment.Api (placeholder HTTP + /health), Catalog.Worker (MassTransit + RabbitMQ), Umbraco Web (SQLite volume).
+# SQL Server from original AC is not used — stack is PostgreSQL-only.
 # Usage (repo root): docker compose -f infra/docker-compose.yml build
+#                      docker compose -f infra/docker-compose.yml up -d
 #                      docker compose -f infra/docker-compose.yml --profile test run --rm m1-domain-tests
 # Apply SQL migrations after Postgres is healthy (see infra/README.md).
 
@@ -53,6 +56,12 @@ services:
       dockerfile: infra/docker/Dockerfile.catalog-api
     ports:
       - "5001:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
@@ -73,6 +82,12 @@ services:
       dockerfile: infra/docker/Dockerfile.inventory-api
     ports:
       - "5002:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Inventory: "Host=postgres;Port=5432;Database=dcms_inventory;Username=dcms;Password=Your_password123"
@@ -83,12 +98,54 @@ services:
       postgres:
         condition: service_healthy
 
+  order-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.order-api
+    ports:
+      - "5003:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.payment-api
+    ports:
+      - "5004:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   umbraco-web:
     build:
       context: ..
       dockerfile: infra/docker/Dockerfile.dcms-web
     ports:
       - "5000:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 120s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       # US-13 BFF → Catalog.Api (internal port 8080). Align Auth__JwtSigningKey with catalog-api when Auth:Enabled.
@@ -100,7 +157,7 @@ services:
       - umbraco_sqlite:/app/umbraco/Data
     depends_on:
       catalog-api:
-        condition: service_started
+        condition: service_healthy
 
   catalog-worker:
     build:

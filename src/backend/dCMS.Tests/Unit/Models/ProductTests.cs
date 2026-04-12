@@ -81,6 +81,43 @@ public sealed class ProductTests
     }
 
     [Fact]
+    public void ReturnPendingToDraft_moves_pending_to_draft()
+    {
+        var p = Product.Create("t1", "s1", 1, """{"vi":"Áo"}""", "{}", "slug", Now);
+        p.SubmitForApproval(Now.AddMinutes(1));
+        p.ClearDomainEvents();
+
+        p.ReturnPendingToDraft(Now.AddMinutes(2));
+
+        p.Status.Should().Be(ProductStatus.Draft);
+        p.DomainEvents.Should().ContainSingle().Which.Should().BeOfType<ProductUpdated>();
+    }
+
+    [Fact]
+    public void ReturnPendingToDraft_throws_when_not_pending()
+    {
+        var p = Product.Create("t1", "s1", 1, """{"vi":"Áo"}""", "{}", "slug", Now);
+        p.ClearDomainEvents();
+
+        var act = () => p.ReturnPendingToDraft(Now.AddMinutes(1));
+
+        act.Should().Throw<InvalidProductStateException>().WithMessage("*pending approval*");
+    }
+
+    [Fact]
+    public void Publish_from_pending_sets_Active()
+    {
+        var p = Product.Create("t1", "s1", 1, """{"vi":"Áo"}""", "{}", "slug", Now);
+        p.SubmitForApproval(Now.AddMinutes(1));
+        p.ClearDomainEvents();
+
+        p.Publish(Now.AddMinutes(2));
+
+        p.Status.Should().Be(ProductStatus.Active);
+        p.DomainEvents.Should().ContainSingle().Which.Should().BeOfType<ProductPublished>();
+    }
+
+    [Fact]
     public void UpdateDetails_raises_ProductUpdated_when_fields_change()
     {
         var p = Product.Create("t1", "s1", 1, """{"vi":"A"}""", "{}", "slug", Now);

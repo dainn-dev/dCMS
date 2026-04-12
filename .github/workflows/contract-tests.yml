@@ -1,0 +1,33 @@
+name: Contract tests (Pact)
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "src/backend/**"
+      - ".github/workflows/contract-tests.yml"
+  pull_request:
+    paths:
+      - "src/backend/**"
+      - ".github/workflows/contract-tests.yml"
+
+jobs:
+  pact-messages:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore dCMS.Tests/dCMS.Tests.csproj
+
+      - name: Pact message contracts (consumer + provider)
+        env:
+          PACT_DO_NOT_TRACK: "true"
+        run: dotnet test dCMS.Tests/dCMS.Tests.csproj --filter "FullyQualifiedName~dCMS.Tests.Pact" --no-restore -v n

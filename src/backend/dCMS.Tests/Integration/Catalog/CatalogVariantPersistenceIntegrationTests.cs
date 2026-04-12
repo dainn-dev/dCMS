@@ -1,5 +1,6 @@
 using Dapper;
 using dCMS.Core.Exceptions;
+using dCMS.Core.Notifications;
 using dCMS.Core.Services;
 using dCMS.Infrastructure.Catalog;
 using FluentAssertions;
@@ -17,7 +18,7 @@ public sealed class CatalogVariantPersistenceIntegrationTests(CatalogVariantPgFi
     public async Task UpdateProductVariantAsync_updates_row_scoped_by_tenant_store()
     {
         var persistence = new SqlCatalogPersistence(_fixture.ConnectionString);
-        var affected = await persistence.UpdateProductVariantAsync("v1", "p1", "t1", "s1", "SKU-A2", "inactive", 5);
+        var affected = await persistence.UpdateProductVariantAsync("v1", "p1", "t1", "s1", "SKU-A2", "inactive", 5, 0);
         affected.Should().Be(1);
 
         await using var conn = new NpgsqlConnection(_fixture.ConnectionString);
@@ -43,9 +44,10 @@ public sealed class CatalogVariantPersistenceIntegrationTests(CatalogVariantPgFi
     public async Task ProductService_UpdateVariantAsync_throws_DuplicateVariantSkuException_when_sku_taken()
     {
         var persistence = new SqlCatalogPersistence(_fixture.ConnectionString);
-        var svc = new ProductService(persistence);
+        var svc = new ProductService(persistence, NullProductNotificationSink.Instance);
 
-        var act = async () => await svc.UpdateVariantAsync("v1", "p1", "t1", "s1", "SKU-B", null, null);
+        var act = async () =>
+            await svc.UpdateVariantAsync("v1", "p1", "t1", "s1", "SKU-B", null, null, null, DateTimeOffset.UtcNow);
 
         await act.Should().ThrowAsync<DuplicateVariantSkuException>();
     }

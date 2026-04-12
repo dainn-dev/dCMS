@@ -241,7 +241,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
     {
         await using var connection = new NpgsqlConnection(_connectionString);
         const string sql = """
-            SELECT v."Id", v."ProductId", v."SKU", v."CombinationHash", v."CombinationCanonical", v."Status", v."SortOrder"
+            SELECT v."Id", v."ProductId", v."SKU", v."CombinationHash", v."CombinationCanonical", v."Status", v."SortOrder", v."BasePriceAmount"
             FROM "ProductVariants" v
             INNER JOIN "Products" p ON p."Id" = v."ProductId"
             WHERE v."ProductId" = @ProductId AND p."TenantId" = @TenantId AND p."StoreId" = @StoreId
@@ -252,7 +252,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return rows.Select(r => ProductVariant.Restore(r.Id, r.ProductId, r.Sku, r.CombinationHash, r.Status, r.SortOrder,
-                r.CombinationCanonical ?? ""))
+                r.CombinationCanonical ?? "", r.BasePriceAmount))
             .ToList();
     }
 
@@ -289,14 +289,16 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
     }
 
     public async Task<int> UpdateProductVariantAsync(string variantId, string productId, string tenantId,
-        string storeId, string sku, string status, int sortOrder, CancellationToken cancellationToken = default)
+        string storeId, string sku, string status, int sortOrder, long basePriceAmount,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = new NpgsqlConnection(_connectionString);
         const string sql = """
             UPDATE "ProductVariants" v SET
                 "SKU" = @Sku,
                 "Status" = @Status,
-                "SortOrder" = @SortOrder
+                "SortOrder" = @SortOrder,
+                "BasePriceAmount" = @BasePriceAmount
             FROM "Products" p
             WHERE v."ProductId" = p."Id"
               AND v."Id" = @VariantId
@@ -306,7 +308,8 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             """;
         return await connection.ExecuteAsync(new CommandDefinition(sql,
                 new { VariantId = variantId, ProductId = productId, TenantId = tenantId, StoreId = storeId, Sku = sku,
-                    Status = status, SortOrder = sortOrder }, cancellationToken: cancellationToken))
+                    Status = status, SortOrder = sortOrder, BasePriceAmount = basePriceAmount },
+                cancellationToken: cancellationToken))
             .ConfigureAwait(false);
     }
 
@@ -314,14 +317,14 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         IReadOnlyList<ProductVariant> variants, CancellationToken cancellationToken)
     {
         var sql = new StringBuilder(
-            """INSERT INTO "ProductVariants" ("Id", "ProductId", "SKU", "CombinationHash", "CombinationCanonical", "Status", "SortOrder") VALUES """);
+            """INSERT INTO "ProductVariants" ("Id", "ProductId", "SKU", "CombinationHash", "CombinationCanonical", "Status", "SortOrder", "BasePriceAmount") VALUES """);
         var ps = new DynamicParameters();
         for (var i = 0; i < variants.Count; i++)
         {
             if (i > 0)
                 sql.Append(',');
             var v = variants[i];
-            sql.Append($"(@v{i}Id, @v{i}Pid, @v{i}Sku, @v{i}Hash, @v{i}Canon, @v{i}St, @v{i}So)");
+            sql.Append($"(@v{i}Id, @v{i}Pid, @v{i}Sku, @v{i}Hash, @v{i}Canon, @v{i}St, @v{i}So, @v{i}Price)");
             ps.Add($"v{i}Id", v.Id);
             ps.Add($"v{i}Pid", v.ProductId);
             ps.Add($"v{i}Sku", v.Sku);
@@ -329,6 +332,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             ps.Add($"v{i}Canon", v.CombinationCanonical);
             ps.Add($"v{i}St", v.Status);
             ps.Add($"v{i}So", v.SortOrder);
+            ps.Add($"v{i}Price", v.BasePriceAmount);
         }
 
         await connection.ExecuteAsync(new CommandDefinition(sql.ToString(), ps, tx, cancellationToken: cancellationToken))
@@ -405,6 +409,151 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             .ToList();
     }
 
+    public async Task<IReadOnlyList<ApprovalCommentRow>> ListApprovalCommentsForProductAsync(string productId, string tenantId,
+        string storeId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT c."Id", c."UserId", c."Role", c."Message", c."Type", c."CreatedAt"
+            FROM "ApprovalComments" c
+            INNER JOIN "Products" p ON p."Id" = c."ProductId"
+            WHERE c."ProductId" = @ProductId AND p."TenantId" = @TenantId AND p."StoreId" = @StoreId
+            ORDER BY c."CreatedAt" ASC, c."Id" ASC
+            """;
+        var rows = await connection
+            .QueryAsync<ApprovalCommentRow>(
+                new CommandDefinition(sql, new { ProductId = productId, TenantId = tenantId, StoreId = storeId },
+                    cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    public async Task InsertApprovalCommentAsync(string productId, string userId, string role, string message, string type,
+        DateTimeOffset createdAt, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            INSERT INTO "ApprovalComments" ("ProductId", "UserId", "Role", "Message", "Type", "CreatedAt")
+            VALUES (@ProductId, @UserId, @Role, @Message, @Type, @CreatedAt)
+            """;
+        await connection.ExecuteAsync(new CommandDefinition(sql,
+            new { ProductId = productId, UserId = userId, Role = role, Message = message, Type = type, CreatedAt = createdAt },
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<int> CountUnreadNotificationsAsync(string tenantId, string userId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT COUNT(*)::int
+            FROM "NotificationEvents"
+            WHERE "TenantId" = @TenantId AND "UserId" = @UserId AND "ReadAt" IS NULL
+            """;
+        return await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(sql, new { TenantId = tenantId, UserId = userId }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<NotificationEventRow>> ListNotificationsForUserAsync(string tenantId, string userId, int limit,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT "Id", "TenantId", "UserId", "Type", "EntityId", "Message", "ReadAt", "CreatedAt"
+            FROM "NotificationEvents"
+            WHERE "TenantId" = @TenantId AND "UserId" = @UserId
+            ORDER BY "CreatedAt" DESC, "Id" DESC
+            LIMIT @Limit
+            """;
+        var rows = await connection
+            .QueryAsync<NotificationEventRow>(
+                new CommandDefinition(sql, new { TenantId = tenantId, UserId = userId, Limit = limit },
+                    cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    public async Task<int> MarkAllNotificationsReadAsync(string tenantId, string userId, DateTimeOffset readAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            UPDATE "NotificationEvents"
+            SET "ReadAt" = @ReadAt
+            WHERE "TenantId" = @TenantId AND "UserId" = @UserId AND "ReadAt" IS NULL
+            """;
+        return await connection.ExecuteAsync(new CommandDefinition(sql, new { TenantId = tenantId, UserId = userId, ReadAt = readAt },
+                cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    public async Task InsertNotificationAsync(string tenantId, string userId, string type, string entityId, string message,
+        DateTimeOffset createdAt, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            INSERT INTO "NotificationEvents" ("TenantId", "UserId", "Type", "EntityId", "Message", "ReadAt", "CreatedAt")
+            VALUES (@TenantId, @UserId, @Type, @EntityId, @Message, NULL, @CreatedAt)
+            """;
+        await connection.ExecuteAsync(new CommandDefinition(sql,
+            new { TenantId = tenantId, UserId = userId, Type = type, EntityId = entityId, Message = message, CreatedAt = createdAt },
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<StoreCatalogSettingsRow?> GetStoreCatalogSettingsAsync(string tenantId, string storeId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT "TenantId", "StoreId", "ApprovalRequired", "LowStockThreshold", "UpdatedAt"
+            FROM "StoreCatalogSettings"
+            WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId
+            """;
+        return await connection.QuerySingleOrDefaultAsync<StoreCatalogSettingsRow>(
+            new CommandDefinition(sql, new { TenantId = tenantId, StoreId = storeId }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    public async Task UpsertStoreCatalogSettingsAsync(string tenantId, string storeId, bool approvalRequired, int? lowStockThreshold,
+        DateTimeOffset updatedAt, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            INSERT INTO "StoreCatalogSettings" ("TenantId", "StoreId", "ApprovalRequired", "LowStockThreshold", "UpdatedAt")
+            VALUES (@TenantId, @StoreId, @ApprovalRequired, @LowStockThreshold, @UpdatedAt)
+            ON CONFLICT ("TenantId", "StoreId") DO UPDATE SET
+                "ApprovalRequired" = EXCLUDED."ApprovalRequired",
+                "LowStockThreshold" = EXCLUDED."LowStockThreshold",
+                "UpdatedAt" = EXCLUDED."UpdatedAt"
+            """;
+        await connection.ExecuteAsync(new CommandDefinition(sql,
+            new
+            {
+                TenantId = tenantId,
+                StoreId = storeId,
+                ApprovalRequired = approvalRequired,
+                LowStockThreshold = lowStockThreshold,
+                UpdatedAt = updatedAt
+            }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<string?> GetLatestApprovalCommentUserIdAsync(string productId, string tenantId, string storeId, string type,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT c."UserId"
+            FROM "ApprovalComments" c
+            INNER JOIN "Products" p ON p."Id" = c."ProductId"
+            WHERE c."ProductId" = @ProductId AND p."TenantId" = @TenantId AND p."StoreId" = @StoreId AND c."Type" = @Type
+            ORDER BY c."CreatedAt" DESC, c."Id" DESC
+            LIMIT 1
+            """;
+        return await connection.QueryFirstOrDefaultAsync<string?>(
+            new CommandDefinition(sql, new { ProductId = productId, TenantId = tenantId, StoreId = storeId, Type = type },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
     private sealed class AxisFlatRow
     {
         public int AttrId { get; init; }
@@ -439,6 +588,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         public string? CombinationCanonical { get; init; }
         public string Status { get; init; } = null!;
         public int SortOrder { get; init; }
+        public long BasePriceAmount { get; init; }
     }
 
     private sealed class CategoryRow

@@ -1,5 +1,6 @@
 using dCMS.Core.Exceptions;
 using dCMS.Core.Models;
+using dCMS.Core.Notifications;
 using dCMS.Core.Persistence;
 using dCMS.Core.Services;
 using FluentAssertions;
@@ -23,7 +24,7 @@ public sealed class ProductServiceListVariantsTests
         persistence.Setup(x => x.ListVariantsForProductAsync(product.Id, "t1", "s1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { v1, v2 });
 
-        var svc = new ProductService(persistence.Object);
+        var svc = new ProductService(persistence.Object, NullProductNotificationSink.Instance);
         var list = await svc.ListVariantsAsync(product.Id, "t1", "s1");
 
         list.Should().HaveCount(2).And.Subject.Should().ContainInOrder(v1, v2);
@@ -37,7 +38,7 @@ public sealed class ProductServiceListVariantsTests
         var persistence = new Mock<ICatalogPersistence>();
         persistence.Setup(x => x.GetByIdAsync(product.Id, "t1", It.IsAny<CancellationToken>())).ReturnsAsync(product);
 
-        var svc = new ProductService(persistence.Object);
+        var svc = new ProductService(persistence.Object, NullProductNotificationSink.Instance);
         await Assert.ThrowsAsync<ProductNotFoundException>(() => svc.ListVariantsAsync(product.Id, "t1", "s1"));
         persistence.Verify(x => x.ListVariantsForProductAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Never);
@@ -49,7 +50,7 @@ public sealed class ProductServiceListVariantsTests
         var persistence = new Mock<ICatalogPersistence>();
         persistence.Setup(x => x.GetByIdAsync("missing", "t1", It.IsAny<CancellationToken>())).ReturnsAsync((Product?)null);
 
-        var svc = new ProductService(persistence.Object);
+        var svc = new ProductService(persistence.Object, NullProductNotificationSink.Instance);
         await Assert.ThrowsAsync<ProductNotFoundException>(() => svc.ListVariantsAsync("missing", "t1", "s1"));
     }
 }

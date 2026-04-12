@@ -9,3 +9,30 @@
 
 # MCP config chứa API keys — không commit
 .mcp.json
+
+# Playwright / Node (E2E)
+src/frontend/node_modules/
+src/frontend/playwright-report/
+src/frontend/test-results/
+src/backend/dCMS.AspNetCore.Auth/bin/
+src/backend/dCMS.AspNetCore.Auth/obj/
+src/backend/dCMS.Catalog.Api/bin/
+src/backend/dCMS.Catalog.Api/obj/
+src/backend/dCMS.Catalog.Worker/bin/
+src/backend/dCMS.Catalog.Worker/obj/
+src/backend/dCMS.Core/bin/
+src/backend/dCMS.Core/obj/
+src/backend/dCMS.Infrastructure/bin/
+src/backend/dCMS.Infrastructure/obj/
+src/backend/dCMS.Inventory.Api/bin/
+src/backend/dCMS.Inventory.Api/obj/
+src/backend/dCMS.Inventory.Core/bin/
+src/backend/dCMS.Inventory.Core/obj/
+src/backend/dCMS.Inventory.Infrastructure/bin/
+src/backend/dCMS.Inventory.Infrastructure/obj/
+src/backend/dCMS.Order.Api/bin/
+src/backend/dCMS.Order.Api/obj/
+src/backend/dCMS.Payment.Api/bin/
+src/backend/dCMS.Payment.Api/obj/
+src/backend/dCMS.Tests/bin/
+src/backend/dCMS.Tests/obj/

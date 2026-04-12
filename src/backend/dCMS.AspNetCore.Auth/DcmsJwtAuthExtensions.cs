@@ -60,6 +60,11 @@ public static class DcmsJwtAuthExtensions
                 DcmsRoles.ChainAdmin,
                 DcmsRoles.SuperAdmin));
 
+            o.AddPolicy(DcmsPolicies.CatalogApproval, p => p.RequireAuthenticatedUser().RequireRole(
+                DcmsRoles.BrandManager,
+                DcmsRoles.ChainAdmin,
+                DcmsRoles.SuperAdmin));
+
             o.AddPolicy(DcmsPolicies.InventoryRead, p => p.RequireAuthenticatedUser().RequireRole(
                 DcmsRoles.StoreStaff,
                 DcmsRoles.StoreManager,

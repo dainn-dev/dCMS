@@ -7,7 +7,9 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
     "$timeout",
     "$scope",
     "$q",
-    function ($http, $timeout, $scope, $q) {
+    "notificationsService",
+    "dcmsCatalogRbac",
+    function ($http, $timeout, $scope, $q, notificationsService, dcmsCatalogRbac) {
         var vm = this;
         vm.title = "dCMS — Product wizard";
         vm.step = 1;
@@ -53,17 +55,75 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
         vm.variantSaveProgress = null;
         /** Step 5 (DAI-287): GET product + review summary + publish/hide + optional detail URL. */
         vm.productDetail = null;
+        /** DAI-295: GET …/approval-comments + 15s poll while pending_approval. */
+        vm.approvalComments = [];
+        vm.approvalCommentsPollTimer = null;
+        /** DAI-296: roles from BFF ForwardIdentity + approve / request-changes / reject. */
+        vm.catalogIdentity = null;
+        /** DAI-299: shimmer while first variants GET for this product is in flight. */
+        vm.variantsGridSkeleton = false;
+        vm.approvalActionModal = null;
+        vm.approvalActionComment = "";
         vm.step5Notice = null;
+        /** US-14: Step 5 sub-views */
+        vm.step5Tab = "variants";
+        vm.variantFilterText = "";
+        vm.variantSortKey = "sortOrder";
+        vm.variantDisplayList = [];
+        vm.bulkPriceInput = "";
+        vm.priceUndoSnapshot = null;
+        vm.priceUndoTimer = null;
+        vm.variantRowFlash = {};
+        vm.variantRowSaving = {};
+        /** DAI-288: manual add variant + hash conflict highlight */
+        vm.newManualVariant = { sku: "", combinationHash: "", combinationCanonical: "", basePriceAmount: 0, status: "active" };
+        vm.variantHashConflictId = null;
+        vm.variantHashConflictHash = null;
+        vm.imagesList = [];
+        vm.imageBusy = false;
+        /** DAI-292: Inventory BFF + multi-warehouse stock grid */
+        vm.inventoryWarehouses = [];
+        vm.selectedStockWarehouseId = "";
+        vm.stockByVariant = {};
+        vm.stockBusy = false;
+        vm.stockGridLoaded = false;
+        vm.stockAutoTimer = null;
+        vm.stockAdjustModal = null;
+        vm.stockAdjustDelta = 0;
+        vm.stockAdjustType = "adjustment";
+        vm.stockAdjustNote = "";
+        vm.bulkStockRows = [];
+        vm.bulkStockParseError = null;
+        vm.bulkStockLastResult = null;
         vm.storePublishMode = "direct";
+        vm.storeCatalogSettingsBusy = false;
+        /** DAI-280: last Catalog/Inventory forward failed offline — retry reuses Idempotency-Key. */
+        vm.forwardRetry = null;
+        vm.approvalReplyText = "";
         vm.productUrlTemplate = "";
         try {
             var pm = localStorage.getItem("dcmsCatalogWizard_publishMode");
             vm.storePublishMode = pm === "approval" ? "approval" : "direct";
             vm.productUrlTemplate = localStorage.getItem("dcmsCatalogWizard_productUrlTemplate") || "";
         } catch (x) {}
+        var openNavProduct = false;
+        try {
+            var navPid = localStorage.getItem("dcmsCatalogWizard_navigateProductId");
+            if (navPid) {
+                localStorage.removeItem("dcmsCatalogWizard_navigateProductId");
+                vm.productId = navPid;
+                vm.step = 5;
+                openNavProduct = true;
+            }
+        } catch (xNav) {}
+        try {
+            localStorage.setItem("dcmsBell_tenantId", vm.tenantId || "t1");
+            localStorage.setItem("dcmsBell_storeId", vm.storeId || "s1");
+        } catch (xBell) {}
 
         var slugTimer = null;
         var baseApi = "/umbraco/backoffice/api/DcmsCatalog/CatalogBackofficeProxy";
+        var baseInventoryApi = "/umbraco/backoffice/api/DcmsCatalog/InventoryBackofficeProxy";
 
         function slugify(s) {
             if (!s) return "";
@@ -81,10 +141,151 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
         function parseEnvelope(res) {
             var d = res.data;
             if (d && d.error) {
-                return { err: d.error.message || d.error.code || "error", data: null };
+                return { err: d.error.message || d.error.code || "error", data: null, meta: d.meta || null };
             }
-            return { err: null, data: d ? d.data : null };
+            return { err: null, data: d ? d.data : null, meta: d ? d.meta : null };
         }
+
+        function bytesToHex(buffer) {
+            var u8 = new Uint8Array(buffer);
+            var h = "";
+            for (var i = 0; i < u8.length; i++) {
+                var x = u8[i].toString(16);
+                h += x.length === 1 ? "0" + x : x;
+            }
+            return h;
+        }
+
+        vm.sha256HexOfArrayBuffer = function (buf) {
+            if (!window.crypto || !crypto.subtle) return $q.reject(new Error("SHA-256 not available in this browser."));
+            return crypto.subtle.digest("SHA-256", buf).then(bytesToHex);
+        };
+
+        vm.forwardBinaryPut = function (path, arrayBuffer, contentType) {
+            vm.error = null;
+            vm.busy = true;
+            var bytes = new Uint8Array(arrayBuffer);
+            var binary = "";
+            var chunk = 0x8000;
+            for (var i = 0; i < bytes.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+            }
+            var b64 = btoa(binary);
+            var headers = { "Content-Type": "application/json" };
+            if (window.crypto && crypto.randomUUID) headers["Idempotency-Key"] = crypto.randomUUID();
+            return $http
+                .post(
+                    baseApi + "/Forward",
+                    {
+                        method: "PUT",
+                        path: path,
+                        tenantId: vm.tenantId,
+                        storeId: vm.storeId,
+                        binaryBodyBase64: b64,
+                        binaryContentType: contentType || "application/octet-stream",
+                    },
+                    { headers: headers }
+                )
+                .then(function (res) {
+                    var p = parseEnvelope(res);
+                    if (p.err) throw new Error(p.err);
+                    return p.data;
+                })
+                .catch(function (e) {
+                    var d = e.data || {};
+                    if (d.error) throw new Error(d.error.message || d.error.code || "Request failed");
+                    throw e;
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.minEditedVariantPrice = function () {
+            var m = null;
+            angular.forEach(vm.variantsList || [], function (v) {
+                var e = vm.variantEdits[v.id];
+                if (!e) return;
+                var x = Number(e.basePriceAmount);
+                if (Number.isNaN(x)) return;
+                m = m === null ? x : Math.min(m, x);
+            });
+            return m === null ? 0 : m;
+        };
+
+        vm.recomputeVariantDisplayList = function () {
+            var src = vm.variantsList || [];
+            var f = (vm.variantFilterText || "").toLowerCase().trim();
+            var out = [];
+            angular.forEach(src, function (v) {
+                var e = vm.variantEdits[v.id] || {};
+                var sku = ((e.sku != null ? e.sku : v.sku) || "").toLowerCase();
+                var h = (v.combinationHash || "").toLowerCase();
+                var canon = ((v.combinationCanonical || "") + "").toLowerCase();
+                if (!f || sku.indexOf(f) >= 0 || h.indexOf(f) >= 0 || canon.indexOf(f) >= 0) out.push(v);
+            });
+            var key = vm.variantSortKey || "sortOrder";
+            out.sort(function (a, b) {
+                var ea = vm.variantEdits[a.id] || {};
+                var eb = vm.variantEdits[b.id] || {};
+                if (key === "sku") return (ea.sku || a.sku || "").localeCompare(eb.sku || b.sku || "");
+                if (key === "status") return (ea.status || a.status || "").localeCompare(eb.status || b.status || "");
+                if (key === "price") return (Number(ea.basePriceAmount) || 0) - (Number(eb.basePriceAmount) || 0);
+                return (Number(ea.sortOrder) || 0) - (Number(eb.sortOrder) || 0) || (a.id || "").localeCompare(b.id || "");
+            });
+            vm.variantDisplayList = out;
+            vm.variantGridScrollTop = 0;
+            vm.updateVariantGridLayout();
+        };
+
+        vm.clearPriceUndo = function () {
+            if (vm.priceUndoTimer) $timeout.cancel(vm.priceUndoTimer);
+            vm.priceUndoTimer = null;
+            vm.priceUndoSnapshot = null;
+        };
+
+        vm.undoBulkPrice = function () {
+            if (!vm.priceUndoSnapshot || !vm.productId) return;
+            vm.error = null;
+            var snap = vm.priceUndoSnapshot;
+            var rows = [];
+            angular.forEach(snap, function (prev, variantId) {
+                rows.push({
+                    productId: vm.productId,
+                    variantId: variantId,
+                    basePriceAmount: Math.floor(Number(prev) || 0),
+                });
+            });
+            if (!rows.length) {
+                vm.clearPriceUndo();
+                return;
+            }
+            if (vm.priceUndoTimer) {
+                $timeout.cancel(vm.priceUndoTimer);
+                vm.priceUndoTimer = null;
+            }
+            vm.busy = true;
+            vm.forward("POST", "products/bulk", { variantPrices: rows })
+                .then(function (data) {
+                    var failed = (data && data.failed) || [];
+                    if (failed.length) {
+                        vm.error = "Undo bulk: " + failed.length + " row(s) failed. First: " + (failed[0].message || "error");
+                        return;
+                    }
+                    vm.priceUndoSnapshot = null;
+                    vm.step5Notice = "Đã revert giá trên server (POST /products/bulk với basePriceAmount cũ).";
+                    if (notificationsService && notificationsService.success) {
+                        notificationsService.success("Bulk price", "Undo completed — prices reverted on server.");
+                    }
+                    return vm.loadProductVariants();
+                })
+                .catch(function (e) {
+                    vm.error = e.message || "Undo bulk failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
 
         vm.loadCategories = function () {
             vm.error = null;
@@ -364,7 +565,7 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
         );
 
         vm.loadVariantAxesDefinitions = function () {
-            return vm.forward("GET", "variant-axes", null).then(function (data) {
+            return vm.forward("GET", "variant-axes", null, { skipRetryCapture: true }).then(function (data) {
                 vm.variantAxesDefinitions = (data && data.items) || [];
                 vm.selectedValueIds = {};
                 angular.forEach(vm.variantAxesDefinitions, function (attr) {
@@ -403,6 +604,43 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
             slugTimer = $timeout(function () {
                 vm.runSlugCheck();
             }, 400);
+        };
+
+        function dcmsIsNetworkishHttpError(e) {
+            var s = e && e.status;
+            return s === undefined || s === null || s === 0 || s === -1;
+        }
+
+        vm.dismissForwardRetry = function () {
+            vm.forwardRetry = null;
+        };
+
+        vm.retryForward = function () {
+            var r = vm.forwardRetry;
+            if (!r) return;
+            vm.error = null;
+            if (r.kind === "inventory") vm.stockBusy = true;
+            else vm.busy = true;
+            $http
+                .post(r.url, r.payload, { headers: r.headers })
+                .then(function (res) {
+                    vm.forwardRetry = null;
+                    var p = parseEnvelope(res);
+                    if (p.err) throw new Error(p.err);
+                    return p.data;
+                })
+                .catch(function (e) {
+                    var d = e.data || {};
+                    if (d.error) {
+                        vm.error = d.error.message || d.error.code || "Request failed";
+                        return;
+                    }
+                    vm.error = (e && e.message) || "Retry failed";
+                })
+                .finally(function () {
+                    if (r.kind === "inventory") vm.stockBusy = false;
+                    else vm.busy = false;
+                });
         };
 
         vm.runSlugCheck = function () {
@@ -450,29 +688,39 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
             if (!opts.preserveError) vm.error = null;
             if (!opts.noBusy) vm.busy = true;
             var headers = { "Content-Type": "application/json" };
-            if (window.crypto && crypto.randomUUID) {
-                headers["Idempotency-Key"] = crypto.randomUUID();
-            }
+            var idemKey = opts.idempotencyKey || (window.crypto && crypto.randomUUID ? crypto.randomUUID() : null);
+            if (idemKey) headers["Idempotency-Key"] = idemKey;
+            var forwardPayload = {
+                method: method,
+                path: path,
+                tenantId: vm.tenantId,
+                storeId: vm.storeId,
+                body: body,
+            };
             return $http
-                .post(
-                    baseApi + "/Forward",
-                    {
-                        method: method,
-                        path: path,
-                        tenantId: vm.tenantId,
-                        storeId: vm.storeId,
-                        body: body,
-                    },
-                    { headers: headers }
-                )
+                .post(baseApi + "/Forward", forwardPayload, { headers: headers })
                 .then(function (res) {
+                    vm.forwardRetry = null;
                     var p = parseEnvelope(res);
                     if (p.err) throw new Error(p.err);
                     return p.data;
                 })
                 .catch(function (e) {
+                    if (!opts.skipRetryCapture && dcmsIsNetworkishHttpError(e)) {
+                        vm.forwardRetry = {
+                            kind: "catalog",
+                            url: baseApi + "/Forward",
+                            headers: angular.extend({}, headers),
+                            payload: angular.copy(forwardPayload),
+                        };
+                    }
                     var d = e.data || {};
-                    if (d.error) throw new Error(d.error.message || d.error.code || "Request failed");
+                    if (d.error) {
+                        var er = new Error(d.error.message || d.error.code || "Request failed");
+                        er.status = e.status;
+                        er.payload = d;
+                        throw er;
+                    }
                     throw e;
                 })
                 .finally(function () {
@@ -480,14 +728,647 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
                 });
         };
 
+        vm.forwardInventory = function (method, path, body, opts) {
+            opts = opts || {};
+            if (!opts.preserveError) vm.error = null;
+            if (!opts.noBusy) vm.stockBusy = true;
+            var headers = { "Content-Type": "application/json" };
+            var idemKey = opts.idempotencyKey || (window.crypto && crypto.randomUUID ? crypto.randomUUID() : null);
+            if (idemKey) headers["Idempotency-Key"] = idemKey;
+            var forwardPayload = {
+                method: method,
+                path: path,
+                tenantId: vm.tenantId,
+                storeId: vm.storeId,
+                body: body,
+            };
+            return $http
+                .post(baseInventoryApi + "/Forward", forwardPayload, { headers: headers })
+                .then(function (res) {
+                    vm.forwardRetry = null;
+                    var p = parseEnvelope(res);
+                    if (p.err) {
+                        var er0 = new Error(p.err);
+                        er0.status = res.status;
+                        er0.meta = p.meta;
+                        throw er0;
+                    }
+                    if (opts.returnEnvelope) return { data: p.data, meta: p.meta };
+                    return p.data;
+                })
+                .catch(function (e) {
+                    if (!opts.skipRetryCapture && dcmsIsNetworkishHttpError(e)) {
+                        vm.forwardRetry = {
+                            kind: "inventory",
+                            url: baseInventoryApi + "/Forward",
+                            headers: angular.extend({}, headers),
+                            payload: angular.copy(forwardPayload),
+                        };
+                    }
+                    var d = e.data || {};
+                    if (d.error) {
+                        var er = new Error(d.error.message || d.error.code || "Request failed");
+                        er.status = e.status;
+                        er.meta = d.meta;
+                        er.code = d.error.code;
+                        er.payload = d;
+                        throw er;
+                    }
+                    var er2 = new Error(e.statusText || "Request failed");
+                    er2.status = e.status;
+                    throw er2;
+                })
+                .finally(function () {
+                    if (!opts.noBusy) vm.stockBusy = false;
+                });
+        };
+
+        vm.clearStockAutoRefresh = function () {
+            if (vm.stockAutoTimer) {
+                window.clearInterval(vm.stockAutoTimer);
+                vm.stockAutoTimer = null;
+            }
+        };
+
+        vm.clearApprovalCommentsPoll = function () {
+            if (vm.approvalCommentsPollTimer) {
+                window.clearInterval(vm.approvalCommentsPollTimer);
+                vm.approvalCommentsPollTimer = null;
+            }
+        };
+
+        vm.ensureApprovalCommentsPoll = function () {
+            vm.clearApprovalCommentsPoll();
+            if (vm.step !== 5 || !vm.productId || !vm.productDetail) return;
+            if ((vm.productDetail.status || "").toLowerCase() !== "pending_approval") return;
+            vm.approvalCommentsPollTimer = window.setInterval(function () {
+                if (vm.step !== 5 || !vm.productId || !vm.productDetail || (vm.productDetail.status || "").toLowerCase() !== "pending_approval") {
+                    vm.clearApprovalCommentsPoll();
+                    return;
+                }
+                $scope.$applyAsync(function () {
+                    vm.loadApprovalComments();
+                });
+            }, 15000);
+        };
+
+        vm.approvalCommentIconClass = function (type) {
+            var t = ((type || "") + "").toLowerCase();
+            if (t === "approve") return "glyphicon glyphicon-ok text-success";
+            if (t === "reject") return "glyphicon glyphicon-remove text-danger";
+            if (t === "request_change") return "glyphicon glyphicon-warning-sign text-warning";
+            if (t === "submitted") return "glyphicon glyphicon-upload text-info";
+            return "glyphicon glyphicon-comment text-muted";
+        };
+
+        vm.persistPublishModeLocalOnly = function () {
+            try {
+                localStorage.setItem("dcmsCatalogWizard_publishMode", vm.storePublishMode === "approval" ? "approval" : "direct");
+            } catch (x) {}
+        };
+
+        vm.loadStoreCatalogSettings = function () {
+            vm.storeCatalogSettingsBusy = true;
+            return vm
+                .forward("GET", "store-catalog-settings", null, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .then(function (data) {
+                    if (data && typeof data.approvalRequired === "boolean") {
+                        vm.storePublishMode = data.approvalRequired ? "approval" : "direct";
+                        vm.persistPublishModeLocalOnly();
+                    }
+                })
+                .catch(function () {
+                    /* keep browser default */
+                })
+                .finally(function () {
+                    vm.storeCatalogSettingsBusy = false;
+                });
+        };
+
+        vm.syncStoreCatalogApprovalRequired = function () {
+            if (vm.catalogIdentity && vm.catalogIdentity.canCatalogWrite === false) return $q.resolve();
+            var ar = vm.storePublishMode === "approval";
+            return vm
+                .forward("PATCH", "store-catalog-settings", { approvalRequired: ar }, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .catch(function () {
+                    /* optional: store may deny write; workflow radio still applies locally */
+                });
+        };
+
+        vm.loadCatalogIdentity = function () {
+            return dcmsCatalogRbac.ensureLoaded().then(function (ctx) {
+                vm.catalogIdentity = {
+                    roles: ctx.roles,
+                    canRunCatalogApprovalActions: ctx.canRunCatalogApprovalActions,
+                    canCatalogWrite: ctx.canCatalogWrite,
+                    isStoreStaff: ctx.isStoreStaff,
+                };
+            });
+        };
+
+        /** DAI-298: StoreStaff (catalog:read only) — hide/disable write UI in Step 5. */
+        vm.readOnlyCatalogUi = function () {
+            if (!vm.catalogIdentity || typeof vm.catalogIdentity.canCatalogWrite === "undefined") return false;
+            return vm.catalogIdentity.canCatalogWrite === false;
+        };
+
+        vm.showApprovalActions = function () {
+            if (!vm.catalogIdentity || !vm.catalogIdentity.canRunCatalogApprovalActions) return false;
+            if (!vm.productDetail || !vm.productDetail.status) return false;
+            return (vm.productDetail.status + "").toLowerCase() === "pending_approval";
+        };
+
+        vm.openApprovalActionModal = function (kind) {
+            vm.approvalActionModal = kind;
+            vm.approvalActionComment = "";
+        };
+
+        vm.closeApprovalActionModal = function () {
+            vm.approvalActionModal = null;
+            vm.approvalActionComment = "";
+        };
+
+        vm.confirmApprovalAction = function () {
+            if (!vm.productId || !vm.approvalActionModal) return;
+            var c = (vm.approvalActionComment || "").trim();
+            if ((vm.approvalActionModal === "request" || vm.approvalActionModal === "reject") && !c) {
+                vm.error = "Comment is required.";
+                return;
+            }
+            vm.error = null;
+            vm.busy = true;
+            var path =
+                vm.approvalActionModal === "request"
+                    ? "products/" + vm.productId + "/request-changes"
+                    : "products/" + vm.productId + "/reject";
+            vm.forward("POST", path, { comment: c })
+                .then(function () {
+                    vm.closeApprovalActionModal();
+                    vm.publishOk = true;
+                    vm.step5Notice = "Approval action completed.";
+                    return vm.loadProductReview();
+                })
+                .catch(function (e) {
+                    vm.error = (e && e.message) || "Approval action failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.approvePendingProduct = function () {
+            if (!vm.productId) return;
+            vm.error = null;
+            vm.step5Notice = null;
+            vm.publishOk = false;
+            vm.busy = true;
+            vm.forward("POST", "products/" + vm.productId + "/approve", {})
+                .then(function () {
+                    vm.publishOk = true;
+                    vm.step5Notice = "Product approved.";
+                    return vm.loadProductReview();
+                })
+                .catch(function (e) {
+                    vm.error = (e && e.message) || "Approve failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.ensureStockAutoRefresh = function () {
+            vm.clearStockAutoRefresh();
+            vm.stockAutoTimer = window.setInterval(function () {
+                if (vm.step === 5 && vm.step5Tab === "stock" && vm.productId) {
+                    $scope.$applyAsync(function () {
+                        vm.refreshStockGrid();
+                    });
+                }
+            }, 60000);
+        };
+
+        vm.setStep5Tab = function (t) {
+            vm.step5Tab = t;
+            if (t === "images") {
+                vm.clearStockAutoRefresh();
+                vm.onImagesTab();
+            } else if (t === "stock") {
+                vm.onStockTab();
+            } else {
+                vm.clearStockAutoRefresh();
+            }
+        };
+
+        vm.loadInventoryWarehouses = function () {
+            return vm
+                .forwardInventory("GET", "warehouses", null, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .then(function (data) {
+                    vm.inventoryWarehouses = (data && data.items) || [];
+                    var ids = vm.inventoryWarehouses.map(function (w) {
+                        return w.id;
+                    });
+                    if (vm.selectedStockWarehouseId && ids.indexOf(vm.selectedStockWarehouseId) < 0) {
+                        vm.selectedStockWarehouseId = "";
+                    }
+                    if (!vm.selectedStockWarehouseId && vm.inventoryWarehouses.length) {
+                        vm.selectedStockWarehouseId = vm.inventoryWarehouses[0].id;
+                    }
+                })
+                .catch(function () {
+                    vm.inventoryWarehouses = [];
+                });
+        };
+
+        vm.refreshStockGrid = function () {
+            if (!vm.productId) {
+                vm.stockGridLoaded = false;
+                return $q.resolve();
+            }
+            var variants = vm.variantsList || [];
+            vm.stockBusy = true;
+            vm.stockByVariant = vm.stockByVariant || {};
+            if (variants.length === 0) {
+                vm.stockByVariant = {};
+                vm.stockGridLoaded = true;
+                vm.stockBusy = false;
+                return $q.resolve();
+            }
+            var chunk = 24;
+            var chain = $q.when();
+            for (var i = 0; i < variants.length; i += chunk) {
+                (function (slice) {
+                    chain = chain.then(function () {
+                        return $q.all(
+                            slice.map(function (v) {
+                                var id = v.id;
+                                return vm
+                                    .forwardInventory("GET", "stock/variants/" + encodeURIComponent(id), null, {
+                                        noBusy: true,
+                                        preserveError: true,
+                                        skipRetryCapture: true,
+                                    })
+                                    .then(function (data) {
+                                        vm.stockByVariant[id] = { items: (data && data.items) || [] };
+                                    })
+                                    .catch(function () {
+                                        vm.stockByVariant[id] = { items: [] };
+                                    });
+                            })
+                        );
+                    });
+                })(variants.slice(i, i + chunk));
+            }
+            return chain
+                .then(function () {
+                    vm.stockGridLoaded = true;
+                })
+                .finally(function () {
+                    vm.stockBusy = false;
+                });
+        };
+
+        vm.stockRowMetrics = function (variant) {
+            if (!vm.stockGridLoaded) {
+                return { warehouseQty: null, totalAvailable: null, totalReserved: null, warn: false };
+            }
+            var items = (vm.stockByVariant[variant.id] && vm.stockByVariant[variant.id].items) || [];
+            var totalAvail = 0;
+            var totalRes = 0;
+            angular.forEach(items, function (it) {
+                var q = Number(it.quantity || 0);
+                var r = Number(it.reservedQuantity || 0);
+                var av =
+                    typeof it.availableQuantity === "number" && !Number.isNaN(it.availableQuantity)
+                        ? it.availableQuantity
+                        : q - r;
+                totalAvail += av;
+                totalRes += r;
+            });
+            var w = vm.selectedStockWarehouseId;
+            var whQty = null;
+            var hasRow = false;
+            if (w) {
+                angular.forEach(items, function (it) {
+                    if (it.warehouseId === w) {
+                        hasRow = true;
+                        whQty = Number(it.quantity || 0);
+                    }
+                });
+            }
+            return {
+                warehouseQty: hasRow ? whQty : null,
+                totalAvailable: totalAvail,
+                totalReserved: totalRes,
+                warn: totalAvail === 0,
+            };
+        };
+
+        vm.stockTableTotals = function () {
+            var tWh = 0;
+            var tA = 0;
+            var tR = 0;
+            angular.forEach(vm.variantsList || [], function (v) {
+                var m = vm.stockRowMetrics(v);
+                if (m.totalAvailable !== null) {
+                    tA += m.totalAvailable;
+                    tR += m.totalReserved;
+                    if (m.warehouseQty !== null) tWh += m.warehouseQty;
+                }
+            });
+            return { warehouseQty: tWh, totalAvailable: tA, totalReserved: tR };
+        };
+
+        vm.stockZeroAvailableCount = function () {
+            if (!vm.stockGridLoaded) return null;
+            var n = 0;
+            angular.forEach(vm.variantsList || [], function (v) {
+                if (vm.stockRowMetrics(v).warn) n++;
+            });
+            return n;
+        };
+
+        vm.openStockAdjustModal = function (variant) {
+            var w = vm.selectedStockWarehouseId;
+            if (!w) {
+                vm.error = "Select a warehouse first.";
+                return;
+            }
+            var m = vm.stockRowMetrics(variant);
+            if (m.warehouseQty === null) {
+                vm.error =
+                    "No stock row for this variant in the selected warehouse (seed VariantStock for tenant/store or choose another warehouse).";
+                return;
+            }
+            vm.error = null;
+            vm.stockAdjustModal = { variant: variant, warehouseId: w, currentQty: m.warehouseQty };
+            vm.stockAdjustDelta = 0;
+            vm.stockAdjustType = "adjustment";
+            vm.stockAdjustNote = "";
+        };
+
+        vm.closeStockAdjustModal = function () {
+            vm.stockAdjustModal = null;
+        };
+
+        vm.stockAdjustPreviewNewQty = function () {
+            if (!vm.stockAdjustModal) return null;
+            var d = Number(vm.stockAdjustDelta);
+            if (Number.isNaN(d)) return null;
+            return vm.stockAdjustModal.currentQty + d;
+        };
+
+        vm.stockAdjustConfirmDisabled = function () {
+            if (!vm.stockAdjustModal) return true;
+            var d = Number(vm.stockAdjustDelta);
+            if (Number.isNaN(d) || d === 0) return true;
+            var n = vm.stockAdjustPreviewNewQty();
+            return n === null || n < 0;
+        };
+
+        vm.confirmStockAdjust = function () {
+            if (vm.stockAdjustConfirmDisabled()) return;
+            var modal = vm.stockAdjustModal;
+            var d = Number(vm.stockAdjustDelta);
+            vm.busy = true;
+            vm.error = null;
+            vm.forwardInventory("POST", "stock/adjust", {
+                variantId: modal.variant.id,
+                warehouseId: modal.warehouseId,
+                delta: Math.trunc(d),
+                movementType: vm.stockAdjustType,
+                note: (vm.stockAdjustNote || "").trim() || undefined,
+                createdBy: "wizard",
+            })
+                .then(function () {
+                    if (notificationsService && notificationsService.success) {
+                        notificationsService.success("Stock", "Adjust saved.");
+                    }
+                    vm.closeStockAdjustModal();
+                    return vm.refreshStockGrid();
+                })
+                .catch(function (e) {
+                    var st = e.status;
+                    if (st === 409) {
+                        if (notificationsService && notificationsService.success) {
+                            notificationsService.success("Stock", "Concurrent update — table refreshed.");
+                        }
+                        vm.closeStockAdjustModal();
+                        vm.refreshStockGrid();
+                        return;
+                    }
+                    if (st === 422 && e.meta && e.meta.requested != null) {
+                        if (notificationsService && notificationsService.error) {
+                            notificationsService.error(
+                                "Insufficient stock",
+                                "Requested " +
+                                    e.meta.requested +
+                                    ", available " +
+                                    (e.meta.available != null ? e.meta.available : "—")
+                            );
+                        }
+                        return;
+                    }
+                    vm.error = (e && e.message) || "Adjust failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.onBulkStockCsvFiles = function (files) {
+            vm.bulkStockParseError = null;
+            vm.bulkStockLastResult = null;
+            if (!files || !files.length) return;
+            var f = files[0];
+            var reader = new FileReader();
+            reader.onload = function () {
+                $scope.$apply(function () {
+                    vm._parseBulkStockText(reader.result || "");
+                });
+            };
+            reader.onerror = function () {
+                $scope.$apply(function () {
+                    vm.bulkStockParseError = "Failed to read file.";
+                });
+            };
+            reader.readAsText(f);
+        };
+
+        vm._parseBulkStockText = function (text) {
+            vm.bulkStockRows = [];
+            vm.bulkStockParseError = null;
+            if (!window.Papa) {
+                vm.bulkStockParseError = "Papa Parse is not loaded.";
+                return;
+            }
+            var r = Papa.parse(text || "", {
+                header: true,
+                skipEmptyLines: "greedy",
+                transformHeader: function (h) {
+                    return (h || "").trim();
+                },
+            });
+            if (r.errors && r.errors.length) {
+                vm.bulkStockParseError = r.errors
+                    .map(function (e) {
+                        return e.message;
+                    })
+                    .join("; ");
+                return;
+            }
+            var rows = r.data || [];
+            angular.forEach(rows, function (row) {
+                var sku = (row.SKU != null ? row.SKU : row.sku) || "";
+                var wh = (row.WarehouseId != null ? row.WarehouseId : row.warehouseId) || "";
+                var deltaRaw = row.Delta != null ? row.Delta : row.delta;
+                var typeRaw = (row.Type != null ? row.Type : row.type) || "adjustment";
+                vm.bulkStockRows.push({
+                    sku: String(sku).trim(),
+                    warehouseId: String(wh).trim(),
+                    deltaStr: deltaRaw == null ? "" : String(deltaRaw),
+                    type: String(typeRaw).trim().toLowerCase(),
+                    errors: [],
+                });
+            });
+            vm.bulkStockValidateAllRows();
+        };
+
+        vm.bulkStockResolveVariantId = function (sku) {
+            var s = (sku || "").trim().toLowerCase();
+            if (!s) return null;
+            var found = null;
+            angular.forEach(vm.variantsList || [], function (v) {
+                var e = vm.variantEdits[v.id] || {};
+                var viSku = (e.sku != null ? e.sku : v.sku) || "";
+                if (String(viSku).trim().toLowerCase() === s) found = v.id;
+            });
+            return found;
+        };
+
+        vm.bulkStockValidateAllRows = function () {
+            var types = { import: true, adjustment: true, return: true };
+            angular.forEach(vm.bulkStockRows, function (row) {
+                row.errors = [];
+                row.variantId = vm.bulkStockResolveVariantId(row.sku);
+                if (!row.sku) row.errors.push("SKU required");
+                else if (!row.variantId) row.errors.push("Unknown SKU for this product");
+                if (row.deltaStr === "" || row.deltaStr === null) row.errors.push("Delta required");
+                else {
+                    var d = parseInt(String(row.deltaStr).trim(), 10);
+                    if (Number.isNaN(d)) row.errors.push("Delta must be an integer");
+                    else row.delta = d;
+                }
+                if (!row.warehouseId) row.errors.push("WarehouseId required");
+                if (!types[row.type]) row.errors.push("Type must be import, adjustment, or return");
+            });
+        };
+
+        vm.bulkStockRowInvalid = function (row) {
+            return row.errors && row.errors.length > 0;
+        };
+
+        vm.bulkStockPreviewAllValid = function () {
+            if (!vm.bulkStockRows || !vm.bulkStockRows.length) return false;
+            var ok = true;
+            angular.forEach(vm.bulkStockRows, function (r) {
+                if (vm.bulkStockRowInvalid(r)) ok = false;
+            });
+            return ok;
+        };
+
+        vm.submitBulkStockCsv = function () {
+            vm.bulkStockValidateAllRows();
+            if (!vm.bulkStockPreviewAllValid()) {
+                vm.error = "Fix CSV row errors before confirming.";
+                return;
+            }
+            if (!vm.productId) return;
+            vm.bulkStockLastResult = null;
+            vm.error = null;
+            vm.busy = true;
+            var idem = window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+            var items = [];
+            angular.forEach(vm.bulkStockRows, function (row) {
+                items.push({
+                    op: "adjust",
+                    variantId: row.variantId,
+                    warehouseId: row.warehouseId,
+                    delta: row.delta,
+                    movementType: row.type,
+                    createdBy: "wizard",
+                });
+            });
+            vm.forwardInventory("POST", "stock/bulk", { createdBy: "wizard", items: items }, {
+                idempotencyKey: idem,
+                returnEnvelope: true,
+                noBusy: true,
+                preserveError: true,
+            })
+                .then(function (env) {
+                    vm.bulkStockLastResult = { data: env.data, meta: env.meta, idempotencyKey: idem };
+                    var m = env.meta || {};
+                    if (notificationsService && notificationsService.success) {
+                        notificationsService.success(
+                            "Bulk stock",
+                            "Succeeded " + (m.succeeded != null ? m.succeeded : "?") + " / failed " + (m.failed != null ? m.failed : "?") + " (requested " + (m.requested != null ? m.requested : "?") + ")."
+                        );
+                    }
+                    return vm.refreshStockGrid();
+                })
+                .catch(function (e) {
+                    vm.error = (e && e.message) || "Bulk stock failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.downloadBulkStockFailedCsv = function () {
+            var br = vm.bulkStockLastResult;
+            if (!br || !br.data || !br.data.failed || !br.data.failed.length) return;
+            function esc(c) {
+                var s = c == null ? "" : String(c);
+                if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+                return s;
+            }
+            var lines = [["index", "sku", "warehouseId", "delta", "type", "code", "message"].join(",")];
+            angular.forEach(br.data.failed, function (f) {
+                var row = vm.bulkStockRows[f.index] || {};
+                lines.push(
+                    [f.index, esc(row.sku), esc(row.warehouseId), row.delta != null ? row.delta : "", esc(row.type), esc(f.code), esc(f.message)].join(",")
+                );
+            });
+            var blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = "bulk-stock-failed.csv";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+
+        vm.onStockTab = function () {
+            vm.ensureStockAutoRefresh();
+            vm.loadInventoryWarehouses().then(function () {
+                return vm.refreshStockGrid();
+            });
+        };
+
         vm.updateVariantGridLayout = function () {
-            var items = vm.variantsList || [];
+            var items = vm.variantDisplayList || [];
             var total = items.length;
             var rowH = vm.variantRowHeight;
             var buf = vm.variantGridBuffer;
             if (total === 0) {
                 vm.variantGridLayout = { start: 0, end: 0, offsetY: 0, innerH: 0 };
                 vm.visibleVariantRows = [];
+                return;
+            }
+            if (total <= 100) {
+                vm.variantGridLayout = { start: 0, end: total, offsetY: 0, innerH: total * rowH };
+                vm.visibleVariantRows = items.slice();
                 return;
             }
             var start = Math.max(0, Math.floor(vm.variantGridScrollTop / rowH) - buf);
@@ -504,37 +1385,129 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
 
         vm.loadProductVariants = function () {
             if (!vm.productId) return $q.resolve();
-            return vm.forward("GET", "products/" + vm.productId + "/variants", null, { noBusy: true, preserveError: true }).then(function (data) {
-                var items = (data && data.items) || [];
-                items.sort(function (a, b) {
-                    return (a.sortOrder || 0) - (b.sortOrder || 0);
+            vm.variantsGridSkeleton = true;
+            return vm
+                .forward("GET", "products/" + vm.productId + "/variants", null, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .then(function (data) {
+                    var items = (data && data.items) || [];
+                    items.sort(function (a, b) {
+                        return (a.sortOrder || 0) - (b.sortOrder || 0);
+                    });
+                    vm.variantsList = items;
+                    vm.variantsBaseline = {};
+                    vm.variantEdits = {};
+                    vm.selectedVariantIds = {};
+                    angular.forEach(items, function (v) {
+                        var so = Number(v.sortOrder) || 0;
+                        var pr = Number(v.basePriceAmount);
+                        if (Number.isNaN(pr) || pr < 0) pr = 0;
+                        vm.variantsBaseline[v.id] = { sku: v.sku, status: v.status, sortOrder: so, basePriceAmount: pr };
+                        vm.variantEdits[v.id] = { sku: v.sku, status: v.status, sortOrder: so, basePriceAmount: pr };
+                    });
+                    vm.variantGridScrollTop = 0;
+                    vm.variantHashConflictId = null;
+                    vm.variantHashConflictHash = null;
+                    vm.stockByVariant = {};
+                    vm.stockGridLoaded = false;
+                    vm.bulkStockRows = [];
+                    vm.bulkStockLastResult = null;
+                    vm.bulkStockParseError = null;
+                    vm.recomputeVariantDisplayList();
+                })
+                .then(function () {
+                    return vm.loadProductReview();
+                })
+                .finally(function () {
+                    vm.variantsGridSkeleton = false;
                 });
-                vm.variantsList = items;
-                vm.variantsBaseline = {};
-                vm.variantEdits = {};
-                vm.selectedVariantIds = {};
-                angular.forEach(items, function (v) {
-                    var so = Number(v.sortOrder) || 0;
-                    vm.variantsBaseline[v.id] = { sku: v.sku, status: v.status, sortOrder: so };
-                    vm.variantEdits[v.id] = { sku: v.sku, status: v.status, sortOrder: so };
+        };
+
+        vm.clearVariantHashConflict = function () {
+            vm.variantHashConflictId = null;
+            vm.variantHashConflictHash = null;
+        };
+
+        vm.createManualVariant = function () {
+            vm.error = null;
+            vm.clearVariantHashConflict();
+            if (!vm.productId) {
+                vm.error = "Missing product id.";
+                return;
+            }
+            var h = (vm.newManualVariant.combinationHash || "").trim().toLowerCase();
+            if (h.length !== 64) {
+                vm.error = "combinationHash must be 64 hex chars (SHA-256 of canonical matrix key).";
+                return;
+            }
+            vm.busy = true;
+            vm.forward("POST", "products/" + vm.productId + "/variants", {
+                sku: (vm.newManualVariant.sku || "").trim(),
+                combinationHash: h,
+                combinationCanonical: (vm.newManualVariant.combinationCanonical || "").trim(),
+                basePriceAmount: Number(vm.newManualVariant.basePriceAmount) || 0,
+                status: vm.newManualVariant.status || "active",
+            })
+                .then(function () {
+                    vm.newManualVariant = { sku: "", combinationHash: "", combinationCanonical: "", basePriceAmount: 0, status: "active" };
+                    vm.step5Notice = "Variant created.";
+                    return vm.loadProductVariants();
+                })
+                .catch(function (e) {
+                    var st = e.status;
+                    var d = e.payload || {};
+                    if (st === 409 && d.error && d.error.code === "duplicate_combination_hash" && d.meta && d.meta.conflictingVariantId) {
+                        vm.variantHashConflictId = d.meta.conflictingVariantId;
+                        vm.variantHashConflictHash = (d.meta.combinationHash || h || "").toLowerCase();
+                        var baseMsg = d.error.message || "Duplicate combination hash.";
+                        vm.error = baseMsg + " Conflicting variant id: " + d.meta.conflictingVariantId + ".";
+                    } else if (d.error) vm.error = d.error.message || d.error.code || "Create variant failed";
+                    else vm.error = e.message || "Create variant failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
                 });
-                vm.variantGridScrollTop = 0;
-                vm.updateVariantGridLayout();
-            }).then(function () {
-                return vm.loadProductReview();
-            });
+        };
+
+        vm.loadApprovalComments = function () {
+            if (!vm.productId) {
+                vm.approvalComments = [];
+                return $q.resolve();
+            }
+            return vm
+                .forward("GET", "products/" + vm.productId + "/approval-comments", null, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .then(function (data) {
+                    vm.approvalComments = (data && data.items) || [];
+                    $timeout(function () {
+                        var el = document.getElementById("dcmsApprovalTimeline");
+                        if (el) el.scrollTop = el.scrollHeight;
+                    }, 0);
+                })
+                .catch(function () {
+                    vm.approvalComments = [];
+                });
         };
 
         vm.loadProductReview = function () {
             if (!vm.productId) {
                 vm.productDetail = null;
+                vm.approvalComments = [];
+                vm.clearApprovalCommentsPoll();
                 return $q.resolve();
             }
-            return vm.forward("GET", "products/" + vm.productId, null, { noBusy: true, preserveError: true }).then(function (data) {
-                vm.productDetail = data;
-            }).catch(function () {
-                vm.productDetail = null;
-            });
+            return vm
+                .forward("GET", "products/" + vm.productId, null, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .then(function (data) {
+                    vm.productDetail = data;
+                    return vm.loadApprovalComments();
+                })
+                .then(function () {
+                    vm.ensureApprovalCommentsPoll();
+                })
+                .catch(function () {
+                    vm.productDetail = null;
+                    vm.approvalComments = [];
+                    vm.clearApprovalCommentsPoll();
+                });
         };
 
         vm.reviewActiveVariantCount = function () {
@@ -556,9 +1529,31 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
         };
 
         vm.persistPublishMode = function () {
-            try {
-                localStorage.setItem("dcmsCatalogWizard_publishMode", vm.storePublishMode === "approval" ? "approval" : "direct");
-            } catch (x) {}
+            vm.persistPublishModeLocalOnly();
+            vm.syncStoreCatalogApprovalRequired();
+        };
+
+        vm.postApprovalReply = function () {
+            if (!vm.productId) return;
+            var msg = (vm.approvalReplyText || "").trim();
+            if (!msg) {
+                vm.error = "Enter a message to add to the approval timeline.";
+                return;
+            }
+            vm.error = null;
+            vm.busy = true;
+            vm.forward("POST", "products/" + vm.productId + "/approval-comments", { message: msg })
+                .then(function () {
+                    vm.approvalReplyText = "";
+                    vm.step5Notice = "Comment added to the approval timeline.";
+                    return vm.loadApprovalComments();
+                })
+                .catch(function (e) {
+                    vm.error = (e && e.message) || "Failed to post comment";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
         };
 
         vm.persistProductUrlTemplate = function () {
@@ -593,7 +1588,9 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
                 var b = vm.variantsBaseline[v.id];
                 if (!e || !b) return;
                 var so = Number(e.sortOrder);
+                var pr = Number(e.basePriceAmount);
                 if (Number.isNaN(so) || so < 0) err = "Sort order must be a non-negative number.";
+                if (Number.isNaN(pr) || pr < 0) err = "Base price must be a non-negative number.";
             });
             if (err) return { jobs: [], validationError: err };
             angular.forEach(vm.variantsList, function (v) {
@@ -601,8 +1598,13 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
                 var b = vm.variantsBaseline[v.id];
                 if (!e || !b) return;
                 var so = Number(e.sortOrder);
-                if (e.sku === b.sku && e.status === b.status && so === b.sortOrder) return;
-                jobs.push({ id: v.id, body: { sku: (e.sku || "").trim(), status: e.status, sortOrder: so } });
+                var pr = Number(e.basePriceAmount);
+                if (Number.isNaN(pr) || pr < 0) pr = 0;
+                if (e.sku === b.sku && e.status === b.status && so === b.sortOrder && pr === b.basePriceAmount) return;
+                jobs.push({
+                    id: v.id,
+                    body: { sku: (e.sku || "").trim(), status: e.status, sortOrder: so, basePriceAmount: pr },
+                });
             });
             return { jobs: jobs, validationError: null };
         };
@@ -613,16 +1615,285 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
             var chain = $q.when();
             angular.forEach(jobs, function (job) {
                 chain = chain.then(function () {
+                    vm.variantRowSaving[job.id] = true;
+                    vm.variantRowFlash[job.id] = null;
                     return vm
-                        .forward("PUT", "products/" + vm.productId + "/variants/" + job.id, job.body, { noBusy: true })
+                        .forward("PUT", "products/" + vm.productId + "/variants/" + job.id, job.body, { noBusy: true, skipRetryCapture: true })
                         .then(function () {
                             vm.variantSaveProgress.done++;
+                            vm.variantRowFlash[job.id] = "ok";
+                            $timeout(function () {
+                                vm.variantRowFlash[job.id] = null;
+                            }, 900);
+                        })
+                        .catch(function (e) {
+                            vm.variantRowFlash[job.id] = "err";
+                            $timeout(function () {
+                                vm.variantRowFlash[job.id] = null;
+                            }, 1400);
+                            throw e;
+                        })
+                        .finally(function () {
+                            vm.variantRowSaving[job.id] = false;
                         });
                 });
             });
             return chain.then(function () {
                 return vm.loadProductVariants();
             });
+        };
+
+        vm.applyBulkVariantPrices = function () {
+            vm.error = null;
+            vm.step5Notice = null;
+            vm.clearPriceUndo();
+            var price = Number(vm.bulkPriceInput);
+            if (Number.isNaN(price) || price < 0) {
+                vm.error = "Bulk price must be a non-negative number.";
+                return;
+            }
+            var rows = [];
+            angular.forEach(vm.selectedVariantIds, function (sel, id) {
+                if (!sel || !vm.variantEdits[id]) return;
+                rows.push({ productId: vm.productId, variantId: id, basePriceAmount: Math.floor(price) });
+            });
+            if (!rows.length) {
+                vm.error = "Select at least one variant row.";
+                return;
+            }
+            var lines = [];
+            var snap = {};
+            angular.forEach(rows, function (r) {
+                var e = vm.variantEdits[r.variantId];
+                var prev = e ? Number(e.basePriceAmount) || 0 : 0;
+                snap[r.variantId] = prev;
+                lines.push(r.variantId.slice(-8) + "… : " + prev + " → " + r.basePriceAmount);
+            });
+            var msg = "Apply base price " + Math.floor(price) + " to " + rows.length + " variant(s)?\n\n" + lines.join("\n");
+            if (!window.confirm(msg)) return;
+            vm.busy = true;
+            vm.forward("POST", "products/bulk", { variantPrices: rows })
+                .then(function (data) {
+                    var failed = (data && data.failed) || [];
+                    if (failed.length) {
+                        vm.error = "Bulk price: " + failed.length + " row(s) failed. First: " + (failed[0].message || "error");
+                        return;
+                    }
+                    angular.forEach(rows, function (r) {
+                        if (vm.variantEdits[r.variantId]) vm.variantEdits[r.variantId].basePriceAmount = r.basePriceAmount;
+                        if (vm.variantsBaseline[r.variantId]) vm.variantsBaseline[r.variantId].basePriceAmount = r.basePriceAmount;
+                        angular.forEach(vm.variantsList, function (x) {
+                            if (x.id === r.variantId) x.basePriceAmount = r.basePriceAmount;
+                        });
+                    });
+                    vm.recomputeVariantDisplayList();
+                    vm.priceUndoSnapshot = snap;
+                    vm.step5Notice =
+                        "Đã lưu giá bulk. Trong 10s có thể Undo: gọi lại POST /products/bulk với basePriceAmount cũ từng variant (revert trên server).";
+                    if (notificationsService && notificationsService.success) {
+                        notificationsService.success(
+                            "Bulk price",
+                            "Saved. Undo available for 10s (use Undo bulk button below)."
+                        );
+                    }
+                    vm.priceUndoTimer = $timeout(function () {
+                        vm.clearPriceUndo();
+                    }, 10000);
+                })
+                .catch(function (e) {
+                    vm.error = e.message || "Bulk price failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.loadProductImages = function () {
+            if (!vm.productId) return $q.resolve();
+            vm.imageBusy = true;
+            return vm
+                .forward("GET", "products/" + vm.productId + "/images", null, { noBusy: true, preserveError: true, skipRetryCapture: true })
+                .then(function (data) {
+                    vm.imagesList = (data && data.items) || [];
+                })
+                .catch(function () {
+                    vm.imagesList = [];
+                })
+                .finally(function () {
+                    vm.imageBusy = false;
+                });
+        };
+
+        vm.onImagesTab = function () {
+            vm.loadProductImages();
+        };
+
+        vm.uploadProductImageFiles = function (files) {
+            if (!vm.productId || !files || !files.length) return;
+            vm.error = null;
+            var chain = $q.when();
+            angular.forEach(files, function (file) {
+                chain = chain.then(function () {
+                    return new $q(function (resolve, reject) {
+                        var reader = new FileReader();
+                        reader.onload = function () {
+                            resolve(reader.result);
+                        };
+                        reader.onerror = function () {
+                            reject(new Error("Failed to read file."));
+                        };
+                        reader.readAsArrayBuffer(file);
+                    }).then(function (buf) {
+                        return vm.sha256HexOfArrayBuffer(buf).then(function (hex) {
+                            return vm.forward("GET", "products/" + vm.productId + "/images/checksum-check?checksum=" + encodeURIComponent(hex), null, {
+                                noBusy: true,
+                                preserveError: true,
+                                skipRetryCapture: true,
+                            }).then(function (chk) {
+                                if (chk && chk.exists) {
+                                    if (!window.confirm("Duplicate checksum on this product. Register another copy anyway?")) {
+                                        return $q.resolve();
+                                    }
+                                }
+                                return vm
+                                    .forward(
+                                        "POST",
+                                        "products/" + vm.productId + "/images/presign",
+                                        {
+                                            checksumSha256: hex,
+                                            contentType: file.type || "application/octet-stream",
+                                            fileName: file.name,
+                                            imageType: "gallery",
+                                        },
+                                        { noBusy: true }
+                                    )
+                                    .then(function (pre) {
+                                        var ct = (pre.headers && pre.headers["Content-Type"]) || file.type || "application/octet-stream";
+                                        var hdrs = pre.headers ? angular.copy(pre.headers) : { "Content-Type": ct };
+                                        if (pre.uploadUrl && /^https?:\/\//i.test(pre.uploadUrl)) {
+                                            return fetch(pre.uploadUrl, {
+                                                method: "PUT",
+                                                body: buf,
+                                                headers: hdrs,
+                                            }).then(function (res) {
+                                                if (!res.ok) throw new Error("S3 upload failed (" + res.status + ").");
+                                                return vm
+                                                    .forward(
+                                                        "POST",
+                                                        "products/" + vm.productId + "/images/" + pre.imageId + "/s3-complete",
+                                                        { contentLength: file.size },
+                                                        { noBusy: true }
+                                                    )
+                                                    .then(function () {
+                                                        return vm.loadProductImages();
+                                                    });
+                                            });
+                                        }
+                                        var path = pre.path;
+                                        if (!path) throw new Error("Presign response missing path.");
+                                        return vm.forwardBinaryPut(path, buf, ct).then(function () {
+                                            return vm.loadProductImages();
+                                        });
+                                    });
+                            });
+                        });
+                    });
+                });
+            });
+            vm.busy = true;
+            chain.catch(function (e) {
+                vm.error = (e && e.message) || "Image upload failed";
+            }).finally(function () {
+                vm.busy = false;
+            });
+        };
+
+        vm.patchImage = function (imageId, body) {
+            return vm.forward("PATCH", "products/" + vm.productId + "/images/" + imageId, body, { noBusy: true, skipRetryCapture: true }).then(function () {
+                return vm.loadProductImages();
+            });
+        };
+
+        vm.setImagePrimary = function (imageId) {
+            vm.error = null;
+            vm.patchImage(imageId, { isPrimary: true }).catch(function (e) {
+                vm.error = e.message || "Failed to set primary";
+            });
+        };
+
+        vm.cycleImageType = function (imageId) {
+            vm.error = null;
+            vm.patchImage(imageId, { cycleType: true }).catch(function (e) {
+                vm.error = e.message || "Failed to update type";
+            });
+        };
+
+        vm.deleteProductImage = function (imageId) {
+            vm.error = null;
+            if (!window.confirm("Remove this image from the product (blob file may remain on disk/S3)?")) return;
+            vm.busy = true;
+            vm.forward("DELETE", "products/" + vm.productId + "/images/" + imageId, {})
+                .then(function () {
+                    return vm.loadProductImages();
+                })
+                .catch(function (e) {
+                    vm.error = e.message || "Delete failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm._commitImageOrder = function (ids) {
+            vm.busy = true;
+            return vm
+                .forward("PATCH", "products/" + vm.productId + "/images/order", { imageIds: ids })
+                .then(function () {
+                    return vm.loadProductImages();
+                })
+                .catch(function (e) {
+                    vm.error = e.message || "Reorder failed";
+                })
+                .finally(function () {
+                    vm.busy = false;
+                });
+        };
+
+        vm.moveImageUp = function (index) {
+            if (index <= 0) return;
+            var ids = vm.imagesList.map(function (i) {
+                return i.id;
+            });
+            var t = ids[index - 1];
+            ids[index - 1] = ids[index];
+            ids[index] = t;
+            vm._commitImageOrder(ids);
+        };
+
+        vm.moveImageDown = function (index) {
+            if (index >= vm.imagesList.length - 1) return;
+            var ids = vm.imagesList.map(function (i) {
+                return i.id;
+            });
+            var t = ids[index + 1];
+            ids[index + 1] = ids[index];
+            ids[index] = t;
+            vm._commitImageOrder(ids);
+        };
+
+        /** DAI-291: drag row onto another row (HTML5 DnD); same PATCH /images/order as ↑/↓. */
+        vm.commitImageReorderDrop = function (draggedId, dropIndex) {
+            if (!vm.productId || !vm.imagesList || vm.imagesList.length < 2) return;
+            var ids = vm.imagesList.map(function (i) {
+                return i.id;
+            });
+            var from = ids.indexOf(draggedId);
+            if (from < 0 || dropIndex < 0 || dropIndex >= ids.length) return;
+            if (from === dropIndex) return;
+            var next = ids.slice();
+            var moved = next.splice(from, 1)[0];
+            next.splice(dropIndex, 0, moved);
+            vm._commitImageOrder(next);
         };
 
         vm.selectAllVariants = function (on) {
@@ -749,6 +2020,10 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
 
         vm.next = function () {
             vm.error = null;
+            if (vm.readOnlyCatalogUi() && (vm.step === 2 || vm.step === 4)) {
+                vm.error = "Read-only (StoreStaff): catalog writes are disabled.";
+                return;
+            }
             if (vm.step === 1) {
                 if (!vm.selectedCategoryId) {
                     vm.error = "Select a leaf category.";
@@ -882,7 +2157,13 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
                     });
                 })
                 .catch(function (e) {
-                    vm.error = e.message || "Publish failed";
+                    var d = (e && e.payload) || {};
+                    var code = d.error && d.error.code;
+                    if (code === "approval_required") {
+                        vm.error =
+                            d.error.message ||
+                            "This store requires submit-for-approval before publish (unless you use an elevated catalog role).";
+                    } else vm.error = e.message || "Publish failed";
                 });
         };
 
@@ -903,7 +2184,69 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
                 });
         };
 
+        $scope.$watchGroup(
+            [
+                function () {
+                    return vm.variantFilterText;
+                },
+                function () {
+                    return vm.variantSortKey;
+                },
+            ],
+            function () {
+                if (vm.step === 5) vm.recomputeVariantDisplayList();
+            }
+        );
+
+        $scope.$watch(
+            function () {
+                return vm.step;
+            },
+            function (n) {
+                if (n !== 5) vm.clearApprovalCommentsPoll();
+            }
+        );
+
+        $scope.$watchGroup(
+            [
+                function () {
+                    return vm.tenantId;
+                },
+                function () {
+                    return vm.storeId;
+                },
+            ],
+            function () {
+                try {
+                    if (vm.tenantId) localStorage.setItem("dcmsBell_tenantId", vm.tenantId);
+                    if (vm.storeId) localStorage.setItem("dcmsBell_storeId", vm.storeId);
+                } catch (x) {}
+                vm.loadStoreCatalogSettings();
+            }
+        );
+
+        $scope.$on("$destroy", function () {
+            vm.clearStockAutoRefresh();
+            vm.clearApprovalCommentsPoll();
+        });
+
+        /** DAI-299: global 409 from $http interceptor — refresh wizard data on Step 5. */
+        $scope.$on("dcms:refreshCatalogData", function () {
+            if (vm.step !== 5 || !vm.productId) return;
+            vm.loadApprovalComments().catch(function () {});
+            vm.loadProductImages().catch(function () {});
+            vm.loadProductVariants().catch(function () {});
+            vm.refreshStockGrid();
+        });
+
+        vm.loadCatalogIdentity();
+        vm.loadStoreCatalogSettings();
         vm.loadCategories();
+        if (openNavProduct && vm.productId) {
+            vm.loadProductReview();
+            vm.loadProductVariants().catch(function () {});
+            vm.loadProductImages().catch(function () {});
+        }
     },
 ]);
 
@@ -922,6 +2265,137 @@ angular.module("umbraco").directive("dcmsProductWizardScroll", function () {
             element.on("scroll", onScroll);
             scope.$on("$destroy", function () {
                 element.off("scroll", onScroll);
+            });
+        },
+    };
+});
+
+angular.module("umbraco").directive("dcmsBindFiles", function () {
+    return {
+        restrict: "A",
+        scope: false,
+        link: function (scope, element, attrs) {
+            element.on("change", function (e) {
+                var fn = scope.$eval(attrs.dcmsBindFiles);
+                var files = e.target && e.target.files ? e.target.files : null;
+                if (typeof fn === "function") fn(files);
+                try {
+                    element.val(null);
+                } catch (x) {}
+            });
+            scope.$on("$destroy", function () {
+                element.off("change");
+            });
+        },
+    };
+});
+
+angular.module("umbraco").directive("dcmsBindBulkStockCsv", function () {
+    return {
+        restrict: "A",
+        scope: false,
+        link: function (scope, element, attrs) {
+            element.on("change", function (e) {
+                var fn = scope.$eval(attrs.dcmsBindBulkStockCsv);
+                var files = e.target && e.target.files ? e.target.files : null;
+                if (typeof fn === "function") fn(files);
+                try {
+                    element.val(null);
+                } catch (x) {}
+            });
+            scope.$on("$destroy", function () {
+                element.off("change");
+            });
+        },
+    };
+});
+
+/** US-14: drop image files onto dashed zone → same handler as file input (checksum / presign / S3). */
+angular.module("umbraco").directive("dcmsImageFilesDropZone", function () {
+    return {
+        restrict: "A",
+        scope: false,
+        link: function (scope, element, attrs) {
+            var el = element[0];
+            function allowDrop(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+            }
+            function onDrop(ev) {
+                allowDrop(ev);
+                var dt = ev.dataTransfer;
+                if (!dt || !dt.files || !dt.files.length) return;
+                var files = dt.files;
+                scope.$applyAsync(function () {
+                    var fn = scope.$eval(attrs.dcmsImageFilesDropZone);
+                    if (typeof fn === "function") fn(files);
+                });
+            }
+            el.addEventListener("dragenter", allowDrop);
+            el.addEventListener("dragover", allowDrop);
+            el.addEventListener("drop", onDrop);
+            scope.$on("$destroy", function () {
+                el.removeEventListener("dragenter", allowDrop);
+                el.removeEventListener("dragover", allowDrop);
+                el.removeEventListener("drop", onDrop);
+            });
+        },
+    };
+});
+
+/** DAI-291: HTML5 drag handle → application/x-dcms-image-id (Umbraco AngularJS has no npm/dnd-kit bundle). */
+angular.module("umbraco").directive("dcmsImageDragSource", function () {
+    return {
+        restrict: "A",
+        link: function (scope, element, attrs) {
+            var el = element[0];
+            el.setAttribute("draggable", "true");
+            function onDragStart(ev) {
+                var id = attrs.dcmsImageDragSource || (scope.img && scope.img.id);
+                if (!id) return;
+                ev.dataTransfer.setData("application/x-dcms-image-id", id);
+                ev.dataTransfer.effectAllowed = "move";
+            }
+            element.on("dragstart", onDragStart);
+            scope.$on("$destroy", function () {
+                element.off("dragstart", onDragStart);
+            });
+        },
+    };
+});
+
+angular.module("umbraco").directive("dcmsImageDropRow", function () {
+    return {
+        restrict: "A",
+        link: function (scope, element, attrs) {
+            var row = element[0];
+            function onDragOver(ev) {
+                ev.preventDefault();
+                ev.dataTransfer.dropEffect = "move";
+                row.style.outline = "1px dashed #337ab7";
+            }
+            function onDragLeave() {
+                row.style.outline = "";
+            }
+            function onDrop(ev) {
+                ev.preventDefault();
+                row.style.outline = "";
+                var draggedId = ev.dataTransfer.getData("application/x-dcms-image-id");
+                var dropIndex = parseInt(attrs.dcmsImageDropRow, 10);
+                if (!draggedId || Number.isNaN(dropIndex)) return;
+                scope.$applyAsync(function () {
+                    if (scope.vm && typeof scope.vm.commitImageReorderDrop === "function") {
+                        scope.vm.commitImageReorderDrop(draggedId, dropIndex);
+                    }
+                });
+            }
+            element.on("dragover", onDragOver);
+            element.on("dragleave", onDragLeave);
+            element.on("drop", onDrop);
+            scope.$on("$destroy", function () {
+                element.off("dragover", onDragOver);
+                element.off("dragleave", onDragLeave);
+                element.off("drop", onDrop);
             });
         },
     };

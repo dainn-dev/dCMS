@@ -26,12 +26,11 @@ public sealed class VariantStock
     public void Adjust(int delta)
     {
         var newQuantity = Quantity + delta;
+        if (newQuantity < 0 && delta < 0)
+            throw new OutOfStockException(VariantId, -delta, Quantity);
         if (newQuantity < ReservedQuantity)
             throw new StockInvariantException(
                 $"Cannot adjust stock for {VariantId}: resulting quantity {newQuantity} would be less than reserved {ReservedQuantity}.");
-        if (newQuantity < 0)
-            throw new StockInvariantException(
-                $"Cannot adjust stock for {VariantId}: resulting quantity {newQuantity} would be negative.");
         Quantity = newQuantity;
     }
 

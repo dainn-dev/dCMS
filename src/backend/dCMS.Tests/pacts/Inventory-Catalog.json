@@ -1,0 +1,39 @@
+{
+  "consumer": {
+    "name": "Inventory"
+  },
+  "interactions": [
+    {
+      "contents": {
+        "content": {
+          "occurredAt": "2026-04-12T12:00:00+00:00",
+          "productId": "00000000-0000-0000-0000-000000000010",
+          "storeId": "s1",
+          "tenantId": "t1"
+        },
+        "contentType": "application/json",
+        "encoded": false
+      },
+      "description": "ProductUpdated.v1 from catalog outbox",
+      "pending": false,
+      "providerStates": [
+        {
+          "name": "product exists for tenant"
+        }
+      ],
+      "type": "Asynchronous/Messages"
+    }
+  ],
+  "metadata": {
+    "pactRust": {
+      "ffi": "0.4.23",
+      "models": "1.2.5"
+    },
+    "pactSpecification": {
+      "version": "4.0"
+    }
+  },
+  "provider": {
+    "name": "Catalog"
+  }
+}

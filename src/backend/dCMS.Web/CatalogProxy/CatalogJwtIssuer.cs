@@ -4,13 +4,15 @@ using System.Text;
 using dCMS.AspNetCore.Auth;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using Umbraco.Cms.Core.Models.Membership;
 
 namespace dCMS.Web.CatalogProxy;
 
-/// <summary>Issues short-lived JWTs for Catalog.Api with <see cref="DcmsClaims.TenantId"/> / <see cref="DcmsClaims.StoreId"/> + Store Manager role.</summary>
+/// <summary>Issues short-lived JWTs for Catalog.Api with tenant/store claims and roles from the Umbraco user (DAI-296).</summary>
 public sealed class CatalogJwtIssuer(IConfiguration configuration)
 {
-    public string CreateForBackOfficeUser(string subject, string tenantId, string storeId, TimeSpan? lifetime = null)
+    public string CreateForBackOfficeUser(IUser? backOfficeUser, string subject, string tenantId, string storeId,
+        TimeSpan? lifetime = null)
     {
         var opt = configuration.GetSection(DcmsAuthOptions.SectionName).Get<DcmsAuthOptions>() ?? new DcmsAuthOptions();
         if (string.IsNullOrWhiteSpace(opt.JwtSigningKey) || opt.JwtSigningKey.Length < 32)
@@ -22,13 +24,16 @@ public sealed class CatalogJwtIssuer(IConfiguration configuration)
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(opt.JwtSigningKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var expires = DateTime.UtcNow.Add(lifetime ?? TimeSpan.FromMinutes(30));
-        var claims = new[]
+        var roleList = CatalogBackofficeRoleMapping.GetDcmsRolesForCatalogJwt(backOfficeUser);
+        var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, subject),
-            new Claim(ClaimTypes.Role, DcmsRoles.StoreManager),
-            new Claim(DcmsClaims.TenantId, tenantId),
-            new Claim(DcmsClaims.StoreId, storeId)
+            new(ClaimTypes.NameIdentifier, subject),
+            new(DcmsClaims.TenantId, tenantId),
+            new(DcmsClaims.StoreId, storeId)
         };
+        foreach (var r in roleList)
+            claims.Add(new Claim(ClaimTypes.Role, r));
+
         var token = new JwtSecurityToken(opt.Issuer, opt.Audience, claims, expires: expires, signingCredentials: creds);
         return new JwtSecurityTokenHandler().WriteToken(token);
     }

@@ -4,7 +4,7 @@ namespace dCMS.Core.Models;
 public sealed class ProductVariant
 {
     private ProductVariant(string id, string productId, string sku, string combinationHash, string combinationCanonical,
-        string status, int sortOrder)
+        string status, int sortOrder, long basePriceAmount)
     {
         Id = id;
         ProductId = productId;
@@ -13,6 +13,7 @@ public sealed class ProductVariant
         CombinationCanonical = combinationCanonical;
         Status = status;
         SortOrder = sortOrder;
+        BasePriceAmount = basePriceAmount;
     }
 
     public string Id { get; }
@@ -24,17 +25,20 @@ public sealed class ProductVariant
     public string CombinationCanonical { get; }
     public string Status { get; }
     public int SortOrder { get; }
+    /// <summary>Minor units in the store currency (e.g. whole VND).</summary>
+    public long BasePriceAmount { get; }
 
     public static ProductVariant Create(string productId, string sku, string combinationHash, int sortOrder,
-        string combinationCanonical = "") =>
+        string combinationCanonical = "", long basePriceAmount = 0) =>
         new("var_" + Guid.NewGuid().ToString("N"), productId, sku, combinationHash, combinationCanonical, "active",
-            sortOrder);
+            sortOrder, basePriceAmount);
 
     public static ProductVariant Restore(string id, string productId, string sku, string combinationHash, string status,
-        int sortOrder, string combinationCanonical = "") =>
-        new(id, productId, sku, combinationHash, combinationCanonical, status, sortOrder);
+        int sortOrder, string combinationCanonical = "", long basePriceAmount = 0) =>
+        new(id, productId, sku, combinationHash, combinationCanonical, status, sortOrder, basePriceAmount);
 
     /// <summary>Immutable update for editable fields (SKU, status, sort order). Combination hash is unchanged.</summary>
-    public ProductVariant With(string? sku = null, string? status = null, int? sortOrder = null) =>
-        new(Id, ProductId, sku ?? Sku, CombinationHash, CombinationCanonical, status ?? Status, sortOrder ?? SortOrder);
+    public ProductVariant With(string? sku = null, string? status = null, int? sortOrder = null, long? basePriceAmount = null) =>
+        new(Id, ProductId, sku ?? Sku, CombinationHash, CombinationCanonical, status ?? Status, sortOrder ?? SortOrder,
+            basePriceAmount ?? BasePriceAmount);
 }

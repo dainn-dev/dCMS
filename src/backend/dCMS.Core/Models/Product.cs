@@ -107,6 +107,17 @@ public sealed class Product
         _domainEvents.Add(new ProductUpdated(Id, TenantId, StoreId, now));
     }
 
+    /// <summary>pending_approval → draft (request changes / reject).</summary>
+    public void ReturnPendingToDraft(DateTimeOffset now)
+    {
+        if (Status != ProductStatus.PendingApproval)
+            throw new InvalidProductStateException("Only products pending approval can be returned to draft.");
+
+        Status = ProductStatus.Draft;
+        Touch(now);
+        _domainEvents.Add(new ProductUpdated(Id, TenantId, StoreId, now));
+    }
+
     /// <summary>draft | pending_approval | hidden → active. Throws if archived.</summary>
     public void Publish(DateTimeOffset now)
     {
@@ -182,6 +193,16 @@ public sealed class Product
     {
         if (Status == ProductStatus.Archived)
             throw new InvalidProductStateException("Cannot generate variants for an archived product.");
+
+        Touch(now);
+        _domainEvents.Add(new ProductUpdated(Id, TenantId, StoreId, now));
+    }
+
+    /// <summary>After variant SKU/price/status rows change — reindex + outbox (US-14).</summary>
+    public void RecordVariantRowsUpdated(DateTimeOffset now)
+    {
+        if (Status == ProductStatus.Archived)
+            throw new InvalidProductStateException("Cannot update variants for an archived product.");
 
         Touch(now);
         _domainEvents.Add(new ProductUpdated(Id, TenantId, StoreId, now));

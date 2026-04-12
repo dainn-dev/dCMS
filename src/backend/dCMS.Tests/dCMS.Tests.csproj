@@ -17,6 +17,7 @@
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="Dapper" Version="2.1.35" />
     <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="PactNet" Version="5.0.0" />
     <PackageReference Include="Testcontainers.Elasticsearch" Version="3.10.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
@@ -43,6 +44,8 @@
     <None Include="..\dCMS.Infrastructure\Migrations\003_CreateProducts.sql" Link="Migrations\003_CreateProducts.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\004_CreateVariants.sql" Link="Migrations\004_CreateVariants.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\010_AddCombinationCanonical.sql" Link="Migrations\010_AddCombinationCanonical.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\012_AddVariantBasePriceAndProductImages.sql" Link="Migrations\012_AddVariantBasePriceAndProductImages.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\013_CreateStoreCatalogSettings.sql" Link="Migrations\013_CreateStoreCatalogSettings.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Inventory.Infrastructure\Migrations\007_CreateInventory.sql" Link="007_CreateInventory.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
