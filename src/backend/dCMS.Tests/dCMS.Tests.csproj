@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="Testcontainers.Elasticsearch" Version="3.10.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.Catalog.Api\dCMS.Catalog.Api.csproj" />
+    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\dCMS.Inventory.Api\dCMS.Inventory.Api.csproj" />
+    <ProjectReference Include="..\dCMS.Inventory.Core\dCMS.Inventory.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Inventory.Infrastructure\dCMS.Inventory.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\dCMS.Infrastructure\Migrations\001_CreateCategories.sql" Link="Migrations\001_CreateCategories.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\011_CreateCatalogVariantAxes.sql" Link="Migrations\011_CreateCatalogVariantAxes.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\003_CreateProducts.sql" Link="Migrations\003_CreateProducts.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\004_CreateVariants.sql" Link="Migrations\004_CreateVariants.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\010_AddCombinationCanonical.sql" Link="Migrations\010_AddCombinationCanonical.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Inventory.Infrastructure\Migrations\007_CreateInventory.sql" Link="007_CreateInventory.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

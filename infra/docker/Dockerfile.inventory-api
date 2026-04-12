@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY src/backend/dCMS.Core/dCMS.Core.csproj dCMS.Core/
+COPY src/backend/dCMS.Inventory.Core/dCMS.Inventory.Core.csproj dCMS.Inventory.Core/
+COPY src/backend/dCMS.AspNetCore.Auth/dCMS.AspNetCore.Auth.csproj dCMS.AspNetCore.Auth/
+COPY src/backend/dCMS.Inventory.Infrastructure/dCMS.Inventory.Infrastructure.csproj dCMS.Inventory.Infrastructure/
+COPY src/backend/dCMS.Inventory.Api/dCMS.Inventory.Api.csproj dCMS.Inventory.Api/
+RUN dotnet restore dCMS.Inventory.Api/dCMS.Inventory.Api.csproj
+
+COPY src/backend/ ./
+RUN dotnet restore dCMS.Inventory.Api/dCMS.Inventory.Api.csproj \
+    && dotnet publish dCMS.Inventory.Api/dCMS.Inventory.Api.csproj -c Release -o /app --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+COPY --from=build /app .
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "dCMS.Inventory.Api.dll"]

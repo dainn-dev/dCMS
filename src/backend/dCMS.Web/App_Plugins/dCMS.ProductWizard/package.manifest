@@ -1,0 +1,17 @@
+{
+  "name": "dCMS Product Wizard",
+  "version": "1.0.0",
+  "allowPackageTelemetry": false,
+  "javascript": [
+    "/App_Plugins/dCMS.ProductWizard/productwizard.controller.js"
+  ],
+  "css": [],
+  "dashboards": [
+    {
+      "alias": "dCMSProductWizard",
+      "view": "/App_Plugins/dCMS.ProductWizard/welcome.html",
+      "sections": [ "dCMSCatalog" ],
+      "weight": 90
+    }
+  ]
+}

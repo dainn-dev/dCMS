@@ -1,0 +1,139 @@
+# dCMS local stack: PostgreSQL, RabbitMQ, Elasticsearch, Catalog API, Inventory API, Catalog Worker.
+# Usage (repo root): docker compose -f infra/docker-compose.yml build
+#                      docker compose -f infra/docker-compose.yml --profile test run --rm m1-domain-tests
+# Apply SQL migrations after Postgres is healthy (see infra/README.md).
+
+name: dcms
+
+volumes:
+  umbraco_sqlite:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dcms
+      POSTGRES_PASSWORD: Your_password123
+      POSTGRES_DB: dcms_catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dcms -d dcms_catalog -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    mem_limit: 1073741824
+
+  catalog-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.catalog-api
+    ports:
+      - "5001:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Redis: "redis:6379"
+      Elasticsearch__Url: "http://elasticsearch:9200"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+
+  inventory-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.inventory-api
+    ports:
+      - "5002:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Inventory: "Host=postgres;Port=5432;Database=dcms_inventory;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Audit: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Redis: "redis:6379"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  umbraco-web:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.dcms-web
+    ports:
+      - "5000:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # US-13 BFF → Catalog.Api (internal port 8080). Align Auth__JwtSigningKey with catalog-api when Auth:Enabled.
+      DCMS__CatalogProxy__CatalogApiBaseUrl: "http://catalog-api:8080"
+      Auth__JwtSigningKey: "change-me-in-production-use-32-chars-min!!"
+      Auth__Issuer: "dcms"
+      Auth__Audience: "dcms-api"
+    volumes:
+      - umbraco_sqlite:/app/umbraco/Data
+    depends_on:
+      catalog-api:
+        condition: service_started
+
+  catalog-worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.catalog-worker
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Inventory: "Host=postgres;Port=5432;Database=dcms_inventory;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Redis: "redis:6379"
+      Elasticsearch__Url: "http://elasticsearch:9200"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+
+  m1-domain-tests:
+    profiles: ["test"]
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.m1-domain-tests
+    # Testcontainers (PostgreSQL, Elasticsearch) needs the host daemon + a routable host to reach published ports.
+    environment:
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

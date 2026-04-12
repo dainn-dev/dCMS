@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+# M1 — full dCMS.Tests suite (unit + integration). With compose: mount Docker socket + TESTCONTAINERS_HOST_OVERRIDE so Testcontainers can run.
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+WORKDIR /src
+
+COPY src/backend/dCMS.Core/dCMS.Core.csproj dCMS.Core/
+COPY src/backend/dCMS.Inventory.Core/dCMS.Inventory.Core.csproj dCMS.Inventory.Core/
+COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/
+COPY src/backend/dCMS.Inventory.Infrastructure/dCMS.Inventory.Infrastructure.csproj dCMS.Inventory.Infrastructure/
+COPY src/backend/dCMS.Tests/dCMS.Tests.csproj dCMS.Tests/
+RUN dotnet restore dCMS.Tests/dCMS.Tests.csproj
+
+COPY src/backend/ ./
+RUN dotnet restore dCMS.Tests/dCMS.Tests.csproj \
+    && dotnet build dCMS.Tests/dCMS.Tests.csproj -c Release --no-restore
+
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+CMD ["dotnet", "test", "dCMS.Tests/dCMS.Tests.csproj", "-c", "Release", "--no-restore", "--no-build", "--verbosity", "normal"]

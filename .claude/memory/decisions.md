@@ -16,7 +16,7 @@ _Thêm decisions vào đây khi chúng được đưa ra._
 ## Decision: Mô hình Siêu thị — Tenant = Siêu thị, hierarchy 4 cấp
 
 **Date:** 2026-04-03 (updated 2026-04-03)
-**Decision:** dCMS theo mô hình siêu thị với hierarchy 4 cấp: **Platform → Siêu thị (Tenant) → Brands → Stores**. Tenant isolation ở cấp Siêu thị — 1 Umbraco instance + 1 SQL Server DB per Siêu thị. Brand là layer tổ chức bên trong. Store là đơn vị bán hàng có storefront riêng.
+**Decision:** dCMS theo mô hình siêu thị với hierarchy 4 cấp: **Platform → Siêu thị (Tenant) → Brands → Stores**. Tenant isolation ở cấp Siêu thị — 1 Umbraco instance + isolated DB per Siêu thị (Umbraco); Catalog/Inventory services dùng PostgreSQL với `TenantId` scoping. Brand là layer tổ chức bên trong. Store là đơn vị bán hàng có storefront riêng.
 **Reason:** Phản ánh đúng thực tế kinh doanh — một tập đoàn bán lẻ (Lotte, BigC) có nhiều thương hiệu con, mỗi thương hiệu có nhiều cửa hàng. Isolation tại cấp Siêu thị đủ đảm bảo data security giữa các tập đoàn khác nhau. Brands/Stores trong cùng Siêu thị share Umbraco instance → giảm chi phí vận hành, dễ cross-brand reporting.
 **Alternatives considered:**
 - Isolation per Store (quá tốn resource, khó cross-brand analytics)
@@ -92,3 +92,12 @@ _Thêm decisions vào đây khi chúng được đưa ra._
 **Decision:** Tất cả giá trị tiền được lưu dưới dạng integer — đơn vị nhỏ nhất của currency (cents cho USD, đồng cho VND).
 **Reason:** Tránh floating point precision errors trong tính toán tiền tệ, standard practice trong eCommerce.
 **Alternatives considered:** Decimal (vẫn có precision risk), float (không dùng trong financial systems)
+
+---
+
+## Decision: PostgreSQL + Npgsql cho Catalog/Inventory (Dapper)
+
+**Date:** 2026-04-12
+**Decision:** Catalog và Inventory persistence dùng **PostgreSQL** với **Npgsql** + **Dapper** (không EF cho runtime paths này). SQL migrations là file `.sql` idempotent (`CREATE IF NOT EXISTS`), versioned theo số `00x_`. Optimistic concurrency cho `VariantStock`: cột bigint **`Revision`** (ứng dụng map vào `VariantStock.RowVersion`), `UPDATE ... SET "Revision" = "Revision" + 1 ... AND "Revision" = @expected RETURNING`.
+**Reason:** Tránh lock-in SQL Server cho microservices headless; Dapper giữ throughput tốt; PG không có `ROWVERSION` — revision counter tương đương pattern optimistic locking.
+**Alternatives considered:** Giữ SQL Server; dùng EF migrations thay vì SQL files (chậm hơn cho hot paths, đổi scope lớn); `xmin` system column (khó map Dapper/portable bằng long).

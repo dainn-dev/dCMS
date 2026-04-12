@@ -1,0 +1,363 @@
+<div
+    ng-controller="Umbraco.dCMS.ProductWizardController as vm"
+    style="padding: 16px 20px 24px; max-width: 880px; font-family: 'Lato', Helvetica, Arial, sans-serif"
+>
+    <h2 style="margin-top: 0">{{ vm.title }}</h2>
+    <p style="color: #555; line-height: 1.5">
+        Open this screen from the <strong>dCMS Catalog</strong> section in the backoffice ribbon (DAI-281). Scope:
+        <strong>tenant</strong> / <strong>store</strong> must match Catalog data; BFF uses JWT (StoreManager) for writes. Administrator and
+        Editor groups receive the section automatically on startup; other groups need it enabled under <em>Users → Groups</em>.
+    </p>
+
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px">
+        <label>TenantId <input type="text" ng-model="vm.tenantId" style="width: 120px" /></label>
+        <label>StoreId <input type="text" ng-model="vm.storeId" style="width: 120px" /></label>
+        <button type="button" class="btn btn-default" ng-click="vm.loadCategories()" ng-disabled="vm.busy">Reload categories</button>
+    </div>
+
+    <div class="alert alert-danger" ng-if="vm.error" style="margin-bottom: 12px">{{ vm.error }}</div>
+
+    <ul class="nav nav-tabs" style="margin-bottom: 16px">
+        <li ng-class="{ active: vm.step === 1 }"><span>1. Category</span></li>
+        <li ng-class="{ active: vm.step === 2 }"><span>2. SPU + slug</span></li>
+        <li ng-class="{ active: vm.step === 3 }"><span>3. Axes (JSON)</span></li>
+        <li ng-class="{ active: vm.step === 4 }"><span>4. Generate</span></li>
+        <li ng-class="{ active: vm.step === 5 }"><span>5. Review</span></li>
+    </ul>
+
+    <div ng-show="vm.step === 1">
+        <h4>Step 1 — Category tree</h4>
+        <p class="text-muted">
+            Data from <code>GET …/categories</code> (ordered by path). Click <strong>▶/▼</strong> on a parent to expand or collapse its subtree; <strong>Leaf</strong> rows use a radio.
+        </p>
+        <div ng-if="vm.categories.length" style="margin-bottom: 10px">
+            <button type="button" class="btn btn-default" style="margin-right: 6px" ng-click="vm.expandAllCategories()">Expand all</button>
+            <button type="button" class="btn btn-default" ng-click="vm.collapseAllCategories()">Collapse all</button>
+        </div>
+        <div ng-repeat="c in vm.categories">
+            <div
+                ng-if="vm.isCategoryRowVisible(c)"
+                ng-style="{ 'padding-left': (12 + (c.depth || 0) * 20) + 'px', 'padding-top': '4px', 'padding-bottom': '4px', 'border-radius': '2px', 'background-color': (c.isLeaf && vm.selectedCategoryId == c.id) ? '#e8f4fc' : 'transparent' }"
+            >
+                <a
+                    href="#"
+                    class="text-muted"
+                    style="display: inline-block; width: 18px; text-decoration: none; vertical-align: middle"
+                    ng-if="!c.isLeaf"
+                    ng-click="vm.toggleBranch($event, c)"
+                    title="Expand / collapse"
+                >
+                    <span ng-bind="vm.isBranchExpanded(c) ? '▼' : '▶'"></span>
+                </a>
+                <span ng-if="c.isLeaf" style="display: inline-block; width: 18px"></span>
+                <label ng-if="c.isLeaf" style="margin: 0; font-weight: normal; cursor: pointer; vertical-align: middle">
+                    <input type="radio" name="dcmsLeafCat" ng-model="vm.selectedCategoryId" ng-value="c.id" />
+                    {{ c.name }}
+                    <small class="text-muted">#{{ c.id }}</small>
+                </label>
+                <span ng-if="!c.isLeaf" style="color: #666; vertical-align: middle">
+                    {{ c.name }}
+                    <small class="text-muted">#{{ c.id }}</small>
+                </span>
+            </div>
+        </div>
+        <p ng-if="!vm.leafCategories.length && !vm.busy" class="text-warning">No leaf categories (seed <code>Categories</code> for tenant).</p>
+    </div>
+
+    <div ng-show="vm.step === 2">
+        <h4>Step 2 — SPU details (multilang) + slug</h4>
+        <ul class="nav nav-tabs" style="margin-bottom: 12px">
+            <li ng-class="{ active: vm.nameTab === 'vi' }">
+                <a href="#" ng-click="$event.preventDefault(); vm.nameTab = 'vi'">Tiếng Việt *</a>
+            </li>
+            <li ng-class="{ active: vm.nameTab === 'en' }">
+                <a href="#" ng-click="$event.preventDefault(); vm.nameTab = 'en'">English</a>
+            </li>
+        </ul>
+        <div ng-show="vm.nameTab === 'vi'">
+            <label>Display name (VI) *</label>
+            <input type="text" class="form-control" style="max-width: 560px; margin-bottom: 12px" ng-model="vm.nameVi" ng-change="vm.onNameChange()" />
+            <label>Short description (VI)</label>
+            <textarea
+                class="form-control"
+                rows="4"
+                style="max-width: 560px"
+                ng-model="vm.descVi"
+                placeholder="Optional — stored in descriptionJson.vi"
+            ></textarea>
+        </div>
+        <div ng-show="vm.nameTab === 'en'">
+            <label>Display name (EN)</label>
+            <input type="text" class="form-control" style="max-width: 560px; margin-bottom: 8px" ng-model="vm.nameEn" ng-change="vm.onNameChange()" />
+            <p class="text-muted" style="font-size: 12px">Optional name; sent as <code>nameJson.en</code> when non-empty.</p>
+            <label>Short description (EN)</label>
+            <textarea
+                class="form-control"
+                rows="4"
+                style="max-width: 560px"
+                ng-model="vm.descEn"
+                placeholder="Optional — stored in descriptionJson.en"
+            ></textarea>
+        </div>
+        <hr style="margin: 16px 0" />
+        <label>Slug * <small class="text-muted">(debounced slug-check, 60s client cache)</small></label>
+        <input type="text" class="form-control" style="max-width: 480px; margin-bottom: 8px" ng-model="vm.slug" ng-change="vm.onSlugChange()" />
+        <p class="text-warning" ng-if="vm.slug && vm.slugFormatOk() === false">
+            Slug should be lowercase <code>a-z</code>, digits, single hyphens (no spaces).
+        </p>
+        <p ng-if="vm.slugPending" class="text-muted">Checking slug…</p>
+        <p ng-if="!vm.slugPending && vm.slugState === true" class="text-success">Slug available.</p>
+        <p ng-if="!vm.slugPending && vm.slugState === false" class="text-danger">Slug already used.</p>
+    </div>
+
+    <div ng-show="vm.step === 3">
+        <h4>Step 3 — Variant axes</h4>
+        <p class="text-muted">
+            Pick values per attribute (from <code>GET …/variant-axes</code>). Optional per-store allowlist table
+            <code>StoreCatalogAttributeValues</code> (when rows exist for tenant+store, only those value IDs are listed). You can still edit JSON
+            directly.
+        </p>
+        <div ng-if="vm.variantAxesDefinitions.length" style="margin-bottom: 12px">
+            <button type="button" class="btn btn-default" ng-click="vm.reloadVariantAxesFromApi()" ng-disabled="vm.busy">Reload definitions</button>
+        </div>
+        <div ng-if="vm.variantAxesDefinitions.length" style="margin-bottom: 16px; max-height: 280px; overflow-y: auto; border: 1px solid #e5e5e5; padding: 10px; border-radius: 4px">
+            <div ng-repeat="attr in vm.variantAxesDefinitions track by attr.attributeId" style="margin-bottom: 14px">
+                <strong>{{ attr.name }}</strong>
+                <span class="text-muted">(#{{ attr.attributeId }})</span>
+                <div ng-repeat="v in attr.values track by v.id" style="margin-left: 12px; margin-top: 4px">
+                    <label style="font-weight: normal; cursor: pointer; margin: 0">
+                        <input type="checkbox" ng-model="vm.selectedValueIds[v.id]" ng-change="vm.syncAxesJsonFromPicker()" />
+                        {{ v.name }} <small class="text-muted">#{{ v.id }}</small>
+                    </label>
+                </div>
+            </div>
+        </div>
+        <div ng-if="!vm.variantAxesDefinitions.length" class="alert alert-info" style="font-size: 13px">
+            No axis definitions for this tenant/store (seed <code>CatalogAttributes</code> / <code>CatalogAttributeValues</code> in the catalog DB, or
+            compose JSON manually below).
+        </div>
+        <label>Axes JSON <small class="text-muted">(synced from checkboxes when picker is loaded)</small></label>
+        <p class="text-muted" style="font-size: 12px">Axis count: <strong>{{ vm.axesAxisCount() }}</strong></p>
+        <textarea class="form-control" rows="5" style="font-family: monospace" ng-model="vm.axesJson"></textarea>
+        <label style="margin-top: 8px">SKU prefix</label>
+        <input type="text" class="form-control" style="max-width: 200px" ng-model="vm.skuPrefix" />
+    </div>
+
+    <div ng-show="vm.step === 4">
+        <h4>Step 4 — Preview and generate</h4>
+        <p class="text-danger" ng-if="vm.axisPreview.error">{{ vm.axisPreview.error }}</p>
+        <div ng-if="vm.axisPreview.ok">
+            <p>
+                <strong>{{ vm.axisPreview.combinationCount }}</strong> variant combination(s) from current axes (client-side cartesian product).
+            </p>
+            <div class="alert alert-warning" ng-if="vm.axisPreview.warnLarge" style="font-size: 13px">
+                Count is very large; server limits still apply when you call <code>variants/generate</code>.
+            </div>
+            <div ng-if="vm.axisPreview.rows.length" style="max-height: 240px; overflow: auto; border: 1px solid #e5e5e5; border-radius: 4px; margin-bottom: 12px">
+                <table class="table table-condensed" style="margin-bottom: 0">
+                    <thead>
+                        <tr>
+                            <th ng-repeat="c in vm.axisPreview.columns">{{ c.title }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr ng-repeat="row in vm.axisPreview.rows track by $index">
+                            <td ng-repeat="cell in row.cells">
+                                {{ cell.label }} <small class="text-muted">#{{ cell.valueId }}</small>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted" style="font-size: 12px" ng-if="vm.axisPreview.truncated">
+                Showing first {{ vm.variantPreviewMaxRows }} rows only (full count above).
+            </p>
+        </div>
+        <p>Press <strong>Next</strong> to call <code>variants/generate</code>. Large combinations follow Catalog limits.</p>
+    </div>
+
+    <div ng-show="vm.step === 5">
+        <h4>Step 5 — Review and publish</h4>
+        <div class="well well-sm" style="margin-bottom: 16px">
+            <h5 style="margin-top: 0">Review summary</h5>
+            <dl class="dl-horizontal" style="margin-bottom: 8px">
+                <dt>Catalog status</dt>
+                <dd>
+                    <code ng-if="vm.productDetail">{{ vm.productDetail.status || "—" }}</code>
+                    <span ng-if="!vm.productDetail" class="text-muted">—</span>
+                </dd>
+                <dt>Variant rows</dt>
+                <dd>{{ vm.variantsList.length }}</dd>
+                <dt>Active / inactive (from grid)</dt>
+                <dd>{{ vm.reviewActiveVariantCount() }} / {{ vm.reviewInactiveVariantCount() }}</dd>
+                <dt>Price range</dt>
+                <dd class="text-muted" style="font-size: 12px">Not in API yet — <code>GET …/variants</code> has no price fields (indexing uses placeholders until pricing is persisted per variant).</dd>
+                <dt>Stock = 0</dt>
+                <dd class="text-muted" style="font-size: 12px">Not loaded — Inventory totals are not proxied in this BFF; use Inventory API / backoffice for warehouse stock.</dd>
+            </dl>
+            <p class="text-muted" style="font-size: 12px; margin-bottom: 8px">
+                <strong>Workflow (wizard preference):</strong> stored in this browser only until a store-config API exists.
+            </p>
+            <label style="margin-right: 16px; font-weight: normal; cursor: pointer">
+                <input type="radio" ng-model="vm.storePublishMode" value="direct" ng-change="vm.persistPublishMode()" /> Direct publish
+            </label>
+            <label style="font-weight: normal; cursor: pointer">
+                <input type="radio" ng-model="vm.storePublishMode" value="approval" ng-change="vm.persistPublishMode()" /> Submit for approval first
+            </label>
+            <div style="margin-top: 10px">
+                <label style="display: block; font-weight: 600">Product detail URL (optional)</label>
+                <input
+                    type="text"
+                    class="form-control"
+                    style="max-width: 100%; font-family: monospace; font-size: 12px"
+                    ng-model="vm.productUrlTemplate"
+                    ng-blur="vm.persistProductUrlTemplate()"
+                    placeholder="https://example.com/catalog/{{tenantId}}/{{storeId}}/products/{{productId}}"
+                />
+                <p class="text-muted" style="font-size: 11px; margin-top: 4px">
+                    After publish or submit, opens in a new tab if non-empty. Placeholders: <code>{{productId}}</code> <code>{{tenantId}}</code> <code>{{storeId}}</code>
+                </p>
+            </div>
+        </div>
+        <div class="alert alert-success" ng-if="vm.publishOk">Last action completed successfully (publish or submit for approval).</div>
+        <div class="alert alert-info" ng-if="vm.step5Notice && !vm.publishOk" style="margin-bottom: 12px">{{ vm.step5Notice }}</div>
+        <dl class="dl-horizontal" style="margin-bottom: 16px">
+            <dt>Tenant</dt>
+            <dd>{{ vm.tenantId }}</dd>
+            <dt>Store</dt>
+            <dd>{{ vm.storeId }}</dd>
+            <dt>Category</dt>
+            <dd>{{ vm.categoryLabel(vm.selectedCategoryId) }}</dd>
+            <dt>Name (VI)</dt>
+            <dd>{{ vm.nameVi || "—" }}</dd>
+            <dt>Name (EN)</dt>
+            <dd>{{ vm.nameEn || "—" }}</dd>
+            <dt>Description (VI)</dt>
+            <dd style="white-space: pre-wrap">{{ vm.descVi || "—" }}</dd>
+            <dt>Description (EN)</dt>
+            <dd style="white-space: pre-wrap">{{ vm.descEn || "—" }}</dd>
+            <dt>Slug</dt>
+            <dd><code>{{ vm.slug || "—" }}</code></dd>
+            <dt>SKU prefix</dt>
+            <dd><code>{{ vm.skuPrefix || "sku" }}</code></dd>
+            <dt>Axes</dt>
+            <dd>{{ vm.axesAxisCount() }} axis definition(s)</dd>
+            <dt>Product id</dt>
+            <dd><code>{{ vm.productId || "—" }}</code></dd>
+            <dt ng-if="vm.generateResult">Variants</dt>
+            <dd ng-if="vm.generateResult">
+                combinations {{ vm.generateResult.combinationCount }}, inserted {{ vm.generateResult.inserted }}, skipped duplicates
+                {{ vm.generateResult.skippedDuplicates }}
+            </dd>
+        </dl>
+
+        <div ng-if="vm.variantsList.length" style="margin-bottom: 16px">
+            <h5 style="margin-top: 0">Variants</h5>
+            <p class="text-muted" style="font-size: 12px">
+                {{ vm.variantsList.length }} row(s). Windowed list (virtual scroll, AngularJS — not the <code>react-window</code> package); only visible rows are
+                rendered. Edits live in <code>variantEdits</code> keyed by id so they survive scrolling.
+            </p>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px">
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.selectAllVariants(true)" ng-disabled="vm.busy">Select all</button>
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.selectAllVariants(false)" ng-disabled="vm.busy">Unselect all</button>
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.selectVisibleVariants()" ng-disabled="vm.busy">Select visible</button>
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.clearVariantSelection()" ng-disabled="vm.busy">Clear selection</button>
+                <label style="margin: 0">
+                    Bulk status
+                    <select ng-model="vm.bulkStatusTarget" class="form-control" style="display: inline-block; width: auto; min-width: 100px; height: 30px; padding: 2px 8px">
+                        <option value="active">active</option>
+                        <option value="inactive">inactive</option>
+                    </select>
+                </label>
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.applyBulkStatusToSelection()" ng-disabled="vm.busy">Apply to selected</button>
+                <span class="text-muted" style="font-size: 12px" ng-if="vm.selectedVariantCount()">({{ vm.selectedVariantCount() }} selected)</span>
+                <label style="margin: 0 0 0 8px">
+                    Bulk sort from
+                    <input
+                        type="number"
+                        min="0"
+                        ng-model="vm.bulkSortStart"
+                        class="form-control"
+                        style="display: inline-block; width: 72px; height: 30px; padding: 2px 6px; vertical-align: middle"
+                    />
+                </label>
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.applyBulkSortIncrementToSelection()" ng-disabled="vm.busy">Apply sort to selected</button>
+                <button type="button" class="btn btn-primary btn-sm" ng-click="vm.saveVariantEdits()" ng-disabled="vm.busy">Save edits (PUT)</button>
+                <button type="button" class="btn btn-default btn-sm" ng-click="vm.loadProductVariants()" ng-disabled="vm.busy">Reload variants</button>
+            </div>
+            <p ng-if="vm.variantSaveProgress" class="text-muted" style="font-size: 12px">
+                Saving {{ vm.variantSaveProgress.done }} / {{ vm.variantSaveProgress.total }}…
+            </p>
+            <div
+                dcms-product-wizard-scroll
+                ng-style="{ height: vm.variantGridViewportPx + 'px', overflow: 'auto', border: '1px solid #e5e5e5', borderRadius: '4px' }"
+            >
+                <div ng-style="{ height: (vm.variantGridLayout.innerH || 0) + 'px', position: 'relative' }">
+                    <div ng-style="{ position: 'absolute', left: 0, right: 0, top: (vm.variantGridLayout.offsetY || 0) + 'px' }">
+                        <table class="table table-condensed" style="margin: 0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 32px"></th>
+                                    <th>SKU</th>
+                                    <th style="width: 110px">Status</th>
+                                    <th style="width: 88px">Sort</th>
+                                    <th>Combination hash</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr ng-repeat="v in vm.visibleVariantRows track by v.id" ng-style="{ height: vm.variantRowHeight + 'px' }">
+                                    <td><input type="checkbox" ng-model="vm.selectedVariantIds[v.id]" /></td>
+                                    <td><input type="text" class="form-control input-sm" ng-model="vm.variantEdits[v.id].sku" style="min-width: 140px" /></td>
+                                    <td>
+                                        <select class="form-control input-sm" ng-model="vm.variantEdits[v.id].status" style="height: 28px; padding: 2px 6px">
+                                            <option value="active">active</option>
+                                            <option value="inactive">inactive</option>
+                                        </select>
+                                    </td>
+                                    <td><input type="number" min="0" class="form-control input-sm" ng-model="vm.variantEdits[v.id].sortOrder" style="height: 28px" /></td>
+                                    <td style="font-size: 11px; word-break: break-all" title="{{ v.combinationHash }}">{{ v.combinationHash }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <p class="text-muted" style="font-size: 12px" ng-if="vm.step === 5 && vm.productId && !vm.variantsList.length && !vm.busy">No variants loaded (generate may have inserted 0, or reload failed).</p>
+
+        <p class="text-muted" style="font-size: 12px">Raw generate response:</p>
+        <pre ng-if="vm.generateResult" style="background: #f7f7f7; padding: 10px; max-height: 220px; overflow: auto">{{ vm.generateResult | json }}</pre>
+        <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+            <button type="button" class="btn btn-default" ng-click="vm.saveDraft()" ng-disabled="vm.busy || !vm.productId">Save draft (variants)</button>
+            <button
+                type="button"
+                class="btn btn-default"
+                ng-class="{ 'btn-primary': vm.storePublishMode === 'approval' }"
+                ng-click="vm.submitApproval()"
+                ng-disabled="vm.busy || !vm.productId"
+            >
+                Submit for approval
+            </button>
+            <button
+                type="button"
+                class="btn btn-default"
+                ng-class="{ 'btn-primary': vm.storePublishMode === 'direct' }"
+                ng-click="vm.publish()"
+                ng-disabled="vm.busy || !vm.productId"
+            >
+                Publish
+            </button>
+            <button type="button" class="btn btn-default" ng-click="vm.hideFromCatalog()" ng-disabled="vm.busy || !vm.productId || !vm.productDetail || vm.productDetail.status !== 'active'">
+                Hide from catalog
+            </button>
+            <button type="button" class="btn btn-default" ng-click="vm.openProductDetailNow()" ng-disabled="vm.busy || !vm.productId || !(vm.productUrlTemplate || '').trim()">
+                Open product URL
+            </button>
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; display: flex; gap: 8px">
+        <button type="button" class="btn btn-default" ng-click="vm.prev()" ng-disabled="vm.step === 1 || vm.busy">Back</button>
+        <button type="button" class="btn btn-primary" ng-click="vm.next()" ng-disabled="vm.busy || vm.step === 5">Next</button>
+    </div>
+</div>

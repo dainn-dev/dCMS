@@ -1,0 +1,35 @@
+---
+description: Khi hoàn thành task/issue, cập nhật state + comment lên Linear nếu có LINEAR_API_KEY
+alwaysApply: true
+---
+
+# Linear — cập nhật state + comment
+
+## Khi nào
+
+Sau khi **hoàn thành** một task/issue gắn với Linear (hoặc user yêu cầu cập nhật Linear), **bắt buộc** thử cập nhật Linear **nếu** có thể dùng API key.
+
+## Điều kiện
+
+- Repo thường có `LINEAR_API_KEY` trong **`.env.local`** (repo root) hoặc biến môi trường tương đương.
+- **Không** đọc/ghi key vào chat, log user-facing, hay commit key.
+- Shell an toàn: `cd <repo-root> && set -a && source .env.local && set +a` rồi gọi API (chỉ echo kết quả JSON không chứa secret).
+
+## Việc phải làm
+
+1. **State:** chuyển issue sang trạng thái đúng nghiệp vụ (thường **Done**; task hủy scope → **Canceled** kèm lý do).
+2. **Comment:** thêm comment tiếng Việt (hoặc theo ngôn ngữ team) gồm: đã làm gì, file/module chính, kết quả test nếu có, follow-up / rủi ro ngắn.
+
+## Cách gọi API
+
+- Endpoint: `POST https://api.linear.app/graphql`
+- Header: `Authorization: $LINEAR_API_KEY`, `Content-Type: application/json`
+- Mutations: `issueUpdate` (ví dụ `input: { stateId }`), `commentCreate` (`input: { issueId, body }`). Lấy `stateId` (Done/Canceled) qua query `team { states { nodes { id name type } } }` hoặc từ issue hiện tại.
+
+## Nếu không làm được
+
+- Không có file env / biến trống / API lỗi: ghi rõ trong **bàn giao** cho user (ví dụ “chưa cập nhật Linear — thiếu `LINEAR_API_KEY`”) và **dán sẵn** nội dung comment + state đề xuất để user tự cập nhật.
+
+## Subtask / parent
+
+- Khi đóng parent (epic/US), **đồng bộ** subtask: Done + comment mapping code thực tế, hoặc Canceled + lý do ngoài scope — tránh để parent Done nhưng subtask còn Todo.

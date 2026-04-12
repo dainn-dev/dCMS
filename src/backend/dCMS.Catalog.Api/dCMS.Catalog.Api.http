@@ -1,0 +1,247 @@
+# dCMS.Catalog.Api — manual smoke / REST Client (VS / Rider / VS Code REST Client)
+# Default URL matches Properties/launchSettings.json ("http" profile) and infra/docker-compose catalog-api port mapping.
+# When Dcms auth is enabled, set @token to a JWT with catalog:read / catalog:write for @tenantId + @storeId.
+
+@dCMS.Catalog.Api_HostAddress = http://localhost:5001
+@tenantId = t1
+@storeId = s1
+@productId = prod_REPLACE_ME
+@variantId = var_REPLACE_ME
+@token =
+
+### Health (anonymous)
+
+GET {{dCMS.Catalog.Api_HostAddress}}/health
+Accept: application/json
+
+###
+
+### Public storefront — slug check (rate limited)
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/products/slug-check?tenantId={{tenantId}}&storeId={{storeId}}&slug=my-product-slug
+Accept: application/json
+
+###
+
+### Public storefront — search
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/products?tenantId={{tenantId}}&storeId={{storeId}}&pageSize=10
+Accept: application/json
+
+###
+
+### Public storefront — product by slug
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/products/my-product-slug?tenantId={{tenantId}}&storeId={{storeId}}
+Accept: application/json
+
+###
+
+### Store-scoped — categories (catalog:read when auth on)
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/categories
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Store-scoped — variant axes (wizard Step 3)
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/variant-axes
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Store-scoped — product search (Elasticsearch)
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products?pageSize=10&sort=priceasc
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Store-scoped — get product
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Store-scoped — list variants
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/variants
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Store-scoped — create product (catalog:write; Idempotency-Key recommended)
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{
+  "categoryId": 1,
+  "nameJson": "{\"vi\":\"Tên sản phẩm\",\"en\":\"Product name\"}",
+  "descriptionJson": "{\"vi\":\"Mô tả\",\"en\":\"Description\"}",
+  "slug": "my-product-slug"
+}
+
+###
+
+### Store-scoped — update product (full replace)
+
+PUT {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{
+  "categoryId": 1,
+  "nameJson": "{\"vi\":\"Tên sản phẩm\",\"en\":\"Product name\"}",
+  "descriptionJson": "{\"vi\":\"Mô tả\",\"en\":\"Description\"}",
+  "slug": "my-product-slug"
+}
+
+###
+
+### Store-scoped — bulk create (≤100 items)
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/bulk
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{
+  "items": [
+    {
+      "categoryId": 1,
+      "nameJson": "{\"vi\":\"Bulk A\"}",
+      "descriptionJson": "{}",
+      "slug": "bulk-product-a"
+    }
+  ]
+}
+
+###
+
+### Store-scoped — bulk update (≤100 items)
+
+PUT {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/bulk
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{
+  "items": [
+    {
+      "productId": "{{productId}}",
+      "categoryId": 1,
+      "nameJson": "{\"vi\":\"Bulk update name\"}",
+      "descriptionJson": "{}",
+      "slug": "bulk-updated-slug"
+    }
+  ]
+}
+
+###
+
+### Store-scoped — generate variants
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/variants/generate
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{
+  "axes": [
+    { "attributeId": 1, "valueIds": [10, 11] },
+    { "attributeId": 2, "valueIds": [20] }
+  ],
+  "skuPrefix": "sku"
+}
+
+###
+
+### Store-scoped — update variant (SKU / status / sortOrder)
+
+PUT {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/variants/{{variantId}}
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{
+  "sku": "sku-001",
+  "status": "active",
+  "sortOrder": 0
+}
+
+###
+
+### Store-scoped — submit for approval
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/submit-for-approval
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{}
+
+###
+
+### Store-scoped — publish
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/publish
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{}
+
+###
+
+### Store-scoped — hide (active → hidden)
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/hide
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{}
+
+###
+
+### Store-scoped — unhide (hidden → active)
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/unhide
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{}
+
+###
+
+### Store-scoped — archive (soft delete)
+
+POST {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}/archive
+Content-Type: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+{}
+
+###
+
+### Store-scoped — delete (maps to archive)
+
+DELETE {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}
+Accept: application/json
+Authorization: Bearer {{token}}
+Idempotency-Key: {{$guid}}
+
+###

@@ -11,7 +11,7 @@ Nền tảng eCommerce CMS headless theo mô hình siêu thị. dCMS quản lý 
 | | |
 |---|---|
 | **Stack** | Umbraco CMS (ASP.NET Core) — Phase 2: Next.js storefront (out of scope hiện tại) |
-| **Database** | SQL Server (Umbraco default per instance) |
+| **Database** | PostgreSQL for Catalog/Inventory services (Dapper); Umbraco tenant DB remains separate per instance |
 | **Search** | Elasticsearch |
 | **Payment** | External system qua API Gateway |
 | **Kiến trúc** | Headless multi-tenant — Platform → Siêu thị (Tenant) → Brands → Stores → Storefront |
@@ -21,7 +21,7 @@ Nền tảng eCommerce CMS headless theo mô hình siêu thị. dCMS quản lý 
 
 **Luôn nhớ:**
 - Hierarchy 4 cấp: **Siêu thị (Tenant) → Brands[] → Stores[] → Storefront** (storefront là Phase 2)
-- **Tenant = Siêu thị** — isolation tại cấp Siêu thị (1 Umbraco instance + 1 SQL Server per Siêu thị)
+- **Tenant = Siêu thị** — isolation tại cấp Siêu thị (1 Umbraco instance + isolated DB per Siêu thị; Catalog/Inventory hiện dùng PostgreSQL với cột `TenantId`)
 - Brand là layer tổ chức bên trong Siêu thị — không isolated riêng
 - Store là đơn vị bán hàng — expose qua Commerce API, storefront (Next.js) build ở Phase 2
 - Elasticsearch index scoped theo Siêu thị: `dcms-{tenantId}-*`, filter thêm brandId/storeId trong query
@@ -101,8 +101,9 @@ dCMS/
 │       ├── lib/                  # API clients, utilities
 │       └── types/                # TypeScript types
 ├── infra/
-│   ├── docker/                   # Dockerfiles cho backend & frontend
-│   └── docker-compose.yml        # Local dev stack
+│   ├── docker/                   # Dockerfiles (Catalog, Inventory, Worker, M1 tests)
+│   ├── docker-compose.yml        # SQL, RabbitMQ, ES, APIs, Worker (+ profile test)
+│   └── README.md                 # Compose + M1 test commands
 ├── .github/
 │   └── workflows/                # GitHub Actions CI/CD
 ├── docs/
@@ -121,7 +122,9 @@ dCMS/
 
 | Command | Mô tả |
 |---|---|
-| `docker compose up` | Start toàn bộ local stack |
+| `docker compose -f infra/docker-compose.yml build` | Build images Docker (SQL, RabbitMQ, ES, APIs, worker, M1 tests) |
+| `docker compose -f infra/docker-compose.yml --profile test run --rm m1-domain-tests` | Chạy test **M1 domain** trong container |
+| `docker compose -f infra/docker-compose.yml up -d` | Start stack (sau khi tạo DB + chạy migration SQL — xem `infra/README.md`) |
 | `docker compose up backend` | Start chỉ Umbraco backend |
 | `docker compose up frontend` | Start chỉ Next.js frontend |
 | `dotnet test` | Run backend unit tests |
