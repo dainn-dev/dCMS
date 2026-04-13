@@ -5,7 +5,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>dCMS.Order.Api</RootNamespace>
-    <Description>Placeholder HTTP host for local Docker stack (DAI-301). Replace with real Order service when implemented.</Description>
+    <Description>Order HTTP host (US-18 / DAI-310+). Also used in local Docker stack (DAI-301).</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.Order.Infrastructure\dCMS.Order.Infrastructure.csproj" />
+  </ItemGroup>
 
 </Project>

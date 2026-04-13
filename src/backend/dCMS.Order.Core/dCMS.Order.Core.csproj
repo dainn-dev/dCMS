@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>dCMS.Order.Core</RootNamespace>
+    <Description>Order domain (DAI-310 / DAI-312 / US-18). Aggregates and domain events.</Description>
+  </PropertyGroup>
+
+</Project>

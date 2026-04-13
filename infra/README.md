@@ -11,9 +11,11 @@ docker compose -f infra/docker-compose.yml build
 docker compose -f infra/docker-compose.yml up -d postgres rabbitmq redis elasticsearch catalog-api inventory-api order-api payment-api catalog-worker umbraco-web
 ```
 
-**Included:** PostgreSQL (**four** databases: `dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`), RabbitMQ (AMQP + management UI), Redis, Elasticsearch, **Catalog.Api**, **Inventory.Api**, **Order.Api** and **Payment.Api** (minimal placeholders with `GET /health` only — replace with real services when implemented), **Catalog.Worker** (RabbitMQ / MassTransit consumers + outbox relays), **Umbraco** (`dCMS.Web`, SQLite in volume `umbraco_sqlite`).
+**Included:** PostgreSQL (**four** databases: `dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`), RabbitMQ (AMQP + management UI), Redis, Elasticsearch, **Catalog.Api**, **Inventory.Api**, **Order.Api** (M5: `dCMS.Order.Api` + DbUp migrations in `dCMS.Order.Infrastructure` on startup; MassTransit/RabbitMQ) and **Payment.Api** (minimal placeholder with `GET /health` until Payment service is implemented), **Catalog.Worker** (RabbitMQ / MassTransit consumers + outbox relays), **Umbraco** (`dCMS.Web`, SQLite in volume `umbraco_sqlite`).
 
-**Deferred vs original DAI-301 wording:** **SQL Server** — this stack uses **PostgreSQL** only. Order/Payment placeholders do not connect to their databases yet; DBs exist for future migrations.
+**Deferred vs original DAI-301 wording:** **SQL Server** — this stack uses **PostgreSQL** only.
+
+**Order ↔ Inventory (DAI-314):** Compose sets **`InternalInventory__ApiKey`** on **inventory-api** (enables `POST /internal/inventory/*`) and matching **`Inventory__InternalApiKey`** + **`Inventory__BaseUrl=http://inventory-api:8080/`** on **order-api** for sync stock checks before order creation. **order-api** waits for **inventory-api** to be healthy.
 
 ### RabbitMQ Management UI
 
@@ -26,7 +28,7 @@ docker compose -f infra/docker-compose.yml up -d postgres rabbitmq redis elastic
 |----------------|----------------------|
 | Catalog.Api    | [http://localhost:5001/health](http://localhost:5001/health) |
 | Inventory.Api  | [http://localhost:5002/health](http://localhost:5002/health) |
-| Order.Api (placeholder) | [http://localhost:5003/health](http://localhost:5003/health) |
+| Order.Api (M5 — DbUp + RabbitMQ) | [http://localhost:5003/health](http://localhost:5003/health) |
 | Payment.Api (placeholder) | [http://localhost:5004/health](http://localhost:5004/health) |
 | dCMS.Web (Umbraco) | [http://localhost:5000/health](http://localhost:5000/health) |
 
@@ -53,6 +55,11 @@ psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migra
 
 psql -d dcms_inventory -v ON_ERROR_STOP=1 -f src/backend/dCMS.Inventory.Infrastructure/Migrations/007_CreateInventory.sql
 psql -d dcms_inventory -v ON_ERROR_STOP=1 -f src/backend/dCMS.Inventory.Infrastructure/Migrations/008_CreateDeadLetterEvents.sql
+
+# Order service (DAI-311) — optional if you do not run Order.Api (DbUp applies the same scripts on startup)
+psql -d dcms_order -v ON_ERROR_STOP=1 -f src/backend/dCMS.Order.Infrastructure/Migrations/001_CreateOrders.sql
+psql -d dcms_order -v ON_ERROR_STOP=1 -f src/backend/dCMS.Order.Infrastructure/Migrations/002_CreateOrderItems.sql
+psql -d dcms_order -v ON_ERROR_STOP=1 -f src/backend/dCMS.Order.Infrastructure/Migrations/003_CreateOrderSagaState.sql
 ```
 
 **Inventory.Api audit (US-11):** `ConnectionStrings:Audit` defaults to the Inventory DB. **Docker Compose** sets `ConnectionStrings__Audit` to **catalog** (`dcms_catalog`) so `AuditLogs` use migration `009` already applied there. For local `dotnet run` without that variable, either point `ConnectionStrings:Audit` at `dcms_catalog` or apply `009_CreateAuditAndNotifications.sql` to `dcms_inventory`.
@@ -89,7 +96,7 @@ cd src/backend && dotnet test dCMS.Tests/dCMS.Tests.csproj -c Release --verbosit
 | Umbraco (`dCMS.Web`) | 5000 |
 | Catalog API    | 5001 |
 | Inventory API  | 5002 |
-| Order API (placeholder) | 5003 |
+| Order API (M5) | 5003 |
 | Payment API (placeholder) | 5004 |
 | RabbitMQ AMQP  | 5672 |
 | RabbitMQ UI    | 15672 |

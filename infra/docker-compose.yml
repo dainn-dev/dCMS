@@ -94,6 +94,7 @@ services:
       ConnectionStrings__Audit: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
       Cors__AllowedOrigins__0: "http://localhost:3000"
+      InternalInventory__ApiKey: "dcms-local-internal-inventory-key-min-32-characters!!"
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,12 +110,25 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+      Inventory__BaseUrl: "http://inventory-api:8080/"
+      Inventory__InternalApiKey: "dcms-local-internal-inventory-key-min-32-characters!!"
+      Payment__BaseUrl: "http://payment-api:8080/"
     depends_on:
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      inventory-api:
+        condition: service_healthy
+      payment-api:
+        condition: service_started
 
   payment-api:
     build:

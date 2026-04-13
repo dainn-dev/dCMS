@@ -1,9 +1,12 @@
-// Placeholder Order API for local Docker stack (DAI-301). No domain logic yet.
+using dCMS.Order.Api.Routes;
+using dCMS.Order.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddOrderInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.MapHealthChecks("/health");
-app.MapGet("/", () => Results.Text("dCMS.Order.Api — placeholder (M0 local stack).\n", "text/plain"));
+app.MapOrderHttpRoutes();
+app.MapGet("/", () => Results.Text("dCMS.Order.Api — M5 Order Service (US-18: POST /api/orders).\n", "text/plain"));
 app.Run();

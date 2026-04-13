@@ -36,3 +36,9 @@ src/backend/dCMS.Payment.Api/bin/
 src/backend/dCMS.Payment.Api/obj/
 src/backend/dCMS.Tests/bin/
 src/backend/dCMS.Tests/obj/
+src/backend/dCMS.Order.Core/bin/
+src/backend/dCMS.Order.Core/obj/
+src/backend/dCMS.Order.Infrastructure/bin/
+src/backend/dCMS.Order.Infrastructure/obj/
+src/backend/dCMS.Order.Tests/bin/
+src/backend/dCMS.Order.Tests/obj/
