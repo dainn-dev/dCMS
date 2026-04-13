@@ -209,11 +209,6 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # KeepAlive and internal callbacks use this; Kestrel listens on 8080 in the image (not 5000).
       Umbraco__CMS__WebRouting__UmbracoApplicationUrl: "http://localhost:8080/"
-      # US-13 BFF → Catalog.Api (internal port 8080). Align Auth__JwtSigningKey with catalog-api when Auth:Enabled.
-      DCMS__CatalogProxy__CatalogApiBaseUrl: "http://catalog-api:8080"
-      Auth__JwtSigningKey: "change-me-in-production-use-32-chars-min!!"
-      Auth__Issuer: "dcms"
-      Auth__Audience: "dcms-api"
       ConnectionStrings__umbracoDbDSN: "Server=sqlserver,1433;Database=Umbraco;User Id=sa;Password=Umbraco_Dev_2026!;TrustServerCertificate=True;Encrypt=True"
       ConnectionStrings__umbracoDbDSN_ProviderName: "Microsoft.Data.SqlClient"
     volumes:
@@ -223,8 +218,6 @@ services:
         condition: service_healthy
       umbraco-db-init:
         condition: service_completed_successfully
-      catalog-api:
-        condition: service_healthy
 
   catalog-worker:
     build:

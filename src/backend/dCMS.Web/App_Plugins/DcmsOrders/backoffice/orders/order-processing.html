@@ -1,0 +1,545 @@
+<div id="dcms-op-root" ng-controller="DcmsOrderProcessingController as vm" class="umb-dashboard dcms-order-processing" ng-class="{'dcms-op-root--detail': vm.view === 'detail'}">
+  <style>
+       .umb-dashboard.dcms-order-processing {
+      box-sizing: border-box !important;
+      position: relative !important;
+      float: none !important;
+      width: 100% !important;
+      max-width: none !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow-x: clip;
+      z-index: 1;
+      isolation: isolate;
+    }
+    /* Detail: fill Umbraco content area, scroll inside partial (ribbon ~80–100px) */
+    .umb-dashboard.dcms-order-processing.dcms-op-root--detail {
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 96px);
+      max-height: calc(100dvh - 96px);
+      min-height: 280px;
+    }
+    .dcms-op-root--detail .dcms-op-shell {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding-bottom: 0.5rem;
+    }
+    .dcms-op-shell {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 0.75rem clamp(0.75rem, 2.5vw, 1.75rem) clamp(1.5rem, 6vh, 3.5rem);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    /* Header */
+    .dcms-op-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.85rem;
+    }
+    .dcms-op-header h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #1b264f;
+      margin: 0;
+    }
+    .dcms-op-export-btn {
+      background: #d42054;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.4rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+    }
+    .dcms-op-export-btn:hover { background: #b81a46; }
+    /* Filter card */
+    .dcms-op-filter-card {
+      background: #fff;
+      border: 1px solid #e9e9eb;
+      border-radius: 6px;
+      padding: 0.85rem 1.1rem 0.7rem;
+      margin-bottom: 0.85rem;
+    }
+    .dcms-op-filter-meta {
+      font-size: 0.75rem;
+      color: #6e6e6e;
+      margin-bottom: 0.6rem;
+      font-weight: 500;
+    }
+    .dcms-op-filter-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.55rem 0.9rem;
+    }
+    @media (max-width: 1000px) {
+      .dcms-op-filter-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .dcms-op-fg {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+    .dcms-op-fg label {
+      font-size: 0.7rem;
+      color: #6e6e6e;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .dcms-op-fg input,
+    .dcms-op-fg select {
+      height: 1.85rem;
+      border: 1px solid #d8d7d9;
+      border-radius: 3px;
+      padding: 0 0.5rem;
+      font-size: 0.78rem;
+      color: #1b264f;
+      background: #fff;
+      box-sizing: border-box;
+      width: 100%;
+      min-width: 0;
+    }
+    .dcms-op-fg input:focus,
+    .dcms-op-fg select:focus {
+      outline: none;
+      border-color: #d42054;
+    }
+    .dcms-op-range {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .dcms-op-range input { flex: 1; min-width: 0; }
+    .dcms-op-range-sep { font-size: 0.72rem; color: #b0b0b8; flex-shrink: 0; }
+    .dcms-op-store-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+    }
+    .dcms-op-store-nav input { flex: 1; min-width: 0; }
+    .dcms-op-nav-btn {
+      border: 1px solid #d8d7d9;
+      background: #f7f7f8;
+      border-radius: 3px;
+      width: 1.6rem;
+      height: 1.85rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #1b264f;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      line-height: 1;
+    }
+    .dcms-op-nav-btn:hover { background: #ececee; }
+    .dcms-op-filter-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.45rem;
+      margin-top: 0.7rem;
+    }
+    .dcms-op-btn-save {
+      border: 1px solid #d8d7d9;
+      background: #fff;
+      border-radius: 3px;
+      padding: 0.35rem 1rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      color: #1b264f;
+    }
+    .dcms-op-btn-save:hover { background: #f7f7f8; }
+    .dcms-op-btn-search {
+      background: #d42054;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      padding: 0.35rem 1.1rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .dcms-op-btn-search:hover { background: #b81a46; }
+    /* Table section */
+    .dcms-op-table-section {
+      background: #fff;
+      border: 1px solid #e9e9eb;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .dcms-op-table-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.55rem 0.9rem;
+      border-bottom: 1px solid #f0f0f2;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .dcms-op-table-info {
+      font-size: 0.75rem;
+      color: #6e6e6e;
+    }
+    .dcms-op-pagination {
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+    }
+    .dcms-op-page-btn {
+      border: 1px solid #d8d7d9;
+      background: #fff;
+      border-radius: 3px;
+      min-width: 1.65rem;
+      height: 1.65rem;
+      padding: 0 0.3rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+      color: #1b264f;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .dcms-op-page-btn.dcms-page-active {
+      background: #d42054;
+      color: #fff;
+      border-color: #d42054;
+    }
+    .dcms-op-page-btn[disabled] {
+      opacity: 0.35;
+      cursor: default;
+      pointer-events: none;
+    }
+    /* Table */
+    .dcms-op-table-scroll {
+      overflow-x: auto;
+      width: 100%;
+    }
+    .dcms-op-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+    .dcms-op-table thead tr {
+      background: #d42054;
+    }
+    .dcms-op-table th {
+      padding: 0.45rem 0.65rem;
+      text-align: center;
+      font-weight: 600;
+      color: #fff;
+      border-bottom: none;
+      user-select: none;
+    }
+    .dcms-op-table td {
+      padding: 0.4rem 0.65rem;
+      color: #1b264f;
+      border-bottom: 1px solid #f0f0f2;
+      text-align: center;
+    }
+    .dcms-op-table tbody tr:nth-child(odd)  { background: #fafafa; }
+    .dcms-op-table tbody tr:nth-child(even) { background: #fff; }
+    .dcms-op-table tbody tr:hover           { background: #f0f4ff; }
+    .dcms-op-action-link {
+      color: #d42054;
+      cursor: pointer;
+      font-weight: 500;
+      text-decoration: none;
+      font-size: 0.73rem;
+    }
+    .dcms-op-action-link:hover { text-decoration: underline; }
+    button.dcms-op-action-link {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+      text-align: inherit;
+    }
+    .dcms-op-badge {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 3px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .dcms-op-badge-open      { background: #e8f5e9; color: #2e7d32; }
+    .dcms-op-badge-processing { background: #fff3e0; color: #e65100; }
+    .dcms-op-badge-fulfilled  { background: #e3f2fd; color: #1565c0; }
+    .dcms-op-badge-shipped    { background: #e8f5e9; color: #2e7d32; }
+    .dcms-op-badge-pending    { background: #fff8e1; color: #f57f17; }
+    .dcms-op-badge-delivered  { background: #e8f5e9; color: #2e7d32; }
+    .dcms-op-badge-cancelled  { background: #fce4ec; color: #c62828; }
+    .dcms-op-tag {
+      display: inline-block;
+      background: #f0f0f2;
+      color: #5a5a6e;
+      border-radius: 2px;
+      padding: 0.05rem 0.35rem;
+      font-size: 0.67rem;
+      font-weight: 500;
+    }
+    .dcms-op-empty-row td {
+      text-align: center;
+      color: #b0b0b8;
+      padding: 2rem;
+      font-size: 0.82rem;
+    }
+    /* Order detail: flex chain from root → shell → page → scroll body */
+    .dcms-order-detail-page {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1 1 0;
+    }
+    .dcms-op-root--detail .dcms-order-detail-page {
+      max-height: none;
+    }
+    .dcms-order-detail-page .dcms-op-detail-bar {
+      flex-shrink: 0;
+    }
+    .dcms-order-detail-body {
+      flex: 1 1 0%;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
+      padding-right: 0.35rem;
+      scrollbar-gutter: stable;
+    }
+  </style>
+
+  <div class="dcms-op-shell">
+
+    <!-- ══ LIST VIEW ════════════════════════════════════════════ -->
+    <div ng-if="vm.view === 'list'">
+
+    <!-- ── Page header ──────────────────────────────────────────── -->
+    <div class="dcms-op-header">
+      <h3>Order Processing</h3>
+      <button class="dcms-op-export-btn" type="button" ng-click="vm.export()">+ Export</button>
+    </div>
+
+    <!-- ── Filter card ──────────────────────────────────────────── -->
+    <div class="dcms-op-filter-card">
+      <div class="dcms-op-filter-meta">{{vm.activeFilterCount}} Filters</div>
+      <div class="dcms-op-filter-grid">
+
+        <!-- Row 1 -->
+        <div class="dcms-op-fg">
+          <label>DO Number</label>
+          <input type="text" ng-model="vm.filters.doNumber" placeholder="Enter DO number" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Order Number</label>
+          <input type="text" ng-model="vm.filters.orderNumber" placeholder="Enter order number" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Order Type</label>
+          <select ng-model="vm.filters.orderType">
+            <option value="">Please select</option>
+            <option value="delivery">Delivery</option>
+            <option value="collection">Collection</option>
+            <option value="express">Express</option>
+          </select>
+        </div>
+        <div class="dcms-op-fg">
+          <label>Delivery Option</label>
+          <input type="text" ng-model="vm.filters.deliveryOption" placeholder="Enter delivery option" />
+        </div>
+
+        <!-- Row 2 -->
+        <div class="dcms-op-fg">
+          <label>Order Date</label>
+          <div class="dcms-op-range">
+            <input type="date" ng-model="vm.filters.orderDateFrom" />
+            <span class="dcms-op-range-sep">–</span>
+            <input type="date" ng-model="vm.filters.orderDateTo" />
+          </div>
+        </div>
+        <div class="dcms-op-fg">
+          <label>Delivery Date</label>
+          <div class="dcms-op-range">
+            <input type="date" ng-model="vm.filters.deliveryDateFrom" placeholder="Select date or date range" />
+            <span class="dcms-op-range-sep">–</span>
+            <input type="date" ng-model="vm.filters.deliveryDateTo" />
+          </div>
+        </div>
+        <div class="dcms-op-fg">
+          <label>Fulfilled On</label>
+          <div class="dcms-op-range">
+            <input type="date" ng-model="vm.filters.fulfilledOnFrom" placeholder="Select date or date range" />
+            <span class="dcms-op-range-sep">–</span>
+            <input type="date" ng-model="vm.filters.fulfilledOnTo" />
+          </div>
+        </div>
+        <div class="dcms-op-fg">
+          <label>Shipping Status</label>
+          <select ng-model="vm.filters.shippingStatus">
+            <option value="">Please select</option>
+            <option value="Open">Open</option>
+            <option value="Pending">Pending</option>
+            <option value="Shipped">Shipped</option>
+            <option value="Delivered">Delivered</option>
+            <option value="Failed">Failed</option>
+          </select>
+        </div>
+
+        <!-- Row 3 -->
+        <div class="dcms-op-fg">
+          <label>Customer Name</label>
+          <input type="text" ng-model="vm.filters.customerName" placeholder="Enter customer name" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Customer Contact No</label>
+          <input type="text" ng-model="vm.filters.contactNo" placeholder="Enter customer contact no" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Customer Email</label>
+          <input type="text" ng-model="vm.filters.email" placeholder="Enter customer email" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Processed By</label>
+          <input type="text" ng-model="vm.filters.processedBy" placeholder="Enter processor name" />
+        </div>
+
+        <!-- Row 4 -->
+        <div class="dcms-op-fg">
+          <label>Payment Method</label>
+          <select ng-model="vm.filters.paymentMethod">
+            <option value="">Please select</option>
+            <option value="NETS">NETS</option>
+            <option value="Credit Card">Credit Card</option>
+            <option value="PayNow">PayNow</option>
+            <option value="GrabPay">GrabPay</option>
+            <option value="Apple Pay">Apple Pay</option>
+            <option value="Corporate Account">Corporate Account</option>
+          </select>
+        </div>
+        <div class="dcms-op-fg">
+          <label>Store Name</label>
+          <input type="text" ng-model="vm.filters.storeName" placeholder="Enter store name" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Affiliate ID</label>
+          <input type="text" ng-model="vm.filters.affiliateId" placeholder="Enter affiliate ID" />
+        </div>
+        <div class="dcms-op-fg">
+          <label>Tags</label>
+          <input type="text" ng-model="vm.filters.tags" placeholder="Enter tags" />
+        </div>
+
+      </div>
+      <div class="dcms-op-filter-actions">
+        <button class="dcms-op-btn-save" type="button" ng-click="vm.saveFilters()">Save</button>
+        <button class="dcms-op-btn-search" type="button" ng-click="vm.search()">Search</button>
+      </div>
+    </div>
+
+    <!-- ── Table section ────────────────────────────────────────── -->
+    <div class="dcms-op-table-section">
+      <div class="dcms-op-table-meta">
+        <span class="dcms-op-table-info">
+          Page {{vm.currentPage}} of {{vm.totalPages}} pages, from page {{vm.fromRecord}}, Total {{vm.filteredOrders.length}} records found.
+        </span>
+        <div class="dcms-op-pagination">
+          <button class="dcms-op-page-btn" type="button"
+                  ng-disabled="vm.currentPage === 1"
+                  ng-click="vm.goPage(vm.currentPage - 1)">&#8249;</button>
+          <button class="dcms-op-page-btn" type="button"
+                  ng-repeat="p in vm.pageRange()"
+                  ng-class="{ 'dcms-page-active': p === vm.currentPage }"
+                  ng-click="vm.goPage(p)">{{p}}</button>
+          <button class="dcms-op-page-btn" type="button"
+                  ng-disabled="vm.currentPage === vm.totalPages"
+                  ng-click="vm.goPage(vm.currentPage + 1)">&#8250;</button>
+        </div>
+      </div>
+
+      <div class="dcms-op-table-scroll">
+        <table class="dcms-op-table">
+          <thead>
+            <tr>
+              <th>DO Number</th>
+              <th>Order Number</th>
+              <th>Order Date</th>
+              <th>Type</th>
+              <th>Customer Name</th>
+              <th>Customer Contact No</th>
+              <th>Customer Email</th>
+              <th>Delivery Date</th>
+              <th>Delivery Option</th>
+              <th>Fulfilled On</th>
+              <th>Shipping Status</th>
+              <th>Processed By</th>
+              <th>Tags</th>
+              <th>Store</th>
+              <th>Payment Method</th>
+              <th>Affiliate ID</th>
+              <th>Identity No.</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr ng-if="vm.pagedOrders.length === 0" class="dcms-op-empty-row">
+              <td colspan="18">No records found.</td>
+            </tr>
+            <tr ng-repeat="o in vm.pagedOrders">
+              <td>{{o.spNumber}}</td>
+              <td>{{o.orderNumber}}</td>
+              <td>{{o.orderDate}}</td>
+              <td>{{o.type}}</td>
+              <td>{{o.customerName}}</td>
+              <td>{{o.contactNo}}</td>
+              <td>{{o.email}}</td>
+              <td>{{o.deliveryDate}}</td>
+              <td>{{o.deliveryOption}}</td>
+              <td><span class="dcms-op-badge dcms-op-badge-{{o.orderStatus}}">{{o.fulfilledBy}}</span></td>
+              <td><span class="dcms-op-badge dcms-op-badge-{{o.shippingStatus | lowercase}}">{{o.shippingStatus}}</span></td>
+              <td>{{o.processedBy}}</td>
+              <td><span ng-if="o.tags" class="dcms-op-tag">{{o.tags}}</span></td>
+              <td>{{o.store}}</td>
+              <td>{{o.paymentMethod}}</td>
+              <td>{{o.affiliateId}}</td>
+              <td>{{o.identityNo}}</td>
+              <td><button type="button" class="dcms-op-action-link" ng-click="vm.viewOrder(o)">View</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    </div><!-- /.list view -->
+
+    <!-- ══ DETAIL VIEW ══════════════════════════════════════════ -->
+    <div ng-if="vm.view === 'detail'" class="dcms-order-detail-page">
+
+      <!-- Sub-header -->
+      <div class="dcms-op-detail-bar">
+        <h3>Order Processing</h3>
+        <div class="dcms-op-detail-bar-actions">
+          <button class="dcms-op-back-link" type="button" ng-click="vm.backToList()">&#8592; Back</button>
+          <button class="dcms-op-submit-btn" type="button">Submit</button>
+        </div>
+      </div>
+
+      <div class="dcms-order-detail-body" ng-if="vm.orderDetailPartialUrl" ng-include="vm.orderDetailPartialUrl"></div>
+
+    </div><!-- /.detail view -->
+
+  </div>
+</div>

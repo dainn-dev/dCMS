@@ -170,7 +170,7 @@ public static class ProductImageRoutes
                 headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Content-Type"] = contentType },
                 uploadMode = "catalog-put",
                 note =
-                    "Upload bytes with PUT to this path on Catalog.Api (Bearer JWT). Umbraco BFF supports base64 via CatalogBackofficeProxy Forward.binaryBodyBase64."
+                    "Upload bytes with PUT to this path on Catalog.Api (Bearer JWT)."
             });
         }
         catch (PostgresException ex) when (ex.SqlState == "23505")

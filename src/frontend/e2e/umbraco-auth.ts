@@ -12,8 +12,3 @@ export async function umbracoLogin(page: Page, username: string, password: strin
   await page.locator('button[type="submit"]').click();
   await page.locator('input[name="username"]').waitFor({ state: "detached", timeout: 120_000 });
 }
-
-export async function gotoProductWizard(page: Page): Promise<void> {
-  await page.goto("/umbraco/#/dCMSCatalog/dCMSProductWizard", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("dcms-pw-wizard-root").waitFor({ state: "visible", timeout: 120_000 });
-}

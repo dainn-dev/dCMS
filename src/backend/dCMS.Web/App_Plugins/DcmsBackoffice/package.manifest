@@ -1,0 +1,9 @@
+{
+  "name": "dCMS Backoffice",
+  "version": "1.0.0",
+  "allowPackageTelemetry": false,
+  "javascript": [
+    "/App_Plugins/DcmsBackoffice/lib/apexcharts.min.js",
+    "/App_Plugins/DcmsBackoffice/dashboards/sales-overview.controller.js"
+  ]
+}
