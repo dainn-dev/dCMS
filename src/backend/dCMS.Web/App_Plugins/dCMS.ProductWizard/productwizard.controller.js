@@ -122,8 +122,8 @@ angular.module("umbraco").controller("Umbraco.dCMS.ProductWizardController", [
         } catch (xBell) {}
 
         var slugTimer = null;
-        var baseApi = "/umbraco/backoffice/api/DcmsCatalog/CatalogBackofficeProxy";
-        var baseInventoryApi = "/umbraco/backoffice/api/DcmsCatalog/InventoryBackofficeProxy";
+        var baseApi = "/umbraco/backoffice/DcmsCatalog/CatalogBackofficeProxy";
+        var baseInventoryApi = "/umbraco/backoffice/DcmsCatalog/InventoryBackofficeProxy";
 
         function slugify(s) {
             if (!s) return "";

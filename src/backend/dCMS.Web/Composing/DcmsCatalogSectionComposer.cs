@@ -11,6 +11,6 @@ public sealed class DcmsCatalogSectionComposer : IComposer
     public void Compose(IUmbracoBuilder builder)
     {
         builder.Sections().InsertAfter<ContentSection, DcmsCatalogSection>();
-        builder.AddNotificationHandler<UmbracoApplicationStartedNotification, GrantDcmsCatalogSectionNotificationHandler>();
+        builder.AddNotificationHandler<UmbracoApplicationStartingNotification, GrantDcmsCatalogSectionNotificationHandler>();
     }
 }

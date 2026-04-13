@@ -9,6 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
+    <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
     <ProjectReference Include="..\dCMS.Order.Infrastructure\dCMS.Order.Infrastructure.csproj" />
   </ItemGroup>
 

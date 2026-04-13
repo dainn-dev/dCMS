@@ -1,37 +1,56 @@
-// Payment API — health + internal create-intent stub for local stack (DAI-301 / DAI-315).
+// Payment API — US-23 service host (DAI-338+).
+
+using dCMS.Infrastructure.Monitoring;
+using dCMS.Payment.Api.Routes;
+using dCMS.Payment.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHealthChecks();
+builder.Services.AddPaymentInfrastructure(builder.Configuration);
+builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "payment");
 
 var app = builder.Build();
 app.MapHealthChecks("/health");
-app.MapGet("/", () => Results.Text("dCMS.Payment.Api — dev stub (create-intent for Order service).\n", "text/plain"));
+app.MapDcmsPrometheusMetrics();
+app.MapPaymentGatewayWebhookRoutes();
+app.MapGet("/", () => Results.Text("dCMS.Payment.Api — create-intent + PaymentTransactions + webhooks (DAI-339 / DAI-341).\n", "text/plain"));
 
 app.MapPost(
     "/internal/payment/create-intent",
-    (CreateIntentStubRequest req) =>
+    async (CreateIntentRequest req, CreatePaymentIntentService svc, CancellationToken ct) =>
     {
-        if (string.IsNullOrWhiteSpace(req.OrderId))
+        var method = string.IsNullOrWhiteSpace(req.PaymentMethod) ? "card" : req.PaymentMethod.Trim();
+        var outcome = await svc.ExecuteAsync(
+            req.OrderId,
+            req.TenantId,
+            req.StoreId,
+            req.CustomerId,
+            req.Amount,
+            req.Currency,
+            method,
+            ct).ConfigureAwait(false);
+
+        if (outcome is CreatePaymentIntentOutcome.Success ok)
         {
             return Results.Json(
-                new
-                {
-                    data = (object?)null,
-                    error = new { code = "INVALID_ORDER", message = "orderId is required." },
-                });
+                new { data = new { paymentIntentId = ok.PaymentIntentId, paymentUrl = ok.PaymentUrl }, error = (object?)null });
         }
 
-        var intentId = $"pi_stub_{req.OrderId}";
-        var url = $"https://checkout.local/pay/{Uri.EscapeDataString(req.OrderId)}";
-        return Results.Json(new { data = new { paymentIntentId = intentId, paymentUrl = url }, error = (object?)null });
+        if (outcome is CreatePaymentIntentOutcome.ValidationError err)
+        {
+            return Results.Json(new { data = (object?)null, error = new { code = err.Code, message = err.Message } });
+        }
+
+        throw new InvalidOperationException($"Unexpected outcome: {outcome.GetType().Name}");
     });
 
 app.Run();
 
-internal sealed record CreateIntentStubRequest(
+internal sealed record CreateIntentRequest(
     string OrderId,
     string TenantId,
     string StoreId,
     string CustomerId,
     decimal Amount,
-    string Currency);
+    string Currency,
+    string? PaymentMethod);

@@ -10,7 +10,16 @@ public sealed class SqlOutboxRelay(string connectionString)
 {
     private readonly string _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
 
-    public async Task ProcessPendingAsync(Func<object, Task> publishAsync, CancellationToken cancellationToken = default)
+    public Task ProcessPendingAsync(Func<object, Task> publishAsync, CancellationToken cancellationToken = default) =>
+        ProcessPendingAsync((_, m) => publishAsync(m), cancellationToken);
+
+    /// <summary>
+    /// <paramref name="publishAsync"/> receives the outbox row id so transports can set a stable MassTransit message id
+    /// (at-least-once relay + idempotent consumers — US-F5 / DAI-365).
+    /// </summary>
+    public async Task ProcessPendingAsync(
+        Func<long, object, Task> publishAsync,
+        CancellationToken cancellationToken = default)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -36,7 +45,7 @@ public sealed class SqlOutboxRelay(string connectionString)
 
             try
             {
-                await publishAsync(message).ConfigureAwait(false);
+                await publishAsync(row.Id, message).ConfigureAwait(false);
                 await MarkProcessedAsync(row.Id, null, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)

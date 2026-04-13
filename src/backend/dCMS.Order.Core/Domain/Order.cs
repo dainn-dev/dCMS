@@ -51,6 +51,7 @@ public sealed class Order
         string storeId,
         string customerId,
         IReadOnlyList<OrderItem> items,
+        IReadOnlyList<OrderPlacedLine> placementLines,
         ShippingAddress shippingAddress,
         DateTimeOffset occurredAt)
     {
@@ -58,6 +59,8 @@ public sealed class Order
             throw new ArgumentException("Order id is required.", nameof(orderId));
         if (items is null || items.Count == 0)
             throw new ArgumentException("At least one line item is required.", nameof(items));
+        if (placementLines is null || placementLines.Count == 0)
+            throw new ArgumentException("At least one placement line is required for saga messaging.", nameof(placementLines));
 
         var total = Money.Sum(items.Select(i => i.LineTotal()));
         var order = new Order(
@@ -78,6 +81,7 @@ public sealed class Order
             order.CustomerId,
             order.Total.Amount,
             order.Total.Currency,
+            placementLines,
             occurredAt));
 
         return order;
@@ -118,21 +122,40 @@ public sealed class Order
         _domainEvents.Add(new OrderConfirmed(Id, occurredAt));
     }
 
-    /// <summary>Fulfillment completed — moves from <see cref="OrderStatus.Confirmed"/> to <see cref="OrderStatus.Shipped"/>.</summary>
-    public void MarkShipped(DateTimeOffset occurredAt)
+    /// <summary>Warehouse starts fulfillment — <see cref="OrderStatus.Confirmed"/> to <see cref="OrderStatus.Processing"/>.</summary>
+    public void StartProcessing(DateTimeOffset occurredAt)
     {
         if (Status != OrderStatus.Confirmed)
+            throw new InvalidOperationException($"Cannot start processing in status {Status}.");
+
+        Status = OrderStatus.Processing;
+    }
+
+    /// <summary>Fulfillment completed — moves from <see cref="OrderStatus.Processing"/> to <see cref="OrderStatus.Shipped"/>.</summary>
+    public void MarkShipped(DateTimeOffset occurredAt)
+    {
+        if (Status != OrderStatus.Processing)
             throw new InvalidOperationException($"Cannot ship order in status {Status}.");
 
         Status = OrderStatus.Shipped;
         _domainEvents.Add(new OrderShipped(Id, occurredAt));
     }
 
-    /// <summary>Cancels the order unless it is already shipped or cancelled.</summary>
+    /// <summary>Delivery completed — <see cref="OrderStatus.Shipped"/> to <see cref="OrderStatus.Delivered"/>.</summary>
+    public void MarkDelivered(DateTimeOffset occurredAt)
+    {
+        if (Status != OrderStatus.Shipped)
+            throw new InvalidOperationException($"Cannot mark delivered in status {Status}.");
+
+        Status = OrderStatus.Delivered;
+        _domainEvents.Add(new OrderDelivered(Id, occurredAt));
+    }
+
+    /// <summary>Cancels the order unless it is already shipped, delivered, or cancelled.</summary>
     public void Cancel(string reason, DateTimeOffset occurredAt)
     {
-        if (Status == OrderStatus.Shipped)
-            throw new InvalidOperationException("Cannot cancel a shipped order.");
+        if (Status is OrderStatus.Shipped or OrderStatus.Delivered)
+            throw new InvalidOperationException("Cannot cancel a shipped or delivered order.");
 
         if (Status == OrderStatus.Cancelled)
             throw new InvalidOperationException("Order is already cancelled.");

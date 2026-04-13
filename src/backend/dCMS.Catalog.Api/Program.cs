@@ -16,6 +16,8 @@ using dCMS.Core.Persistence;
 using dCMS.Core.Search;
 using dCMS.Core.Services;
 using dCMS.Core.Pricing;
+using dCMS.Infrastructure;
+using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Caching;
 using dCMS.Infrastructure.Catalog;
@@ -123,8 +125,22 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 });
 
 builder.Services.Configure<IdempotencyOptions>(o => o.PathSubstrings = ["/products"]);
+builder.Services.AddHostedService<CatalogDbMigrationHostedService>();
+builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "catalog");
 
 var app = builder.Build();
+
+app.UseExceptionHandler(errApp => errApp.Run(async context =>
+{
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsJsonAsync(new
+    {
+        data = (object?)null,
+        meta = (object?)null,
+        error = new { code = "internal_error", message = "An internal error occurred." }
+    });
+}));
 
 app.UseCorrelationId();
 app.UseForwardedHeaders();
@@ -147,6 +163,8 @@ app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, met
     .WithTags("health")
     .AllowAnonymous()
     .DisableRateLimiting();
+
+app.MapDcmsPrometheusMetrics();
 
 app.Run();
 

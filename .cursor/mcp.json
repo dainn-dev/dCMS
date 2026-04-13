@@ -1,16 +1,3 @@
 {
-  "mcpServers": {
-    "linear": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://mcp.linear.app/mcp",
-        "--header",
-        "Authorization:${AUTH_HEADER}"
-      ],
-      "env": {},
-      "envFile": "${workspaceFolder}/.env.local"
-    }
-  }
+  "mcpServers": {}
 }

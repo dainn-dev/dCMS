@@ -1,13 +1,21 @@
 using dCMS.Order.Core.Integration;
 using dCMS.Order.Core.Ordering;
+using dCMS.Order.Infrastructure.Caching;
 using dCMS.Order.Infrastructure.Integration;
+using dCMS.Order.Infrastructure.Messaging;
+using dCMS.Order.Infrastructure.Operations;
 using dCMS.Order.Infrastructure.Persistence;
+using dCMS.Order.Infrastructure.Sagas;
 using dCMS.Order.Infrastructure.Services;
+using dCMS.Order.Infrastructure.Shipping;
+using dCMS.Infrastructure.Messaging;
 using MassTransit;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using Polly.Extensions.Http;
+using StackExchange.Redis;
 
 namespace dCMS.Order.Infrastructure;
 
@@ -19,20 +27,71 @@ public static class OrderServiceCollectionExtensions
         services.AddPaymentHttpClient(configuration);
         services.AddHostedService<OrderDbMigrationHostedService>();
         services.AddSingleton<OrderQueryStore>();
+        services.AddSingleton<ShipmentQueryStore>();
+        services.AddSingleton<ShipmentPollingStore>();
+        services.AddSingleton<ICarrierStatusMapper, ConfigCarrierStatusMapper>();
+        services.AddSingleton<ShipmentWebhookProcessor>();
+        services.AddHttpClient(nameof(HttpCarrierTrackingClient))
+            .AddTransientHttpErrorPolicy(policy =>
+                policy.WaitAndRetryAsync(2, _ => TimeSpan.FromMilliseconds(200)));
+        services.AddSingleton<ICarrierTrackingClient, HttpCarrierTrackingClient>();
+        services.AddHostedService<ShipmentPollingWorker>();
+        services.AddSingleton<IOrderDetailCache>(sp =>
+        {
+            var mux = sp.GetService<IConnectionMultiplexer>();
+            return mux is null ? new NullOrderDetailCache() : new RedisOrderDetailCache(mux);
+        });
         services.AddSingleton<IOrderService, OrderService>();
+        services.AddSingleton<IOrderDlqAdminRepository, OrderDlqAdminRepository>();
+        services.AddHttpClient(nameof(OperationAlerts));
+        services.AddSingleton<IOperationAlerts, OperationAlerts>();
+        services.AddHostedService<OrderOutboxRelayHostedService>();
+        services.AddPostgresConsumedMessageIdempotency(configuration, "Order");
+        services.AddProcessedMessagesCleanup(configuration, "Order");
         services.AddMassTransit(bus =>
         {
+            bus.AddDcmsPublishEnvelopeObserver();
+            bus.AddDcmsConsumerEndpointDefaults();
+            bus.AddConsumer<OrderPaymentSettledConsumer>();
+            bus.AddConsumer<OrderCancelledIntegrationConsumer>();
+            bus.AddConsumer<OrderStatusProjectionConsumer>();
+            bus.AddSagaStateMachine<OrderSaga, OrderSagaState>()
+                .EntityFrameworkRepository(r =>
+                {
+                    r.ConcurrencyMode = ConcurrencyMode.Pessimistic;
+                    r.AddDbContext<DbContext, OrderSagaDbContext>((_, builder) =>
+                    {
+                        var cs = configuration.GetConnectionString("Order")
+                            ?? throw new InvalidOperationException(
+                                "ConnectionStrings:Order is required for MassTransit saga persistence (DAI-319).");
+                        builder.UseNpgsql(cs);
+                    });
+                    r.UsePostgres();
+                });
             bus.SetKebabCaseEndpointNameFormatter();
-            bus.UsingRabbitMq((_, cfg) =>
+            bus.UsingRabbitMq((context, cfg) =>
             {
                 var host = configuration["RabbitMq:Host"] ?? "localhost";
                 var user = configuration["RabbitMq:User"] ?? "guest";
                 var pass = configuration["RabbitMq:Pass"] ?? "guest";
-                cfg.Host(host, "/", h =>
+                if (ushort.TryParse(configuration["RabbitMq:Port"], out var port) && port > 0)
                 {
-                    h.Username(user);
-                    h.Password(pass);
-                });
+                    cfg.Host(host, port, "/", h =>
+                    {
+                        h.Username(user);
+                        h.Password(pass);
+                    });
+                }
+                else
+                {
+                    cfg.Host(host, "/", h =>
+                    {
+                        h.Username(user);
+                        h.Password(pass);
+                    });
+                }
+
+                cfg.ConfigureEndpoints(context);
             });
         });
 

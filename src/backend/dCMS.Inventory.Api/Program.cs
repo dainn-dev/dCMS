@@ -6,10 +6,12 @@ using dCMS.Inventory.Api.Middleware;
 using dCMS.Inventory.Api.Stock;
 using dCMS.Inventory.Api.Warehouses;
 using dCMS.Inventory.Infrastructure;
+using dCMS.Infrastructure.Messaging;
 using dCMS.Inventory.Persistence;
 using dCMS.Inventory.Services;
 using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Middleware;
+using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Pricing;
 using dCMS.Infrastructure.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -42,6 +44,8 @@ builder.Services.AddHostedService<AuditLogBackgroundService>();
 builder.Services.AddSingleton<IPriceChangeAlerter, NoopPriceChangeAlerter>();
 builder.Services.Configure<IdempotencyOptions>(o => o.PathSubstrings = ["/stock"]);
 builder.Services.Configure<InternalInventoryOptions>(builder.Configuration.GetSection(InternalInventoryOptions.SectionName));
+builder.Services.AddHostedService<InventoryDbMigrationHostedService>();
+builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Inventory");
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -78,6 +82,18 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 
 var app = builder.Build();
 
+app.UseExceptionHandler(errApp => errApp.Run(async context =>
+{
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsJsonAsync(new
+    {
+        data = (object?)null,
+        meta = (object?)null,
+        error = new { code = "internal_error", message = "An internal error occurred." }
+    });
+}));
+
 app.UseCorrelationId();
 app.UseForwardedHeaders();
 app.UseCors("api");
@@ -95,6 +111,8 @@ app.MapGet("/health", () => Results.Json(new { data = new { status = "ok", servi
     .WithTags("health")
     .AllowAnonymous()
     .DisableRateLimiting();
+
+app.MapDcmsPrometheusMetrics();
 
 app.Run();
 

@@ -1,12 +1,12 @@
 /**
  * DAI-299 — $http responseError for dCMS BFF calls (Umbraco AngularJS).
- * Targets URLs under /umbraco/backoffice/api/Dcms*
+ * Targets URLs under /umbraco/backoffice/DcmsCatalog (PluginController area; no /api/ segment).
  */
 (function () {
     "use strict";
 
     function isDcmsBackofficeRequest(url) {
-        return typeof url === "string" && url.indexOf("/umbraco/backoffice/api/Dcms") === 0;
+        return typeof url === "string" && url.indexOf("/umbraco/backoffice/DcmsCatalog") === 0;
     }
 
     angular.module("umbraco").factory("dcmsHttpErrorInterceptor", [

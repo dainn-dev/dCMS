@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>dCMS.Messaging.Contracts</RootNamespace>
+    <Description>DAI-303 — shared message contracts + envelope primitives (M0).</Description>
+  </PropertyGroup>
+
+</Project>

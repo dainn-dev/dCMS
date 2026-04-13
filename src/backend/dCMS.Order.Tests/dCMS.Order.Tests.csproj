@@ -11,22 +11,33 @@
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="MassTransit.TestFramework" Version="8.3.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
+    <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="Npgsql" Version="8.0.6" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="3.10.0" />
+    <PackageReference Include="Testcontainers.Redis" Version="3.10.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.2.1" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
+    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Order.Api\dCMS.Order.Api.csproj" />
     <ProjectReference Include="..\dCMS.Order.Core\dCMS.Order.Core.csproj" />
     <ProjectReference Include="..\dCMS.Order.Infrastructure\dCMS.Order.Infrastructure.csproj" />
+    <ProjectReference Include="..\dCMS.Payment.Infrastructure\dCMS.Payment.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

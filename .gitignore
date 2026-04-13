@@ -42,3 +42,11 @@ src/backend/dCMS.Order.Infrastructure/bin/
 src/backend/dCMS.Order.Infrastructure/obj/
 src/backend/dCMS.Order.Tests/bin/
 src/backend/dCMS.Order.Tests/obj/
+src/backend/dCMS.Payment.Core/bin/
+src/backend/dCMS.Payment.Core/obj/
+src/backend/dCMS.Payment.Infrastructure/bin/
+src/backend/dCMS.Payment.Infrastructure/obj/
+src/backend/dCMS.Payment.Tests/bin/
+src/backend/dCMS.Payment.Tests/obj/
+src/backend/dCMS.Messaging.Contracts/obj/
+src/backend/dCMS.Messaging.Contracts/bin/

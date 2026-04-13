@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>dCMS.Payment.Infrastructure</RootNamespace>
+    <Description>US-23 Payment persistence, migrations, messaging (DAI-338+).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="dbup-postgresql" Version="5.0.40" />
+    <PackageReference Include="MassTransit" Version="8.3.0" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\dCMS.Payment.Core\dCMS.Payment.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Migrations\*.sql" />
+  </ItemGroup>
+
+</Project>

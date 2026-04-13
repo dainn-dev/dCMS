@@ -5,7 +5,7 @@
 (function () {
     "use strict";
 
-    var forwardIdentityUrl = "/umbraco/backoffice/api/DcmsCatalog/CatalogBackofficeProxy/ForwardIdentity";
+    var forwardIdentityUrl = "/umbraco/backoffice/DcmsCatalog/CatalogBackofficeProxy/ForwardIdentity";
 
     function parseEnvelope(res) {
         var d = res.data;

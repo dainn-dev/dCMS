@@ -32,7 +32,8 @@ public sealed class HttpPaymentClient : IPaymentClient
             request.StoreId,
             request.CustomerId,
             request.Amount,
-            request.Currency);
+            request.Currency,
+            request.PaymentMethod);
 
         using var response = await _http
             .PostAsJsonAsync("internal/payment/create-intent", body, JsonOptions, cancellationToken)
@@ -112,5 +113,6 @@ public sealed class HttpPaymentClient : IPaymentClient
         string StoreId,
         string CustomerId,
         decimal Amount,
-        string Currency);
+        string Currency,
+        string PaymentMethod);
 }

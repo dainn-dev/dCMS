@@ -2,11 +2,17 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
+COPY src/backend/dCMS.Core/dCMS.Core.csproj dCMS.Core/
+COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/
+COPY src/backend/dCMS.Payment.Core/dCMS.Payment.Core.csproj dCMS.Payment.Core/
+COPY src/backend/dCMS.Payment.Infrastructure/dCMS.Payment.Infrastructure.csproj dCMS.Payment.Infrastructure/
 COPY src/backend/dCMS.Payment.Api/dCMS.Payment.Api.csproj dCMS.Payment.Api/
 RUN dotnet restore dCMS.Payment.Api/dCMS.Payment.Api.csproj
 
-COPY src/backend/dCMS.Payment.Api/ dCMS.Payment.Api/
-RUN dotnet publish dCMS.Payment.Api/dCMS.Payment.Api.csproj -c Release -o /app --no-restore
+COPY src/backend/ ./
+RUN dotnet restore dCMS.Payment.Api/dCMS.Payment.Api.csproj \
+    && dotnet publish dCMS.Payment.Api/dCMS.Payment.Api.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

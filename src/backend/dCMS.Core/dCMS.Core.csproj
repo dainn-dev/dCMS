@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.Messaging.Contracts\dCMS.Messaging.Contracts.csproj" />
+  </ItemGroup>
+
 </Project>

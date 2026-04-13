@@ -13,6 +13,9 @@ public sealed class OrderAggregateTests
     private static OrderItem Line(string id = "line-1", int qty = 2, decimal unit = 10m) =>
         new(id, "prod-1", "var-1", qty, new Money(unit, "USD"), "Widget", "{\"sku\":\"W-1\"}");
 
+    private static IReadOnlyList<OrderPlacedLine> PlaceLines(int qty = 2) =>
+        [new OrderPlacedLine("var-1", "wh-1", qty)];
+
     [Fact]
     public void Create_raises_OrderPlaced_with_totals()
     {
@@ -22,6 +25,7 @@ public sealed class OrderAggregateTests
             "store-1",
             "cust-1",
             [Line()],
+            PlaceLines(),
             Address(),
             T0);
 
@@ -34,13 +38,17 @@ public sealed class OrderAggregateTests
         Assert.Equal("cust-1", placed.CustomerId);
         Assert.Equal(20m, placed.TotalAmount);
         Assert.Equal("USD", placed.Currency);
+        Assert.Single(placed.Lines);
+        Assert.Equal("var-1", placed.Lines[0].VariantId);
+        Assert.Equal("wh-1", placed.Lines[0].WarehouseId);
+        Assert.Equal(2, placed.Lines[0].Quantity);
         Assert.Equal(T0, placed.OccurredAt);
     }
 
     [Fact]
     public void Cancel_from_payment_pending_raises_OrderCancelled()
     {
-        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], Address(), T0);
+        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], PlaceLines(), Address(), T0);
         order.ClearDomainEvents();
 
         order.Cancel("customer changed mind", T0.AddMinutes(1));
@@ -55,7 +63,7 @@ public sealed class OrderAggregateTests
     [Fact]
     public void AssignPaymentIntent_sets_id_when_payment_pending()
     {
-        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], Address(), T0);
+        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], PlaceLines(), Address(), T0);
         order.ClearDomainEvents();
 
         order.AssignPaymentIntent("pi_123");
@@ -67,7 +75,7 @@ public sealed class OrderAggregateTests
     [Fact]
     public void AssignPaymentIntent_twice_throws()
     {
-        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], Address(), T0);
+        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], PlaceLines(), Address(), T0);
         order.AssignPaymentIntent("pi_1");
 
         Assert.Throws<InvalidOperationException>(() => order.AssignPaymentIntent("pi_2"));
@@ -76,8 +84,9 @@ public sealed class OrderAggregateTests
     [Fact]
     public void Cannot_cancel_shipped_order()
     {
-        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], Address(), T0);
+        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], PlaceLines(), Address(), T0);
         order.Confirm(T0.AddMinutes(1));
+        order.StartProcessing(T0.AddMinutes(1).AddSeconds(30));
         order.MarkShipped(T0.AddMinutes(2));
         order.ClearDomainEvents();
 

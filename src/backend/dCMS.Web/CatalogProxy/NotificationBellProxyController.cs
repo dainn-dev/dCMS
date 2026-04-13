@@ -96,7 +96,7 @@ public sealed class NotificationBellProxyController : UmbracoAuthorizedJsonContr
         {
             StatusCode = (int)response.StatusCode,
             Content = body,
-            ContentType = "application/json"
+            ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json"
         };
     }
 

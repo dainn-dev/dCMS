@@ -48,5 +48,6 @@ public sealed class OrderMigrationsIntegrationTests : IAsyncLifetime
         AssertTableExists(conn, "Orders");
         AssertTableExists(conn, "OrderItems");
         AssertTableExists(conn, "OrderSagaState");
+        AssertTableExists(conn, "ProcessedMessages");
     }
 }

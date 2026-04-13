@@ -8,12 +8,12 @@ From **repository root**, build and start the services that exist in this repo t
 
 ```bash
 docker compose -f infra/docker-compose.yml build
-docker compose -f infra/docker-compose.yml up -d postgres rabbitmq redis elasticsearch catalog-api inventory-api order-api payment-api catalog-worker umbraco-web
+docker compose -f infra/docker-compose.yml up -d postgres sqlserver rabbitmq redis elasticsearch catalog-api inventory-api order-api payment-api catalog-worker umbraco-web
 ```
 
-**Included:** PostgreSQL (**four** databases: `dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`), RabbitMQ (AMQP + management UI), Redis, Elasticsearch, **Catalog.Api**, **Inventory.Api**, **Order.Api** (M5: `dCMS.Order.Api` + DbUp migrations in `dCMS.Order.Infrastructure` on startup; MassTransit/RabbitMQ) and **Payment.Api** (minimal placeholder with `GET /health` until Payment service is implemented), **Catalog.Worker** (RabbitMQ / MassTransit consumers + outbox relays), **Umbraco** (`dCMS.Web`, SQLite in volume `umbraco_sqlite`).
+**Included:** PostgreSQL (**four** databases: `dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`), **SQL Server 2022** (Umbraco CMS database `Umbraco` only; host port **14333**), RabbitMQ (AMQP + management UI), Redis, Elasticsearch, **Catalog.Api**, **Inventory.Api**, **Order.Api** (M5: `dCMS.Order.Api` + DbUp migrations in `dCMS.Order.Infrastructure` on startup; MassTransit/RabbitMQ) and **Payment.Api** (minimal placeholder with `GET /health` until Payment service is implemented), **Catalog.Worker** (RabbitMQ / MassTransit consumers + outbox relays), **Umbraco** (`dCMS.Web`, **Microsoft SQL Server** + volume `umbraco_data` for `/app/umbraco/Data`).
 
-**Deferred vs original DAI-301 wording:** **SQL Server** — this stack uses **PostgreSQL** only.
+**Note:** Application APIs use **PostgreSQL** only; **SQL Server** is used **only** for the Umbraco CMS database in Docker Compose.
 
 **Order ↔ Inventory (DAI-314):** Compose sets **`InternalInventory__ApiKey`** on **inventory-api** (enables `POST /internal/inventory/*`) and matching **`Inventory__InternalApiKey`** + **`Inventory__BaseUrl=http://inventory-api:8080/`** on **order-api** for sync stock checks before order creation. **order-api** waits for **inventory-api** to be healthy.
 
@@ -34,35 +34,29 @@ docker compose -f infra/docker-compose.yml up -d postgres rabbitmq redis elastic
 
 Compose **healthchecks** use `curl` against `http://127.0.0.1:8080/health` inside **catalog-api**, **inventory-api**, **order-api**, **payment-api**, and **umbraco-web** containers (runtime images install `curl` in the Dockerfiles). **catalog-worker** is a .NET worker host with **no HTTP port** — use logs / `docker compose ps` for liveness.
 
-### Umbraco first run
+### Umbraco first run (Docker)
 
-SQLite is persisted in Docker volume `umbraco_web`. First visit completes the installer at `/umbraco`. Content Delivery API is enabled (`/umbraco/delivery/api/v2/...`); in Development, `PublicAccess` is on — tighten for production (API key / auth).
+- **Database:** SQL Server (`sqlserver` service). Compose sets `ConnectionStrings:umbracoDbDSN` + `umbracoDbDSN_ProviderName` = `Microsoft.Data.SqlClient`. Init job `umbraco-db-init` creates database **`Umbraco`** if missing (SA password matches compose: `Umbraco_Dev_2026!`).
+- **Host access (optional):** `localhost,14333` with `sa` / same password (SSMS / Azure Data Studio).
+- **Local files:** Volume `umbraco_data` → `/app/umbraco/Data` (NuCache / local state; not the DB).
+- **Installer:** First visit completes setup at `/umbraco`. Content Delivery API is enabled (`/umbraco/delivery/api/v2/...`); in Development, `PublicAccess` is on — tighten for production (API key / auth).
+
+**Local `dotnet run` (no Docker):** `appsettings.json` still defaults to **SQLite** under `umbraco/Data/` unless you override connection strings.
+
+**Upgrading from the old SQLite Compose setup:** remove the obsolete Docker volume if it still exists (name is often `dcms_umbraco_sqlite`): `docker volume rm dcms_umbraco_sqlite` after `docker compose … down`.
 
 ### SQL migrations (Postgres)
 
-After Postgres is healthy, apply migrations (from repo root, with `psql` installed and Postgres on localhost):
+**Migrations run automatically on startup** — `catalog-api`, `inventory-api`, and `order-api` each run DbUp at boot and apply any pending scripts embedded in their assemblies. No manual `psql` steps required after `docker compose up`.
 
-```bash
-export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=dcms PGPASSWORD=Your_password123
+- **Catalog** (`dcms_catalog`): applied by `catalog-api` via `CatalogDbMigrationHostedService`
+- **Inventory** (`dcms_inventory`): applied by `inventory-api` via `InventoryDbMigrationHostedService`
+- **Order** (`dcms_order`): applied by `order-api` via `OrderDbMigrationHostedService`
+- `catalog-worker` waits for both `catalog-api` and `inventory-api` to be healthy before starting, so migrations are guaranteed to be complete when the Worker connects.
 
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/001_CreateCategories.sql
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/011_CreateCatalogVariantAxes.sql
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/003_CreateProducts.sql
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/004_CreateVariants.sql
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/010_AddCombinationCanonical.sql
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/008_CreateDeadLetterEvents.sql
-psql -d dcms_catalog -v ON_ERROR_STOP=1 -f src/backend/dCMS.Infrastructure/Migrations/009_CreateAuditAndNotifications.sql
+**Local `dotnet run` (no Docker):** migrations still run automatically on startup. Ensure the target database exists and the connection string is configured correctly.
 
-psql -d dcms_inventory -v ON_ERROR_STOP=1 -f src/backend/dCMS.Inventory.Infrastructure/Migrations/007_CreateInventory.sql
-psql -d dcms_inventory -v ON_ERROR_STOP=1 -f src/backend/dCMS.Inventory.Infrastructure/Migrations/008_CreateDeadLetterEvents.sql
-
-# Order service (DAI-311) — optional if you do not run Order.Api (DbUp applies the same scripts on startup)
-psql -d dcms_order -v ON_ERROR_STOP=1 -f src/backend/dCMS.Order.Infrastructure/Migrations/001_CreateOrders.sql
-psql -d dcms_order -v ON_ERROR_STOP=1 -f src/backend/dCMS.Order.Infrastructure/Migrations/002_CreateOrderItems.sql
-psql -d dcms_order -v ON_ERROR_STOP=1 -f src/backend/dCMS.Order.Infrastructure/Migrations/003_CreateOrderSagaState.sql
-```
-
-**Inventory.Api audit (US-11):** `ConnectionStrings:Audit` defaults to the Inventory DB. **Docker Compose** sets `ConnectionStrings__Audit` to **catalog** (`dcms_catalog`) so `AuditLogs` use migration `009` already applied there. For local `dotnet run` without that variable, either point `ConnectionStrings:Audit` at `dcms_catalog` or apply `009_CreateAuditAndNotifications.sql` to `dcms_inventory`.
+**Inventory.Api audit (US-11):** `ConnectionStrings:Audit` defaults to the Inventory DB. **Docker Compose** sets `ConnectionStrings__Audit` to **catalog** (`dcms_catalog`) so `AuditLogs` use the catalog schema. For local `dotnet run` without that variable, point `ConnectionStrings:Audit` at `dcms_catalog`.
 
 On first boot, Postgres init scripts create **`dcms_inventory`** (`01-create-inventory-db.sql`) and **`dcms_order`** / **`dcms_payment`** (`02-create-order-payment-dbs.sql`) alongside the default **`dcms_catalog`** database from `POSTGRES_DB`.
 

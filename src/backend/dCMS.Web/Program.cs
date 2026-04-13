@@ -1,11 +1,22 @@
+using System.IO;
 using dCMS.Web.CatalogProxy;
 using dCMS.Web.InventoryProxy;
+using dCMS.Web.SystemHealth;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+// Persist antiforgery / auth cookie keys across Docker recreates (default is /root/.aspnet, ephemeral in containers).
+var dataProtectionKeysPath = Path.Combine(builder.Environment.ContentRootPath, "umbraco", "Data", "DataProtection-Keys");
+Directory.CreateDirectory(dataProtectionKeysPath);
+builder.Services.AddDataProtection()
+    .SetApplicationName("dCMS.Web")
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+
 builder.Services.Configure<CatalogProxyOptions>(builder.Configuration.GetSection(CatalogProxyOptions.SectionName));
 builder.Services.Configure<InventoryProxyOptions>(builder.Configuration.GetSection(InventoryProxyOptions.SectionName));
+builder.Services.Configure<OrderProxyOptions>(builder.Configuration.GetSection(OrderProxyOptions.SectionName));
 builder.Services.AddSingleton<CatalogJwtIssuer>();
 builder.Services.AddHttpClient("dcmsCatalog");
 builder.Services.AddHttpClient("dcmsInventory");

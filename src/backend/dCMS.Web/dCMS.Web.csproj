@@ -6,8 +6,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Umbraco brings Microsoft.Data.SqlClient (SQL Server). Compose overrides umbracoDbDSN at runtime for Docker. -->
+    <!-- 13.13.1 is latest 13.x on nuget.org (Apr 2026); NU1902 has no fixed 13.x yet — suppress only this GHSA, remove when Umbraco ships a patched 13.x. -->
     <PackageReference Include="Umbraco.Cms" Version="13.13.1" />
     <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-54mj-vcvj-q3v5" />
   </ItemGroup>
 
   <ItemGroup>

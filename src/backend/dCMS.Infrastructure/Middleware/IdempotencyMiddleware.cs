@@ -32,9 +32,10 @@ public sealed class IdempotencyMiddleware(RequestDelegate next, IServiceProvider
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                """{"data":null,"meta":null,"error":{"code":"missing_idempotency_key","message":"Idempotency-Key header is required for this request."}}""",
-                context.RequestAborted).ConfigureAwait(false);
+            var missingBody = opt.UseStandardApiEnvelope
+                ? """{"data":null,"meta":null,"error":{"code":"missing_idempotency_key","message":"Idempotency-Key header is required for this request."}}"""
+                : """{"error":{"code":"MISSING_IDEMPOTENCY_KEY","message":"Idempotency-Key header is required."}}""";
+            await context.Response.WriteAsync(missingBody, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -43,9 +44,10 @@ public sealed class IdempotencyMiddleware(RequestDelegate next, IServiceProvider
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                """{"data":null,"meta":null,"error":{"code":"invalid_idempotency_key","message":"Idempotency-Key must be 1–128 characters."}}""",
-                context.RequestAborted).ConfigureAwait(false);
+            var invalidBody = opt.UseStandardApiEnvelope
+                ? """{"data":null,"meta":null,"error":{"code":"invalid_idempotency_key","message":"Idempotency-Key must be 1–128 characters."}}"""
+                : """{"error":{"code":"INVALID_IDEMPOTENCY_KEY","message":"Idempotency-Key must be 1–128 characters."}}""";
+            await context.Response.WriteAsync(invalidBody, context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -78,34 +80,38 @@ public sealed class IdempotencyMiddleware(RequestDelegate next, IServiceProvider
         }
 
         var originalBody = context.Response.Body;
-        await using var buffer = new MemoryStream();
+        using var buffer = new MemoryStream();
         context.Response.Body = buffer;
-
-        await next(context).ConfigureAwait(false);
-
-        var bodyText = Encoding.UTF8.GetString(buffer.ToArray());
-        if (bodyText.Length > MaxCachedBodyChars)
+        try
         {
+            await next(context).ConfigureAwait(false);
+
+            var bodyText = Encoding.UTF8.GetString(buffer.ToArray());
+            if (bodyText.Length > MaxCachedBodyChars)
+            {
+                buffer.Position = 0;
+                await buffer.CopyToAsync(originalBody, context.RequestAborted).ConfigureAwait(false);
+                return;
+            }
+
+            if (context.Response.StatusCode < 500)
+            {
+                var payload = JsonSerializer.Serialize(new
+                {
+                    statusCode = context.Response.StatusCode,
+                    contentType = context.Response.ContentType ?? "application/json",
+                    body = bodyText
+                });
+                await db.StringSetAsync(cacheKey, payload, Ttl).ConfigureAwait(false);
+            }
+
             buffer.Position = 0;
             await buffer.CopyToAsync(originalBody, context.RequestAborted).ConfigureAwait(false);
-            context.Response.Body = originalBody;
-            return;
         }
-
-        if (context.Response.StatusCode < 500)
+        finally
         {
-            var payload = JsonSerializer.Serialize(new
-            {
-                statusCode = context.Response.StatusCode,
-                contentType = context.Response.ContentType ?? "application/json",
-                body = bodyText
-            });
-            await db.StringSetAsync(cacheKey, payload, Ttl).ConfigureAwait(false);
+            context.Response.Body = originalBody;
         }
-
-        buffer.Position = 0;
-        await buffer.CopyToAsync(originalBody, context.RequestAborted).ConfigureAwait(false);
-        context.Response.Body = originalBody;
     }
 
     private static string Sha256Hex(string s)

@@ -1,0 +1,44 @@
+<div ng-controller="dcmsSystemHealthDlq as vm" class="umb-dashboard">
+ <h3>Order outbox DLQ</h3>
+  <p class="muted">US-F4 — messages moved to <code>DeadLetterEvents</code> after outbox retries. SuperAdmin only.</p>
+
+  <div class="flex gap2" style="margin-bottom: 12px; flex-wrap: wrap;">
+    <input type="text" ng-model="vm.eventType" placeholder="Event type filter" class="umb-property-editor" />
+    <label><input type="checkbox" ng-model="vm.includeDiscarded" /> Include discarded</label>
+    <button type="button" class="btn btn-primary" ng-click="vm.load()" ng-disabled="vm.busy">Refresh</button>
+  </div>
+
+  <div ng-if="vm.error" class="alert alert-error">{{ vm.error }}</div>
+
+  <div ng-if="vm.busy">Loading…</div>
+
+  <table class="table" ng-if="!vm.busy && vm.rows.length">
+    <thead>
+      <tr>
+        <th>Id</th>
+        <th>OrderId</th>
+        <th>EventType</th>
+        <th>FailureReason</th>
+        <th>FailedAt</th>
+        <th>RetryCount</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr ng-repeat="r in vm.rows">
+        <td>{{ r.id }}</td>
+        <td>{{ r.orderId }}</td>
+        <td>{{ r.eventType }}</td>
+        <td>{{ r.failureReason }}</td>
+        <td>{{ r.failedAt }}</td>
+        <td>{{ r.retryCount }}</td>
+        <td>
+          <button type="button" class="btn btn-success btn-xs" ng-click="vm.retry(r)" ng-disabled="r.discardedAt || r.reprocessedAt">Retry</button>
+          <button type="button" class="btn btn-danger btn-xs" ng-click="vm.discard(r)" ng-disabled="r.discardedAt">Discard</button>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p ng-if="!vm.busy && !vm.rows.length && !vm.error" class="muted">No DLQ rows.</p>
+</div>

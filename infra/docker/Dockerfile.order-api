@@ -2,13 +2,15 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
 COPY src/backend/dCMS.Order.Core/dCMS.Order.Core.csproj dCMS.Order.Core/
 COPY src/backend/dCMS.Order.Infrastructure/dCMS.Order.Infrastructure.csproj dCMS.Order.Infrastructure/
 COPY src/backend/dCMS.Order.Api/dCMS.Order.Api.csproj dCMS.Order.Api/
 RUN dotnet restore dCMS.Order.Api/dCMS.Order.Api.csproj
 
 COPY src/backend/ ./
-RUN dotnet publish dCMS.Order.Api/dCMS.Order.Api.csproj -c Release -o /app --no-restore
+RUN dotnet restore dCMS.Order.Api/dCMS.Order.Api.csproj \
+    && dotnet publish dCMS.Order.Api/dCMS.Order.Api.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

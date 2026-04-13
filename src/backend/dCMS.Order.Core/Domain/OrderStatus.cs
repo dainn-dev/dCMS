@@ -6,6 +6,14 @@ public enum OrderStatus
     PaymentPending = 0,
 
     Confirmed,
+
+    /// <summary>Fulfillment / packing after payment (US-19 saga <c>Processing</c>).</summary>
+    Processing,
+
     Shipped,
+
+    /// <summary>Carrier proof of delivery (US-19 saga <c>Delivered</c>).</summary>
+    Delivered,
+
     Cancelled,
 }

@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.Json;
 using dCMS.Web.CatalogProxy;
+using Newtonsoft.Json.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -82,8 +82,8 @@ public sealed class InventoryBackofficeProxyController : UmbracoAuthorizedJsonCo
 
         if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsDelete(request.Method))
         {
-            if (request.Body is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } body)
-                msg.Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json");
+            if (request.Body is not null && request.Body.Type != JTokenType.Null && request.Body.Type != JTokenType.Undefined)
+                msg.Content = new StringContent(request.Body.ToString(Newtonsoft.Json.Formatting.None), Encoding.UTF8, "application/json");
         }
 
         var client = _httpClientFactory.CreateClient("dcmsInventory");
@@ -93,7 +93,7 @@ public sealed class InventoryBackofficeProxyController : UmbracoAuthorizedJsonCo
         {
             StatusCode = (int)response.StatusCode,
             Content = responseBody,
-            ContentType = "application/json"
+            ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json"
         };
     }
 
@@ -124,5 +124,5 @@ public sealed class InventoryForwardRequest
     public string Path { get; set; } = "";
     public string? TenantId { get; set; }
     public string? StoreId { get; set; }
-    public JsonElement? Body { get; set; }
+    public JToken? Body { get; set; }
 }

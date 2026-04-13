@@ -1,10 +1,14 @@
 using Dapper;
+using dCMS.Core.Messaging;
+using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using dCMS.Order.Core.Integration;
 using dCMS.Order.Core.Ordering;
 using OrderDomain = dCMS.Order.Core.Domain;
+using dCMS.Order.Infrastructure.Caching;
 using dCMS.Order.Infrastructure.Migrations;
 using dCMS.Order.Infrastructure.Persistence;
 using dCMS.Order.Infrastructure.Services;
@@ -19,6 +23,7 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
 {
     private PostgreSqlContainer? _postgres;
     private IOrderService? _orderService;
+    private readonly Mock<IBus> _busMock = new();
 
     public async Task InitializeAsync()
     {
@@ -40,11 +45,16 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
 
         OrderDatabaseUpgrader.Run(configuration, NullLogger.Instance);
 
+        _busMock
+            .Setup(b => b.Publish(It.IsAny<OrderCustomerCancellationV1>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton<IInventoryClient, NoOpInventoryClient>();
-        services.AddSingleton<IPaymentClient, FakePaymentClient>();
         services.AddSingleton<OrderQueryStore>();
+        services.AddSingleton<IOrderDetailCache, NullOrderDetailCache>();
+        services.AddSingleton(_busMock.Object);
         services.AddSingleton<IOrderService, OrderService>();
         _orderService = services.BuildServiceProvider().GetRequiredService<IOrderService>();
     }
@@ -82,16 +92,15 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
 
         var created = await _orderService!.CreateOrderAsync(cmd);
         Assert.Equal(orderId, created.Order.Id);
-        Assert.NotNull(created.PaymentUrl);
-        Assert.StartsWith("https://pay.test/", created.PaymentUrl, StringComparison.Ordinal);
+        Assert.Null(created.PaymentUrl);
         Assert.Equal(OrderDomain.OrderStatus.PaymentPending, created.Order.Status);
-        Assert.Equal("pi_test_intent", created.Order.PaymentIntentId);
+        Assert.Null(created.Order.PaymentIntentId);
 
         var loaded = await _orderService.GetByIdAsync("t1", "s1", orderId);
         Assert.NotNull(loaded);
         Assert.Single(loaded!.Items);
         Assert.Equal("Widget", loaded.Items[0].ProductNameSnapshot);
-        Assert.Equal("pi_test_intent", loaded.PaymentIntentId);
+        Assert.Null(loaded.PaymentIntentId);
 
         await using var conn = new NpgsqlConnection(_postgres!.GetConnectionString());
         await conn.OpenAsync();
@@ -151,14 +160,197 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
         Assert.Equal("A", second.Items[0].ProductNameSnapshot);
     }
 
-    private sealed class FakePaymentClient : IPaymentClient
+    [Fact]
+    public async Task GetTimedById_returns_order_with_created_at()
     {
-        public Task<PaymentIntentResult> CreatePaymentIntentAsync(
-            CreatePaymentIntentRequest request,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new PaymentIntentResult(
-                "pi_test_intent",
-                $"https://pay.test/{request.OrderId}?pi=pi_test"));
+        var orderId = Guid.NewGuid().ToString();
+        var cmd = new CreateOrderCommand(
+            orderId,
+            "t1",
+            "s1",
+            "cust-list",
+            $"idem-{Guid.NewGuid():N}",
+            [
+                new CreateOrderLine(
+                    "line-1",
+                    "p1",
+                    "v1",
+                    "wh-1",
+                    1,
+                    new OrderDomain.Money(5m, "USD"),
+                    "P",
+                    "{}"),
+            ],
+            new OrderDomain.ShippingAddress("1 A", null, "C", "R", "1", "VN"),
+            DateTimeOffset.Parse("2026-04-13T10:00:00Z"));
+
+        await _orderService!.CreateOrderAsync(cmd);
+
+        var timed = await _orderService.GetTimedByIdAsync("t1", "s1", orderId);
+        Assert.NotNull(timed);
+        Assert.Equal(orderId, timed!.Order.Id);
+        Assert.Equal("cust-list", timed.Order.CustomerId);
+        Assert.True(timed.CreatedAt > DateTimeOffset.MinValue);
+    }
+
+    [Fact]
+    public async Task ListOrders_filters_by_customer_and_cursor_pages()
+    {
+        var idem1 = $"idem-{Guid.NewGuid():N}";
+        var idem2 = $"idem-{Guid.NewGuid():N}";
+        var o1 = Guid.NewGuid().ToString();
+        var o2 = Guid.NewGuid().ToString();
+
+        await _orderService!.CreateOrderAsync(new CreateOrderCommand(
+            o1, "t1", "s1", "cust-a", idem1,
+            [new CreateOrderLine("l1", "p", "v", "wh", 1, new OrderDomain.Money(1m, "USD"), "N", "{}")],
+            new OrderDomain.ShippingAddress("1", null, "C", "R", "1", "VN"),
+            DateTimeOffset.Parse("2026-04-13T12:00:01Z")));
+
+        await _orderService.CreateOrderAsync(new CreateOrderCommand(
+            o2, "t1", "s1", "cust-a", idem2,
+            [new CreateOrderLine("l2", "p", "v", "wh", 1, new OrderDomain.Money(2m, "USD"), "N", "{}")],
+            new OrderDomain.ShippingAddress("2", null, "C", "R", "2", "VN"),
+            DateTimeOffset.Parse("2026-04-13T12:00:02Z")));
+
+        var page1 = await _orderService.ListOrdersAsync(
+            new OrderListQuery("t1", "s1", "cust-a", null, null, 1));
+        Assert.Single(page1.Items);
+        Assert.NotNull(page1.NextCursor);
+
+        var page2 = await _orderService.ListOrdersAsync(
+            new OrderListQuery("t1", "s1", "cust-a", null, page1.NextCursor, 1));
+        Assert.Single(page2.Items);
+        Assert.NotEqual(page1.Items[0].Order.Id, page2.Items[0].Order.Id);
+        var both = new[] { page1.Items[0].Order.Id, page2.Items[0].Order.Id }.ToHashSet();
+        Assert.Contains(o1, both);
+        Assert.Contains(o2, both);
+
+        var filtered = await _orderService.ListOrdersAsync(
+            new OrderListQuery("t1", "s1", null, "payment_pending", null, 50));
+        var pendingIds = filtered.Items.Select(i => i.Order.Id).ToHashSet();
+        Assert.Contains(o1, pendingIds);
+        Assert.Contains(o2, pendingIds);
+    }
+
+    [Fact]
+    public async Task ListOrders_invalid_status_throws()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _orderService!.ListOrdersAsync(new OrderListQuery("t1", "s1", null, "not-a-status", null, 10)));
+    }
+
+    [Fact]
+    public async Task CancelOrder_payment_pending_updates_row_outbox_and_publishes_customer_cancellation()
+    {
+        _busMock.Invocations.Clear();
+        var orderId = Guid.NewGuid().ToString();
+        await _orderService!.CreateOrderAsync(new CreateOrderCommand(
+            orderId,
+            "t1",
+            "s1",
+            "cust-1",
+            $"idem-{Guid.NewGuid():N}",
+            [
+                new CreateOrderLine(
+                    "l1",
+                    "p1",
+                    "v1",
+                    "wh-1",
+                    1,
+                    new OrderDomain.Money(10m, "USD"),
+                    "P",
+                    "{}"),
+            ],
+            new OrderDomain.ShippingAddress("1", null, "C", "R", "1", "VN"),
+            DateTimeOffset.UtcNow));
+
+        var result = await _orderService.CancelOrderAsync(
+            new CancelOrderCommand("t1", "s1", orderId, $"cancel-{Guid.NewGuid():N}", null, "user changed mind", DateTimeOffset.UtcNow));
+
+        var ok = Assert.IsType<CancelOrderResult.Ok>(result);
+        Assert.Equal(OrderDomain.OrderStatus.Cancelled, ok.Order.Status);
+
+        await using var conn = new NpgsqlConnection(_postgres!.GetConnectionString());
+        await conn.OpenAsync();
+        var status = (string?)await conn.ExecuteScalarAsync(
+            """SELECT "Status" FROM "Orders" WHERE "Id" = @Id""",
+            new { Id = Guid.Parse(orderId) });
+        Assert.Equal(nameof(OrderDomain.OrderStatus.Cancelled), status);
+
+        var outbox = await conn.ExecuteScalarAsync<long>(
+            """SELECT COUNT(*) FROM "OutboxEvents" WHERE "EventType" = 'OrderCancelled' AND "Payload"::jsonb->>'orderId' = @oid""",
+            new { oid = orderId });
+        Assert.True(outbox >= 1);
+
+        _busMock.Verify(
+            b => b.Publish(It.Is<OrderCustomerCancellationV1>(m => m.OrderId == orderId), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CancelOrder_wrong_customer_returns_forbidden()
+    {
+        _busMock.Invocations.Clear();
+        var orderId = Guid.NewGuid().ToString();
+        await _orderService!.CreateOrderAsync(new CreateOrderCommand(
+            orderId,
+            "t1",
+            "s1",
+            "cust-1",
+            $"idem-{Guid.NewGuid():N}",
+            [
+                new CreateOrderLine("l1", "p1", "v1", "wh-1", 1, new OrderDomain.Money(1m, "USD"), "P", "{}"),
+            ],
+            new OrderDomain.ShippingAddress("1", null, "C", "R", "1", "VN"),
+            DateTimeOffset.UtcNow));
+
+        var result = await _orderService.CancelOrderAsync(
+            new CancelOrderCommand(
+                "t1",
+                "s1",
+                orderId,
+                $"cancel-{Guid.NewGuid():N}",
+                CallerCustomerId: "other-user",
+                "no",
+                DateTimeOffset.UtcNow));
+
+        Assert.IsType<CancelOrderResult.Forbidden>(result);
+        _busMock.Verify(
+            b => b.Publish(It.IsAny<OrderCustomerCancellationV1>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task CancelOrder_shipped_returns_not_cancellable()
+    {
+        _busMock.Invocations.Clear();
+        var orderId = Guid.NewGuid().ToString();
+        await _orderService!.CreateOrderAsync(new CreateOrderCommand(
+            orderId,
+            "t1",
+            "s1",
+            "cust-1",
+            $"idem-{Guid.NewGuid():N}",
+            [
+                new CreateOrderLine("l1", "p1", "v1", "wh-1", 1, new OrderDomain.Money(1m, "USD"), "P", "{}"),
+            ],
+            new OrderDomain.ShippingAddress("1", null, "C", "R", "1", "VN"),
+            DateTimeOffset.UtcNow));
+
+        await using (var conn = new NpgsqlConnection(_postgres!.GetConnectionString()))
+        {
+            await conn.OpenAsync();
+            await conn.ExecuteAsync(
+                """UPDATE "Orders" SET "Status" = 'Shipped' WHERE "Id" = @Id""",
+                new { Id = Guid.Parse(orderId) });
+        }
+
+        var result = await _orderService.CancelOrderAsync(
+            new CancelOrderCommand("t1", "s1", orderId, $"cancel-{Guid.NewGuid():N}", null, "try", DateTimeOffset.UtcNow));
+
+        var nc = Assert.IsType<CancelOrderResult.NotCancellable>(result);
+        Assert.Contains("shipped", nc.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class NoOpInventoryClient : IInventoryClient

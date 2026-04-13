@@ -5,7 +5,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>dCMS.Payment.Api</RootNamespace>
-    <Description>Placeholder HTTP host for local Docker stack (DAI-301). Replace with real Payment service when implemented.</Description>
+    <Description>US-23 Payment HTTP host (DAI-338+).</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\dCMS.Payment.Core\dCMS.Payment.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Payment.Infrastructure\dCMS.Payment.Infrastructure.csproj" />
+  </ItemGroup>
 
 </Project>

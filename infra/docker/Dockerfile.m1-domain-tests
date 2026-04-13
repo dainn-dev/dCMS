@@ -3,6 +3,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0
 WORKDIR /src
 
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
 COPY src/backend/dCMS.Core/dCMS.Core.csproj dCMS.Core/
 COPY src/backend/dCMS.Inventory.Core/dCMS.Inventory.Core.csproj dCMS.Inventory.Core/
 COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/

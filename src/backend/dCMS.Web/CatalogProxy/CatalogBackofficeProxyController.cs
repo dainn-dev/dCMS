@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.WebUtilities;
+using Newtonsoft.Json.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -59,7 +59,7 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
         {
             StatusCode = (int)response.StatusCode,
             Content = body,
-            ContentType = "application/json"
+            ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json"
         };
     }
 
@@ -148,9 +148,9 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
                 msg.Content = new ByteArrayContent(bytes);
                 msg.Content.Headers.ContentType = new MediaTypeHeaderValue(ct);
             }
-            else if (request.Body is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } body)
+            else if (request.Body is not null && request.Body.Type != JTokenType.Null && request.Body.Type != JTokenType.Undefined)
             {
-                msg.Content = new StringContent(body.GetRawText(), Encoding.UTF8, "application/json");
+                msg.Content = new StringContent(request.Body.ToString(Newtonsoft.Json.Formatting.None), Encoding.UTF8, "application/json");
             }
         }
 
@@ -161,7 +161,7 @@ public sealed class CatalogBackofficeProxyController : UmbracoAuthorizedJsonCont
         {
             StatusCode = (int)response.StatusCode,
             Content = responseBody,
-            ContentType = "application/json"
+            ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json"
         };
     }
 
@@ -192,7 +192,7 @@ public sealed class CatalogForwardRequest
     public string Path { get; set; } = "";
     public string? TenantId { get; set; }
     public string? StoreId { get; set; }
-    public JsonElement? Body { get; set; }
+    public JToken? Body { get; set; }
 
     /// <summary>Optional raw body for PUT uploads (US-14 images). Standard base64 or base64url.</summary>
     public string? BinaryBodyBase64 { get; set; }

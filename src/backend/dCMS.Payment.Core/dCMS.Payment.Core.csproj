@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>dCMS.Payment.Core</RootNamespace>
+    <Description>US-23 Payment domain + contracts (DAI-338+).</Description>
+  </PropertyGroup>
+
+</Project>

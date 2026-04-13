@@ -13,7 +13,7 @@ public sealed class InventoryOutboxRelayHostedService(SqlOutboxRelay relay, IBus
         {
             try
             {
-                await relay.ProcessPendingAsync(m => PublishAsync(m, stoppingToken), stoppingToken)
+                await relay.ProcessPendingAsync((_, m) => PublishAsync(m, stoppingToken), stoppingToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)

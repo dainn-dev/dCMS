@@ -1,6 +1,6 @@
-# dCMS local stack (DAI-301 / M0): PostgreSQL (4 DBs), RabbitMQ, Redis, Elasticsearch, Catalog.Api, Inventory.Api,
-# Order.Api + Payment.Api (placeholder HTTP + /health), Catalog.Worker (MassTransit + RabbitMQ), Umbraco Web (SQLite volume).
-# SQL Server from original AC is not used — stack is PostgreSQL-only.
+# dCMS local stack (DAI-301 / M0): PostgreSQL (4 DBs), SQL Server (Umbraco CMS only), RabbitMQ, Redis, Elasticsearch,
+# Catalog.Api, Inventory.Api, Order.Api + Payment.Api, Catalog.Worker, Umbraco Web (SQL Server + local Data volume).
+# Application data APIs remain PostgreSQL-only; Umbraco uses MSSQL on port 14333 (host).
 # Usage (repo root): docker compose -f infra/docker-compose.yml build
 #                      docker compose -f infra/docker-compose.yml up -d
 #                      docker compose -f infra/docker-compose.yml --profile test run --rm m1-domain-tests
@@ -9,9 +9,46 @@
 name: dcms
 
 volumes:
-  umbraco_sqlite:
+  umbraco_mssql_data:
+  umbraco_data:
 
 services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Umbraco_Dev_2026!"
+    ports:
+      - "14333:1433"
+    volumes:
+      - umbraco_mssql_data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+  umbraco-db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "Umbraco_Dev_2026!"
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        sleep 3
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "IF DB_ID('Umbraco') IS NULL CREATE DATABASE Umbraco;"
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -144,9 +181,17 @@ services:
       start_period: 20s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Payment: "Host=postgres;Port=5432;Database=dcms_payment;Username=dcms;Password=Your_password123"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+      # DAI-341: replace in non-dev / real providers
+      Payment__Providers__stub__WebhookSecret: "dev-webhook-secret"
     depends_on:
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   umbraco-web:
     build:
@@ -162,14 +207,22 @@ services:
       start_period: 120s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      # KeepAlive and internal callbacks use this; Kestrel listens on 8080 in the image (not 5000).
+      Umbraco__CMS__WebRouting__UmbracoApplicationUrl: "http://localhost:8080/"
       # US-13 BFF → Catalog.Api (internal port 8080). Align Auth__JwtSigningKey with catalog-api when Auth:Enabled.
       DCMS__CatalogProxy__CatalogApiBaseUrl: "http://catalog-api:8080"
       Auth__JwtSigningKey: "change-me-in-production-use-32-chars-min!!"
       Auth__Issuer: "dcms"
       Auth__Audience: "dcms-api"
+      ConnectionStrings__umbracoDbDSN: "Server=sqlserver,1433;Database=Umbraco;User Id=sa;Password=Umbraco_Dev_2026!;TrustServerCertificate=True;Encrypt=True"
+      ConnectionStrings__umbracoDbDSN_ProviderName: "Microsoft.Data.SqlClient"
     volumes:
-      - umbraco_sqlite:/app/umbraco/Data
+      - umbraco_data:/app/umbraco/Data
     depends_on:
+      sqlserver:
+        condition: service_healthy
+      umbraco-db-init:
+        condition: service_completed_successfully
       catalog-api:
         condition: service_healthy
 
@@ -186,8 +239,11 @@ services:
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Pass: "guest"
+      RabbitMq__ManagementBaseUrl: "http://rabbitmq:15672"
     depends_on:
-      postgres:
+      catalog-api:
+        condition: service_healthy
+      inventory-api:
         condition: service_healthy
       rabbitmq:
         condition: service_started

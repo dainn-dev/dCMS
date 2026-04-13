@@ -5,7 +5,7 @@
 (function () {
     "use strict";
 
-    var bellApiBase = "/umbraco/backoffice/api/DcmsCatalog/NotificationBellProxy";
+    var bellApiBase = "/umbraco/backoffice/DcmsCatalog/NotificationBellProxy";
 
     function parseEnvelope(res) {
         var d = res.data;

@@ -3,9 +3,12 @@ using dCMS.Catalog.Worker.Indexing;
 using dCMS.Catalog.Worker.Workers;
 using dCMS.Core.Persistence;
 using dCMS.Core.Search;
+using dCMS.Infrastructure;
 using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Outbox;
 using dCMS.Infrastructure.Search;
+using dCMS.Infrastructure.Messaging;
+using dCMS.Infrastructure.Monitoring;
 using MassTransit;
 using MediatR;
 using Microsoft.Extensions.Options;
@@ -52,8 +55,16 @@ builder.Services.AddSingleton<DebouncedStockProductIndexPublisher>();
 
 builder.Services.AddHttpClient();
 
+builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "catalog-worker");
+
+builder.Services.AddHostedService<CatalogDbMigrationHostedService>();
+builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Catalog");
+builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Catalog");
+
 builder.Services.AddMassTransit(x =>
 {
+    x.AddDcmsPublishEnvelopeObserver();
+    x.AddDcmsConsumerEndpointDefaults();
     x.AddConsumer<ProductCreatedIndexConsumer>();
     x.AddConsumer<ProductUpdatedIndexConsumer>();
     x.AddConsumer<ProductPublishedIndexConsumer>();

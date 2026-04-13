@@ -2,6 +2,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
 COPY src/backend/dCMS.Core/dCMS.Core.csproj dCMS.Core/
 COPY src/backend/dCMS.AspNetCore.Auth/dCMS.AspNetCore.Auth.csproj dCMS.AspNetCore.Auth/
 COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/

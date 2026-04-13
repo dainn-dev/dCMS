@@ -78,6 +78,10 @@ public static class DcmsJwtAuthExtensions
                 DcmsRoles.BrandManager,
                 DcmsRoles.ChainAdmin,
                 DcmsRoles.SuperAdmin));
+
+            o.AddPolicy(DcmsPolicies.OrderAccess, p => p.RequireAuthenticatedUser());
+
+            o.AddPolicy(DcmsPolicies.OrderDlqAdmin, p => p.RequireAuthenticatedUser().RequireRole(DcmsRoles.SuperAdmin));
         });
 
         return services;
@@ -99,5 +103,13 @@ public static class DcmsJwtAuthExtensions
         if (configuration.IsDcmsAuthEnabled())
             group.AddEndpointFilter<TenantStoreAccessEndpointFilter>();
         return group;
+    }
+
+    /// <summary>Applies tenant/store header match when auth is enabled.</summary>
+    public static RouteHandlerBuilder WithTenantStoreHeaderAccess(this RouteHandlerBuilder builder, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            builder.AddEndpointFilter<TenantStoreHeaderAccessEndpointFilter>();
+        return builder;
     }
 }

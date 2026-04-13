@@ -7,4 +7,5 @@ public sealed record CreatePaymentIntentRequest(
     string StoreId,
     string CustomerId,
     decimal Amount,
-    string Currency);
+    string Currency,
+    string PaymentMethod = "card");
