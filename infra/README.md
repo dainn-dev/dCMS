@@ -82,6 +82,32 @@ Equivalent locally (full test project, same as the `m1-domain-tests` image):
 cd src/backend && dotnet test dCMS.Tests/dCMS.Tests.csproj -c Release --verbosity normal
 ```
 
+## Umbraco v16 Backoffice — Orders SPA (React)
+
+The custom **Orders** backoffice section is implemented as a **Vite + React SPA** and mounted by an Umbraco backoffice extension element.
+
+- **SPA source**: `src/backoffice/dcms-backoffice-spa/`
+- **Umbraco plugin**: `src/backend/dCMS.Web/App_Plugins/DcmsV16/`
+- **Build output (served by Umbraco)**:
+  - `src/backend/dCMS.Web/App_Plugins/DcmsV16/dist/orders-spa.js`
+  - `src/backend/dCMS.Web/App_Plugins/DcmsV16/dist/orders-spa.css`
+- **Bridge element (mounts SPA, injects CSS inside the element scope)**:
+  - `src/backend/dCMS.Web/App_Plugins/DcmsV16/dcms-orders-section.js`
+
+### Build the Orders SPA
+
+From the SPA folder:
+
+```bash
+cd src/backoffice/dcms-backoffice-spa
+npm install
+npm run build
+```
+
+Notes:
+- On **PowerShell**, do **not** chain commands with `&&` (it may fail depending on PS version). Prefer running commands on separate lines, or use `;`.
+- The build is configured to emit bundles directly into Umbraco’s `App_Plugins/DcmsV16/dist/` folder so the backoffice can load them without extra copy steps.
+
 ## Ports
 
 | Service        | Port |

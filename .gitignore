@@ -50,3 +50,6 @@ src/backend/dCMS.Payment.Tests/bin/
 src/backend/dCMS.Payment.Tests/obj/
 src/backend/dCMS.Messaging.Contracts/obj/
 src/backend/dCMS.Messaging.Contracts/bin/
+src/backend/.vs/
+src/backoffice/dcms-backoffice-spa/node_modules/
+design/

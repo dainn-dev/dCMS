@@ -1,0 +1,46 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        background: "#fff8f7",
+        surface: "#fff8f7",
+        "surface-bright": "#fff8f7",
+        "surface-container-lowest": "#ffffff",
+        "surface-container-low": "#fff0ef",
+        "surface-container-high": "#ffe2de",
+        "surface-container": "#ffe9e7",
+        "on-background": "#281716",
+        "on-surface": "#281716",
+        "on-surface-variant": "#5c403d",
+        primary: "#aa0014",
+        "primary-container": "#d12026",
+        "on-primary": "#ffffff",
+        secondary: "#a53a35",
+        "secondary-container": "#fe7c73",
+        "on-secondary-container": "#721414",
+        tertiary: "#005880",
+        "tertiary-container": "#0072a3",
+        outline: "#916f6c",
+        "outline-variant": "#e5bdb9",
+        "error-container": "#ffdad6",
+        "on-error-container": "#93000a",
+        "surface-variant": "#fbdbd8",
+        "surface-container": "#ffe9e7",
+      },
+      borderRadius: {
+        DEFAULT: "0.125rem",
+        lg: "0.25rem",
+        xl: "0.5rem",
+        full: "0.75rem",
+      },
+      fontFamily: {
+        headline: ["Inter", "system-ui", "sans-serif"],
+        body: ["Inter", "system-ui", "sans-serif"],
+        label: ["Inter", "system-ui", "sans-serif"],
+      },
+    },
+  },
+  plugins: [],
+};

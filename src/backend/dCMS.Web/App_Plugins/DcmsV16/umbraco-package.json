@@ -1,0 +1,47 @@
+{
+  "$schema": "../../umbraco-package-schema.json",
+  "name": "dCMS Backoffice",
+  "version": "2.0.0",
+  "allowPackageTelemetry": false,
+  "extensions": [
+    {
+      "type": "section",
+      "alias": "dcmsOrders",
+      "name": "Orders",
+      "weight": 950,
+      "element": "/App_Plugins/DcmsV16/dcms-orders-section.js",
+      "meta": {
+        "label": "Orders",
+        "pathname": "dcms-orders"
+      }
+    },
+    {
+      "type": "section",
+      "alias": "dcmsEStore",
+      "name": "eStore",
+      "weight": 940,
+      "element": "/App_Plugins/DcmsV16/dcms-estore-section.js",
+      "meta": {
+        "label": "eStore",
+        "pathname": "dcms-estore"
+      }
+    },
+    {
+      "type": "dashboard",
+      "alias": "Dcms.Dashboard.SalesOverview",
+      "name": "Sales overview",
+      "element": "/App_Plugins/DcmsV16/dcms-sales-dashboard.js",
+      "weight": 12,
+      "meta": {
+        "label": "Sales overview",
+        "pathname": "dcms-sales-overview"
+      },
+      "conditions": [
+        {
+          "alias": "Umb.Condition.SectionAlias",
+          "match": "Umb.Section.Content"
+        }
+      ]
+    }
+  ]
+}

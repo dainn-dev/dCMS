@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//e/Projects/dCMS/design/failed_orders_dashboard/**)",
+      "Read(//e/Projects/dCMS/design/order_processing_dashboard/**)"
+    ]
+  }
+}

@@ -1,14 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Umbraco brings Microsoft.Data.SqlClient. appsettings uses localhost:14333 (compose SQL Server publish); in-container compose sets Server=sqlserver,1433. -->
-    <!-- 13.13.1 is latest 13.x on nuget.org (Apr 2026); NU1902 has no fixed 13.x yet — suppress only this GHSA, remove when Umbraco ships a patched 13.x. -->
-    <PackageReference Include="Umbraco.Cms" Version="13.13.1" />
+    <PackageReference Include="Umbraco.Cms" Version="16.5.1" />
   </ItemGroup>
 
   <ItemGroup>

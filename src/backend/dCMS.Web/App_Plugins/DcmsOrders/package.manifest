@@ -1,9 +1,0 @@
-{
-  "name": "Orders",
-  "version": "1.0.0",
-  "allowPackageTelemetry": false,
-  "javascript": [
-    "/App_Plugins/DcmsOrders/backoffice/orders/order-processing.controller.js",
-    "/App_Plugins/DcmsOrders/backoffice/orders/failed-orders.controller.js"
-  ]
-}
