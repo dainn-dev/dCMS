@@ -5,6 +5,12 @@
   "allowPackageTelemetry": false,
   "extensions": [
     {
+      "type": "backofficeEntryPoint",
+      "alias": "Dcms.Backoffice.HideGettingStarted",
+      "name": "dCMS — hide Getting Started & Packages",
+      "js": "/App_Plugins/DcmsV16/dcms-hide-getting-started.js"
+    },
+    {
       "type": "section",
       "alias": "dcmsOrders",
       "name": "Orders",
@@ -19,7 +25,7 @@
       "type": "section",
       "alias": "dcmsEStore",
       "name": "eStore",
-      "weight": 940,
+      "weight": 960,
       "element": "/App_Plugins/DcmsV16/dcms-estore-section.js",
       "meta": {
         "label": "eStore",
@@ -29,12 +35,12 @@
     {
       "type": "dashboard",
       "alias": "Dcms.Dashboard.SalesOverview",
-      "name": "Sales overview",
-      "element": "/App_Plugins/DcmsV16/dcms-sales-dashboard.js",
+      "name": "Dashboard",
+      "element": "/App_Plugins/DcmsV16/dcms-dashboard.js",
       "weight": 12,
       "meta": {
-        "label": "Sales overview",
-        "pathname": "dcms-sales-overview"
+        "label": "Dashboard",
+        "pathname": "dcms-dashboard"
       },
       "conditions": [
         {

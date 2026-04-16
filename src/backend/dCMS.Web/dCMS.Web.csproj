@@ -36,4 +36,24 @@
     <Content Include="config\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- ── Frontend SPA build ──────────────────────────────────────────────── -->
+  <PropertyGroup>
+    <SpaDir>$(MSBuildProjectDirectory)\..\..\backoffice\dcms-backoffice-spa</SpaDir>
+    <!-- Set SkipFrontendBuild=true on the CLI to skip: dotnet run /p:SkipFrontendBuild=true -->
+    <SkipFrontendBuild Condition="'$(SkipFrontendBuild)' == ''">false</SkipFrontendBuild>
+  </PropertyGroup>
+
+  <Target Name="BuildFrontendSpa" BeforeTargets="BeforeBuild" Condition="'$(SkipFrontendBuild)' != 'true'">
+    <Message Text="[dCMS] Building backoffice SPA..." Importance="high" />
+    <!-- Install deps only when node_modules is missing -->
+    <Exec Command="npm install --prefer-offline --no-audit --no-fund"
+          WorkingDirectory="$(SpaDir)"
+          Condition="!Exists('$(SpaDir)\node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(SpaDir)" />
+    <!-- npm run build already invokes build:orders + build:estore + build:dashboard via the top-level "build" script -->
+
+    <Message Text="[dCMS] SPA build done — dist copied via CopyToOutputDirectory." Importance="high" />
+  </Target>
+  <!-- ──────────────────────────────────────────────────────────────────────── -->
+
 </Project>

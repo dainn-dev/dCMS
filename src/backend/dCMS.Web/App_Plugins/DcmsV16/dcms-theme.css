@@ -1,0 +1,32 @@
+/**
+ * dCMS Backoffice Theme
+ *
+ * Overrides Umbraco / UUI CSS custom properties.
+ * Variable names confirmed from uui-css.css served at runtime.
+ *
+ * Brand: primary = #aa0014
+ */
+
+:root {
+  /* ── Header / top-bar ─────────────────────────────────────────── */
+  /* uui-css default: var(--uui-palette-space-cadet, #1b264f)       */
+  --uui-color-header-surface:           #aa0014;
+  --uui-color-header-contrast:          rgba(255, 255, 255, 0.85);
+  --uui-color-header-contrast-emphasis: #ffffff;
+
+  /* ── Selected / active state (sidebar active item, checkboxes) ── */
+  /* uui-css default: var(--uui-palette-violet-blue, #3544b1)       */
+  --uui-color-selected:           #aa0014;
+  --uui-color-selected-emphasis:  #d12026;
+  --uui-color-selected-standalone:#8a0010;
+  --uui-color-selected-contrast:  #ffffff;
+
+  /* ── Interactive links and default button colour ─────────────── */
+  /* uui-css default: var(--uui-palette-space-cadet, #1b264f)       */
+  --uui-color-interactive:         #aa0014;
+  --uui-color-interactive-emphasis:#d12026;
+  --uui-color-default:             #aa0014;
+  --uui-color-default-emphasis:    #d12026;
+  --uui-color-default-standalone:  #8a0010;
+  --uui-color-default-contrast:    #ffffff;
+}

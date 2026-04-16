@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build:orders": "vite build",
+    "build:estore": "vite build --config vite.estore.config.ts",
+    "build:dashboard": "vite build --config vite.dashboard.config.ts",
+    "build": "npm run build:orders && npm run build:estore && npm run build:dashboard",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-table": "^8.21.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

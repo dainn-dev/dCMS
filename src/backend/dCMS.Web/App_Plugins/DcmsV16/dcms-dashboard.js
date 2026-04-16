@@ -1,8 +1,8 @@
 import { UmbElementMixin } from "@umbraco-cms/backoffice/element-api";
 
 const _v = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : Date.now();
-const SPA_JS = `/App_Plugins/DcmsV16/dist/estore-spa.js?v=${_v}`;
-const SPA_CSS = `/App_Plugins/DcmsV16/dist/estore-spa.css?v=${_v}`;
+const SPA_JS = `/App_Plugins/DcmsV16/dist/dashboard-spa.js?v=${_v}`;
+const SPA_CSS = `/App_Plugins/DcmsV16/dist/dashboard-spa.css?v=${_v}`;
 
 function resolveUrl(path) {
   try {
@@ -12,7 +12,7 @@ function resolveUrl(path) {
   }
 }
 
-export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElement) {
+export default class DcmsDashboardElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
   /** @type {{ mount?: (el: HTMLElement) => void, unmount?: (el: HTMLElement) => void } | null} */
@@ -23,33 +23,26 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
   }
 
   async connectedCallback() {
-    // Make this element fill its Umbraco section container.
     this.style.display = "block";
     this.style.position = "relative";
     this.style.width = "100%";
     this.style.height = "100%";
 
-    // Inject a placeholder while loading.
-    this.innerHTML = `<div data-react-root style="position:absolute;inset:0"></div>`;
+    this.innerHTML = `<div data-react-root style="position:relative;min-height:100%"></div>`;
     this.#host = this.querySelector("[data-react-root]");
     if (!this.#host) return;
 
     try {
-      // Fetch CSS text and inject a <style> tag directly inside THIS element,
-      // not in <head> — required because Umbraco v16 renders sections inside
-      // its own Shadow DOM, so global <head> styles can't pierce through.
       const cssUrl = resolveUrl(SPA_CSS);
       const cssRes = await fetch(cssUrl, { method: "GET", credentials: "same-origin" });
       if (!cssRes.ok) throw new Error(`GET ${cssUrl} -> ${cssRes.status} ${cssRes.statusText}`);
       const cssText = await cssRes.text();
 
       const style = document.createElement("style");
-      style.id = "dcms-estore-spa-style";
+      style.id = "dcms-dashboard-spa-style";
       style.textContent = cssText;
-      // Prepend so it comes before the React root in the DOM.
       this.insertBefore(style, this.#host);
 
-      // Preflight JS to surface clear 404/500 errors.
       const jsUrl = resolveUrl(SPA_JS);
       const jsRes = await fetch(jsUrl, { method: "GET", credentials: "same-origin" });
       if (!jsRes.ok) throw new Error(`GET ${jsUrl} -> ${jsRes.status} ${jsRes.statusText}`);
@@ -61,19 +54,16 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
       if (this.#host) {
         this.#host.innerHTML =
           `<div style="padding:16px 20px;font-family:system-ui,sans-serif;color:#b91c1c">
-            <div style="font-weight:600;margin-bottom:6px">Could not load eStore SPA bundle.</div>
+            <div style="font-weight:600;margin-bottom:6px">Could not load Dashboard SPA bundle.</div>
             <div style="margin-bottom:8px">Expected: <code>${SPA_JS}</code></div>
             <div style="background:#fff;border:1px solid #e9e9eb;border-radius:6px;padding:10px 12px;color:#0f172a">
               <div style="font-size:12px;color:#64748b;margin-bottom:4px">Error</div>
               <code style="white-space:pre-wrap;word-break:break-word">${msg}</code>
             </div>
-            <div style="margin-top:10px;font-size:12px;color:#64748b">
-              Run <code>npm run build</code> in <code>src/backoffice/dcms-backoffice-spa</code> and restart Umbraco.
-            </div>
           </div>`;
       }
       // eslint-disable-next-line no-console
-      console.error("[dcms-estore-section]", e);
+      console.error("[dcms-dashboard]", e);
     }
   }
 
@@ -83,5 +73,5 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
   }
 }
 
-customElements.define("dcms-estore-section", DcmsEStoreSectionElement);
+customElements.define("dcms-dashboard", DcmsDashboardElement);
 
