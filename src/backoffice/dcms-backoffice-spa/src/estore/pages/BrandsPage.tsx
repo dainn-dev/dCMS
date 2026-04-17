@@ -1,8 +1,42 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { DataTable } from "../../orders/components/DataTable";
-import { IconAddCircle, IconDelete, IconShare } from "../../orders/icons";
+import { IconAddCircle, IconCheckCircle, IconShare } from "../../orders/icons";
 import { createBrandColumns } from "../brands-columns";
 import type { BrandListRow } from "../brands-columns";
+
+// ─── Export helper ────────────────────────────────────────────────────────────
+
+function exportBrandsToCSV(rows: BrandListRow[]) {
+  type ExportRow = {
+    "Brand Code": string;
+    "Brand Name": string;
+    Status: string;
+  };
+
+  const data: ExportRow[] = rows.map((r) => ({
+    "Brand Code": r.code,
+    "Brand Name": r.name,
+    Status: r.active ? "Active" : "Inactive",
+  }));
+
+  const headers = Object.keys(data[0]) as (keyof ExportRow)[];
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+
+  const csv = [
+    headers.map(escape).join(","),
+    ...data.map((r) => headers.map((h) => escape(r[h])).join(",")),
+  ].join("\r\n");
+
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `brand-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // Re-export so EStoreApp.tsx import stays unchanged
 export type { BrandListRow } from "../brands-columns";
@@ -41,13 +75,26 @@ const BRAND_ROWS: BrandListRow[] = [
 type BrandsPageProps = {
   onEditBrand?: (row: BrandListRow) => void;
   onCreateBrand?: () => void;
+  rows?: BrandListRow[];
+  onRowsChange?: (next: BrandListRow[]) => void;
 };
 
-export function BrandsPage({ onEditBrand, onCreateBrand }: BrandsPageProps) {
+export function BrandsPage({ onEditBrand, onCreateBrand, rows }: BrandsPageProps) {
   const columns = useMemo(
     () => createBrandColumns(onEditBrand, (code) => console.info("[Brands] Delete", code)),
     [onEditBrand]
   );
+
+  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
+    message: "",
+    visible: false,
+  });
+
+  useEffect(() => {
+    if (!toast.visible) return;
+    const t = setTimeout(() => setToast((p) => ({ ...p, visible: false })), 3000);
+    return () => clearTimeout(t);
+  }, [toast.visible]);
 
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Brands management">
@@ -67,18 +114,13 @@ export function BrandsPage({ onEditBrand, onCreateBrand }: BrandsPageProps) {
           <button
             type="button"
             className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-variant"
-            onClick={() => console.info("[Brands] Export (placeholder)")}
+            onClick={() => {
+              exportBrandsToCSV(rows ?? BRAND_ROWS);
+              setToast({ message: "Brand export downloaded.", visible: true });
+            }}
           >
             <IconShare className="h-4 w-4 shrink-0" />
             Export Brands
-          </button>
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-lg border border-error/30 px-4 py-2 text-xs font-medium text-error transition-colors hover:bg-error/10"
-            onClick={() => console.info("[Brands] Remove brand (placeholder)")}
-          >
-            <IconDelete className="h-4 w-4 shrink-0" />
-            Remove Brand
           </button>
           <button
             type="button"
@@ -94,9 +136,30 @@ export function BrandsPage({ onEditBrand, onCreateBrand }: BrandsPageProps) {
       <div className="flex-1 p-6">
         <DataTable
           columns={columns}
-          data={BRAND_ROWS}
+          data={rows ?? BRAND_ROWS}
           globalFilterPlaceholder="Search by code or brand name…"
         />
+      </div>
+
+      {/* Toast notification */}
+      <div
+        aria-live="polite"
+        className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 transition-all duration-300 ${
+          toast.visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0 pointer-events-none"
+        }`}
+      >
+        <div className="flex items-center gap-3 rounded-xl bg-on-surface px-5 py-3 shadow-2xl">
+          <IconCheckCircle className="h-4 w-4 shrink-0 text-primary" />
+          <span className="text-sm font-medium text-surface">{toast.message}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="ml-2 rounded p-0.5 text-surface/60 hover:text-surface transition-colors"
+            onClick={() => setToast((p) => ({ ...p, visible: false }))}
+          >
+            ✕
+          </button>
+        </div>
       </div>
     </div>
   );

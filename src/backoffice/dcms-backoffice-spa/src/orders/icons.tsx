@@ -533,3 +533,66 @@ export function IconElectricMoped({ className = "h-4 w-4" }: { className?: strin
     </svg>
   );
 }
+
+/** auto_fix_high — optimize / auto-enhance */
+export function IconAutoFixHigh({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M19.3 8.925l-4.225-4.225L13.9 5.875l1.075 1.075-7.35 7.35-1.075-1.075-1.175 1.175L9.6 18.625l1.175-1.175-1.075-1.075 7.35-7.35 1.075 1.075 1.175-1.175zm-9.9 7.725L6.35 13.6l7.35-7.35 3.05 3.05-7.35 7.35zM19 3l-.5 2-.5-2-2-.5 2-.5.5-2 .5 2 2 .5-2 .5zm-14 2l-.5 2-.5-2-2-.5 2-.5.5-2 .5 2 2 .5-2 .5zm4 17l-.5 2-.5-2-2-.5 2-.5.5-2 .5 2 2 .5-2 .5z" />
+    </svg>
+  );
+}
+
+/** text_fields — alt text */
+export function IconTextFields({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z" />
+    </svg>
+  );
+}
+
+/** crop */
+export function IconCrop({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z" />
+    </svg>
+  );
+}
+
+/** rotate_left — rotate counter-clockwise */
+export function IconRotateCcw({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z" />
+    </svg>
+  );
+}
+
+/** rotate_right — rotate clockwise */
+export function IconRotateCw({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M15.55 5.55L11 1v3.07C7.06 4.56 4 7.92 4 12s3.05 7.44 7 7.93v-2.02c-2.84-.48-5-2.94-5-5.91s2.16-5.43 5-5.91V10l4.55-4.45zM19.93 11c-.17-1.39-.72-2.73-1.62-3.89l-1.42 1.42c.54.75.88 1.6 1.02 2.47h2.02zM13 17.9v2.02c1.39-.17 2.74-.71 3.9-1.61l-1.44-1.44c-.75.54-1.59.89-2.46 1.03zm3.89-2.42l1.42 1.41c.9-1.16 1.45-2.5 1.62-3.89h-2.02c-.14.87-.48 1.72-1.02 2.48z" />
+    </svg>
+  );
+}
+
+/** tune — brightness/contrast sliders */
+export function IconTune({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z" />
+    </svg>
+  );
+}
+
+/** open_with — move & scale */
+export function IconOpenWith({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M10 9h4V6h3l-5-5-5 5h3v3zm-1 1H6V7l-5 5 5 5v-3h3v-4zm14 2l-5-5v3h-3v4h3v3l5-5zm-9 3h-4v3H7l5 5 5-5h-3v-3z" />
+    </svg>
+  );
+}

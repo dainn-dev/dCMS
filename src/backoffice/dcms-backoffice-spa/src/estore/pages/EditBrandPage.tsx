@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { langLabel, useUmbracoLanguages } from "../useUmbracoLanguages";
+import { useEffect, useRef, useState } from "react";
+import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import {
   IconArrowBack,
   IconCalendarToday,
@@ -22,6 +22,7 @@ import {
   IconMap,
   IconMoreHoriz,
   IconSave,
+  IconSearch,
   IconVisibility,
 } from "../../orders/icons";
 
@@ -42,7 +43,6 @@ const btnFooterPrimary =
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type EditTab = "general" | "contacts" | "seo" | "recommendations";
-type LangRecord = Record<string, string>;
 
 type Props = {
   mode: "add" | "edit";
@@ -53,6 +53,129 @@ type Props = {
   logoAlt?: string;
   onBack: () => void;
 };
+
+// ── Mock category list (mirrors CategoriesPage INITIAL_TREE) ─────────────
+const MOCK_CATEGORIES = [
+  "@12%rebate",
+  "Sub-category A",
+  "Sub-category B",
+  "1-12-REBATE",
+  "Anniversary",
+  "CGCategory",
+  "Electronics",
+  "Furniture",
+];
+
+// ── Category Picker ────────────────────────────────────────────────────────
+function CategoryPicker({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const filtered = MOCK_CATEGORIES.filter((c) =>
+    c.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const toggle = (cat: string) => {
+    onChange(
+      selected.includes(cat)
+        ? selected.filter((c) => c !== cat)
+        : [...selected, cat]
+    );
+  };
+
+  return (
+    <div ref={containerRef} className="relative space-y-1.5">
+      {/* Selected chips */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((cat) => (
+            <span
+              key={cat}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary"
+            >
+              {cat}
+              <button
+                type="button"
+                aria-label={`Remove ${cat}`}
+                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+                onClick={() => toggle(cat)}
+              >
+                <IconClose className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Search input */}
+      <div className="relative">
+        <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
+        <input
+          type="text"
+          className={`${inputBase} pl-8 pr-3`}
+          placeholder="Type category name to search..."
+          value={search}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
+        />
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-52 overflow-y-auto rounded-lg border border-outline-variant/20 bg-surface shadow-xl">
+          {filtered.length === 0 ? (
+            <p className="px-4 py-3 text-xs italic text-on-surface-variant">
+              No categories match "{search}"
+            </p>
+          ) : (
+            filtered.map((cat) => {
+              const checked = selected.includes(cat);
+              return (
+                <label
+                  key={cat}
+                  className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors hover:bg-surface-container-high ${
+                    checked ? "bg-primary/5 font-semibold text-primary" : "text-on-surface"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(cat)}
+                    className="h-3.5 w-3.5 accent-primary shrink-0"
+                  />
+                  {cat}
+                </label>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {selected.length === 0 && !open && (
+        <p className="text-[10px] text-on-surface-variant">
+          Click the box above to assign categories.
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ── Mock brand list for Recommendations tab ────────────────────────────────
 const ALL_BRANDS = [
@@ -139,45 +262,42 @@ export function EditBrandPage({
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
 
-  // SEO state
-  const umbracoLangs = useUmbracoLanguages();
-  const languages = useMemo(
-    () => (umbracoLangs.status !== "loading" ? umbracoLangs.languages : []),
-    [umbracoLangs]
-  );
-  const defaultIso = useMemo(
-    () => languages.find((l) => l.isDefault)?.isoCode ?? languages[0]?.isoCode ?? "en-US",
-    [languages]
-  );
+  // Brand Name reactive state (drives auto-populate in add mode)
+  const [brandNameInput, setBrandNameInput] = useState(brandName || "");
 
-  const [seoLang, setSeoLang] = useState<string>("");
-  // Sync seoLang to Umbraco default once languages are loaded
-  useEffect(() => {
-    if (languages.length > 0 && !seoLang) setSeoLang(defaultIso);
-  }, [defaultIso, languages, seoLang]);
+  // Derive auto-populated values from brand name input
+  const words = brandNameInput.replace(/[^a-zA-Z0-9\s]/g, " ").trim().split(/\s+/).filter(Boolean);
+  const autoDisplayName = words.slice(0, 2).join(" ");
+  const autoCodePrefix = (words[0] ?? "").slice(0, 3).toUpperCase().padEnd(3, "X");
+  const autoCode = brandNameInput ? `${autoCodePrefix}-${words.length > 1 ? (words[1] ?? "").slice(0, 4).toUpperCase().padEnd(4, "0") : "0001"}` : "";
+  const autoPromo = brandNameInput.replace(/[^a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "";
 
-  const [metaTitles, setMetaTitles] = useState<LangRecord>({});
-  const [metaKeywords, setMetaKeywords] = useState<LangRecord>({});
-  const [metaDescriptions, setMetaDescriptions] = useState<LangRecord>({});
-  // Pre-populate edit-mode defaults for the Umbraco default language
-  useEffect(() => {
-    if (!defaultIso || isAdd) return;
-    setMetaTitles((p) => ({ ...p, [defaultIso]: p[defaultIso] ?? "T - 10.Deep | TANGS Singapore" }));
-    setMetaDescriptions((p) => ({
-      ...p,
-      [defaultIso]: p[defaultIso] ?? "T - 10.Deep demo ecommerce sirius brand meta description. Experience premium lifestyle curation with global delivery options.",
-    }));
-  // Only on first load
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultIso]);
+  // Display Name: seed remounts MultiLangInput only when brand name field loses focus
+  // so user edits on other languages are preserved while typing the brand name.
+  const [displayNameSeed, setDisplayNameSeed] = useState(0);
+  const [confirmedDisplayName, setConfirmedDisplayName] = useState(brandName || "");
+
+  function handleBrandNameBlur() {
+    if (isAdd && autoDisplayName !== confirmedDisplayName) {
+      setConfirmedDisplayName(autoDisplayName);
+      setDisplayNameSeed((s) => s + 1);
+    }
+  }
+
+  // Edit mode: use prop-derived values (static)
+  const displayNameGuess = brandName.split(/\s+/).slice(0, 2).join(" ");
+  const promoGuess = isAdd
+    ? autoPromo
+    : brandCode.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "BRND";
+  const codeValue = isAdd ? autoCode : brandCode;
+
+  // Categories state
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(
+    isAdd ? [] : ["Luxury", "Fragrance"]
+  );
 
   // Recommendations state
   const [excludedBrands, setExcludedBrands] = useState<string[]>([]);
-
-  // Auto-populate helpers (edit mode: derived from existing code/name)
-  const displayNameGuess = brandName.split(/\s+/).slice(0, 2).join(" ");
-  const promoGuess =
-    brandCode.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "BRND";
 
   // Available brands for recommendations (exclude self)
   const availableBrands = ALL_BRANDS.filter((b) => b.code !== brandCode);
@@ -340,51 +460,81 @@ export function EditBrandPage({
 
                 <div className="col-span-12 md:col-span-4 space-y-1.5">
                   <label className={labelBase}>Brand Name <span className="text-error">*</span></label>
-                  <input className={inputBase} type="text" defaultValue={brandName} placeholder="Enter brand name" />
+                  <input
+                    className={inputBase}
+                    type="text"
+                    value={brandNameInput}
+                    onChange={(e) => setBrandNameInput(e.target.value)}
+                    onBlur={handleBrandNameBlur}
+                    placeholder="Enter brand name"
+                  />
+                  {isAdd && autoDisplayName && (
+                    <p className="text-[10px] text-primary/70">
+                      Display Name will be set to &ldquo;{autoDisplayName}&rdquo; on confirm.
+                    </p>
+                  )}
                 </div>
 
-                <div className="col-span-12 md:col-span-4 space-y-1.5">
-                  <label className={labelBase}>Display Name</label>
-                  <input className={inputBase} type="text" defaultValue={isAdd ? "" : displayNameGuess} placeholder="Auto-filled from Brand Name" />
+                <div className="col-span-12 md:col-span-4">
+                  <MultiLangInput
+                    key={isAdd ? displayNameSeed : undefined}
+                    label="Display Name"
+                    defaultValues={{
+                      en: isAdd ? confirmedDisplayName : displayNameGuess,
+                    }}
+                    placeholders={{
+                      en: "Auto-filled from Brand Name",
+                      vn: "Tên hiển thị",
+                      zh: "显示名称",
+                      ja: "表示名",
+                    }}
+                  />
                 </div>
 
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
-                  <label className={labelBase}>Brand Code</label>
-                  <input className={`${inputBase} font-mono`} type="text" defaultValue={brandCode} placeholder="e.g. LHG-7721" />
+                  <label className={labelBase}>
+                    Brand Code
+                    {isAdd && autoCode && (
+                      <span className="ml-1.5 text-[9px] font-normal normal-case text-primary/70 tracking-normal">
+                        auto-filled
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    className={`${inputBase} font-mono ${isAdd && autoCode ? "text-on-surface-variant" : ""}`}
+                    type="text"
+                    value={codeValue}
+                    readOnly={isAdd && Boolean(autoCode)}
+                    placeholder="e.g. LHG-7721"
+                    onChange={() => {}}
+                  />
                 </div>
 
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
-                  <label className={labelBase}>Promo Code Prefix</label>
-                  <input className={inputBase} type="text" defaultValue={isAdd ? "" : promoGuess} placeholder="e.g. LHG" />
+                  <label className={labelBase}>
+                    Promo Code Prefix
+                    {isAdd && autoPromo && (
+                      <span className="ml-1.5 text-[9px] font-normal normal-case text-primary/70 tracking-normal">
+                        auto-filled
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    className={`${inputBase} ${isAdd && autoPromo ? "text-on-surface-variant" : ""}`}
+                    type="text"
+                    value={isAdd ? autoPromo : promoGuess}
+                    readOnly={isAdd && Boolean(autoPromo)}
+                    placeholder="e.g. LHG"
+                    onChange={() => {}}
+                  />
                 </div>
 
                 <div className="col-span-12 md:col-span-6 space-y-1.5">
                   <label className={labelBase}>Categories</label>
-                  <div className="flex flex-wrap gap-2 p-2 bg-surface border border-outline-variant/20 rounded-md min-h-[38px] items-center">
-                    {(!isAdd ? ["Luxury", "Fragrance"] : []).map((c) => (
-                      <span
-                        key={c}
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-primary/10 text-primary text-[10px] font-bold uppercase rounded-full"
-                      >
-                        {c}
-                        <button
-                          type="button"
-                          className="p-0.5 rounded hover:bg-primary/20"
-                          aria-label={`Remove ${c}`}
-                          onClick={() => console.info("[EditBrand] Remove category", c)}
-                        >
-                          <IconClose className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                    <button
-                      type="button"
-                      className="text-primary text-[10px] font-bold uppercase ml-1 hover:underline"
-                      onClick={() => console.info("[EditBrand] Add category (placeholder)")}
-                    >
-                      + Add Category
-                    </button>
-                  </div>
+                  <CategoryPicker
+                    selected={selectedCategories}
+                    onChange={setSelectedCategories}
+                  />
                 </div>
               </div>
 
@@ -395,17 +545,19 @@ export function EditBrandPage({
                 </div>
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>Publish From</label>
-                  <div className="relative">
-                    <input className={`${inputBase} pr-10`} type="text" defaultValue={isAdd ? "" : "2024-05-15"} placeholder="YYYY-MM-DD" />
-                    <IconCalendarToday className="absolute right-3 top-2.5 h-4 w-4 text-on-surface-variant pointer-events-none" />
-                  </div>
+                  <input
+                    className={inputBase}
+                    type="date"
+                    defaultValue={isAdd ? "" : "2024-05-15"}
+                  />
                 </div>
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>Publish To</label>
-                  <div className="relative">
-                    <input className={`${inputBase} pr-10`} type="text" defaultValue={isAdd ? "" : "2025-05-15"} placeholder="YYYY-MM-DD" />
-                    <IconCalendarToday className="absolute right-3 top-2.5 h-4 w-4 text-on-surface-variant pointer-events-none" />
-                  </div>
+                  <input
+                    className={inputBase}
+                    type="date"
+                    defaultValue={isAdd ? "" : "2025-05-15"}
+                  />
                 </div>
               </div>
 
@@ -417,7 +569,6 @@ export function EditBrandPage({
 
                 {/* Description */}
                 <div className="col-span-12 md:col-span-8 space-y-1.5">
-                  <label className={labelBase}>Description</label>
                   <div className="border border-outline-variant/20 rounded-md overflow-hidden bg-surface">
                     <div className="flex items-center gap-1 p-2 border-b border-outline-variant/20 bg-surface-container-low">
                       {[
@@ -440,14 +591,22 @@ export function EditBrandPage({
                         </button>
                       ))}
                     </div>
-                    <div className="p-4 min-h-[160px] text-sm text-on-surface">
-                      {!isAdd && (
-                        <p>
-                          Velvet Aura Luxury represents the pinnacle of olfactory craftsmanship. Established in 2024,
-                          our mission is to curate sensory experiences that transcend the ordinary.
-                        </p>
-                      )}
-                    </div>
+                    <MultiLangTextarea
+                      label="Description"
+                      rows={6}
+                      defaultValues={{
+                        en: isAdd
+                          ? ""
+                          : "Velvet Aura Luxury represents the pinnacle of olfactory craftsmanship. Established in 2024, our mission is to curate sensory experiences that transcend the ordinary.",
+                      }}
+                      placeholders={{
+                        en: "Enter brand description...",
+                        vn: "Nhập mô tả thương hiệu...",
+                        zh: "输入品牌描述...",
+                        ja: "ブランドの説明を入力してください...",
+                      }}
+                      className="rounded-none border-0 focus:ring-0 min-h-[160px]"
+                    />
                   </div>
                 </div>
 
@@ -687,125 +846,47 @@ export function EditBrandPage({
                 {/* Left: fields */}
                 <div className="col-span-12 lg:col-span-8 space-y-6">
                   <div className="space-y-6">
-                    {/* Meta Title */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className={labelBase}>Meta Title</label>
-                        <div className="flex items-center gap-0.5">
-                          {umbracoLangs.status === "loading" ? (
-                            <span className="text-[10px] text-on-surface-variant/40 italic">Loading…</span>
-                          ) : (
-                            languages.map((lang) => (
-                              <button
-                                key={lang.isoCode}
-                                type="button"
-                                title={lang.name}
-                                onClick={() => setSeoLang(lang.isoCode)}
-                                className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${
-                                  seoLang === lang.isoCode
-                                    ? "bg-primary text-on-primary"
-                                    : "text-on-surface-variant/50 hover:bg-surface-container-high hover:text-on-surface-variant"
-                                }`}
-                              >
-                                {langLabel(lang.isoCode)}
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                      <input
-                        className={inputBase}
-                        type="text"
-                        value={metaTitles[seoLang] ?? ""}
-                        onChange={(e) =>
-                          setMetaTitles((prev) => ({ ...prev, [seoLang]: e.target.value }))
-                        }
-                        placeholder="Enter the text that will appear on the browser's title bar and tab"
-                      />
-                      <p className={`text-xs mt-1 flex justify-end ${(metaTitles[seoLang] ?? "").length > 60 ? "text-error font-semibold" : "text-on-surface-variant"}`}>
-                        {(metaTitles[seoLang] ?? "").length} / 60
-                      </p>
-                    </div>
+                    <MultiLangInput
+                      label="Meta Title"
+                      defaultValues={{
+                        en: isAdd ? "" : "T - 10.Deep | TANGS Singapore",
+                      }}
+                      placeholders={{
+                        en: "Enter the text that will appear on the browser's title bar and tab",
+                        vn: "Tiêu đề xuất hiện trên tab trình duyệt",
+                        zh: "浏览器标签栏中显示的文字",
+                        ja: "ブラウザのタブに表示されるテキスト",
+                      }}
+                      hint="Recommended: 60 characters or fewer."
+                    />
 
-                    {/* Meta Keywords */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className={labelBase}>Meta Keywords</label>
-                        <div className="flex items-center gap-0.5">
-                          {umbracoLangs.status === "loading" ? (
-                            <span className="text-[10px] text-on-surface-variant/40 italic">Loading…</span>
-                          ) : (
-                            languages.map((lang) => (
-                              <button
-                                key={lang.isoCode}
-                                type="button"
-                                title={lang.name}
-                                onClick={() => setSeoLang(lang.isoCode)}
-                                className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${
-                                  seoLang === lang.isoCode
-                                    ? "bg-primary text-on-primary"
-                                    : "text-on-surface-variant/50 hover:bg-surface-container-high hover:text-on-surface-variant"
-                                }`}
-                              >
-                                {langLabel(lang.isoCode)}
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                      <input
-                        className={inputBase}
-                        type="text"
-                        value={metaKeywords[seoLang] ?? ""}
-                        onChange={(e) =>
-                          setMetaKeywords((prev) => ({ ...prev, [seoLang]: e.target.value }))
-                        }
-                        placeholder="Enter keywords separated by commas…"
-                      />
-                      <p className="text-xs text-on-surface-variant mt-1">
-                        List relevant keywords to help search engines find this brand.
-                      </p>
-                    </div>
+                    <MultiLangInput
+                      label="Meta Keywords"
+                      placeholders={{
+                        en: "Enter keywords separated by commas…",
+                        vn: "Nhập từ khóa, cách nhau bằng dấu phẩy...",
+                        zh: "输入以逗号分隔的关键词...",
+                        ja: "カンマ区切りでキーワードを入力...",
+                      }}
+                      hint="List relevant keywords to help search engines find this brand."
+                    />
 
-                    {/* Meta Description */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <label className={labelBase}>Meta Description</label>
-                        <div className="flex items-center gap-0.5">
-                          {umbracoLangs.status === "loading" ? (
-                            <span className="text-[10px] text-on-surface-variant/40 italic">Loading…</span>
-                          ) : (
-                            languages.map((lang) => (
-                              <button
-                                key={lang.isoCode}
-                                type="button"
-                                title={lang.name}
-                                onClick={() => setSeoLang(lang.isoCode)}
-                                className={`rounded px-1.5 py-0.5 text-[10px] font-bold transition-colors ${
-                                  seoLang === lang.isoCode
-                                    ? "bg-primary text-on-primary"
-                                    : "text-on-surface-variant/50 hover:bg-surface-container-high hover:text-on-surface-variant"
-                                }`}
-                              >
-                                {langLabel(lang.isoCode)}
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                      <textarea
-                        className={`${inputBase} resize-none`}
-                        rows={4}
-                        value={metaDescriptions[seoLang] ?? ""}
-                        onChange={(e) =>
-                          setMetaDescriptions((prev) => ({ ...prev, [seoLang]: e.target.value }))
-                        }
-                        placeholder="Provide a brief overview of the brand that will be displayed on search results listings"
-                      />
-                      <p className={`text-xs mt-1 flex justify-end ${(metaDescriptions[seoLang] ?? "").length > 160 ? "text-error font-semibold" : "text-on-surface-variant"}`}>
-                        {(metaDescriptions[seoLang] ?? "").length} / 160
-                      </p>
-                    </div>
+                    <MultiLangTextarea
+                      label="Meta Description"
+                      rows={4}
+                      defaultValues={{
+                        en: isAdd
+                          ? ""
+                          : "T - 10.Deep demo ecommerce sirius brand meta description. Experience premium lifestyle curation with global delivery options.",
+                      }}
+                      placeholders={{
+                        en: "Provide a brief overview of the brand that will be displayed on search results listings",
+                        vn: "Mô tả ngắn về thương hiệu hiển thị trên kết quả tìm kiếm",
+                        zh: "提供将在搜索结果中显示的品牌简短概述",
+                        ja: "検索結果に表示されるブランドの概要を入力してください",
+                      }}
+                      hint="Recommended: 160 characters or fewer."
+                    />
                   </div>
                 </div>
 
@@ -821,10 +902,18 @@ export function EditBrandPage({
                         https://your-estore.com › brands › {brandName.toLowerCase().replace(/\s+/g, "-") || "brand-name"}
                       </div>
                       <h4 className="text-lg text-[#1a0dab] hover:underline cursor-pointer font-normal mb-1 truncate">
-                        {(metaTitles[seoLang] ?? "") || <span className="text-outline-variant italic">Meta title will appear here</span>}
+                        {isAdd ? (
+                          <span className="text-outline-variant italic">Meta title will appear here</span>
+                        ) : (
+                          "T - 10.Deep | TANGS Singapore"
+                        )}
                       </h4>
                       <p className="text-[13px] text-[#4d5156] leading-snug line-clamp-3">
-                        {(metaDescriptions[seoLang] ?? "") || <span className="italic text-outline-variant">Meta description will appear here</span>}
+                        {isAdd ? (
+                          <span className="italic text-outline-variant">Meta description will appear here</span>
+                        ) : (
+                          "T - 10.Deep demo ecommerce sirius brand meta description. Experience premium lifestyle curation with global delivery options."
+                        )}
                       </p>
                     </div>
                   </div>

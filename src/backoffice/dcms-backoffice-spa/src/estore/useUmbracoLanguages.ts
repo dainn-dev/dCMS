@@ -16,10 +16,12 @@ type State =
  * Fetches the list of installed languages from the Umbraco Management API.
  * Endpoint: GET /umbraco/management/api/v1/language
  *
- * Falls back to `fallback` (default: EN only) when the API is unreachable
- * (e.g. during local SPA-only dev without Umbraco running).
+ * Requires a Bearer token (from UMB_AUTH_CONTEXT) to authenticate against
+ * the Umbraco Management API v1. Falls back to EN-only when token is absent
+ * or the API is unreachable (e.g. local SPA dev without Umbraco running).
  */
 export function useUmbracoLanguages(
+  authToken?: string,
   fallback: UmbracoLanguage[] = [
     { isoCode: "en-US", name: "English", isDefault: true, isMandatory: true },
   ]
@@ -29,9 +31,12 @@ export function useUmbracoLanguages(
   useEffect(() => {
     let cancelled = false;
 
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
     fetch("/umbraco/management/api/v1/language?skip=0&take=100", {
       credentials: "same-origin",
-      headers: { Accept: "application/json" },
+      headers,
     })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -57,9 +62,9 @@ export function useUmbracoLanguages(
     return () => {
       cancelled = true;
     };
-  // fallback is stable between renders when passed as a literal — no dep needed
+  // Re-fetch when token becomes available (e.g. first load, token refresh)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authToken]);
 
   return state;
 }

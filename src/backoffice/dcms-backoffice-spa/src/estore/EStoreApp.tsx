@@ -1,13 +1,33 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EStoreLayout, type EStorePageId } from "./layout/EStoreLayout";
+import { LanguageProvider } from "./LanguageContext";
 import type { BrandListRow } from "./pages/BrandsPage";
 import { BrandsPage } from "./pages/BrandsPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { EditBrandPage } from "./pages/EditBrandPage";
+import { EditProductPage } from "./pages/EditProductPage";
+import { ProductImageImportPage } from "./pages/ProductImageImportPage";
+import { ProductImportPage } from "./pages/ProductImportPage";
+import { ProductInventoryImportPage } from "./pages/ProductInventoryImportPage";
+import { CategoryAssignmentPage } from "./pages/CategoryAssignmentPage";
+import { ProductConfigPage } from "./pages/ProductConfigPage";
+import { EditAttributePage } from "./pages/EditAttributePage";
+import { AttributeImportPage } from "./pages/AttributeImportPage";
+import { EditPromoPage } from "./pages/EditPromoPage";
+import { GroupedPromoCodesPage } from "./pages/GroupedPromoCodesPage";
+import { PromoExclusionListPage } from "./pages/PromoExclusionListPage";
+import type { PromoListRow } from "./promotions-columns";
+import type { AttributeListRow } from "./attributes-columns";
+import type { ProductListRow } from "./pages/ProductsPage";
 import { ProductsPage } from "./pages/ProductsPage";
 import { AttributesPage } from "./pages/AttributesPage";
 import { FulfillmentOptionsPage } from "./pages/FulfillmentOptionsPage";
+import { EditFulfillmentOptionPage } from "./pages/EditFulfillmentOptionPage";
+import { CollectionLocationsPage } from "./pages/CollectionLocationsPage";
+import { DeliveryAllocationPage } from "./pages/DeliveryAllocationPage";
+import { FulfillmentSlotsPage } from "./pages/FulfillmentSlotsPage";
 import { PromotionsPage } from "./pages/PromotionsPage";
+import { LogisticPartnerManagementPage } from "./pages/LogisticPartnerManagementPage";
 
 type BrandEditData = Pick<BrandListRow, "code" | "name" | "active" | "imageSrc" | "imageAlt">;
 
@@ -16,16 +36,382 @@ type BrandFormState =
   | { mode: "add" }
   | { mode: "edit"; data: BrandEditData };
 
-export function EStoreApp() {
+type PromoType = "standard" | "shareable" | "account-bound";
+
+type PromoFormState =
+  | { mode: "idle" }
+  | { mode: "add"; promoType: PromoType }
+  | { mode: "edit"; data: PromoListRow }
+  | { mode: "grouped"; parent: PromoListRow }
+  | { mode: "exclusion-list" };
+
+type AttributeFormState =
+  | { mode: "idle" }
+  | { mode: "add" }
+  | { mode: "edit"; data: AttributeListRow }
+  | { mode: "attr-import" };
+
+type ProductFormState =
+  | { mode: "idle" }
+  | { mode: "add" }
+  | { mode: "edit"; data: ProductListRow }
+  | { mode: "import" }
+  | { mode: "image-import" }
+  | { mode: "inventory-import" }
+  | { mode: "category-assignment" }
+  | { mode: "product-config" };
+
+type FulfillmentSection = "allocation" | "config" | "locations";
+
+type FulfillmentFormState =
+  | { mode: "idle" }
+  | { mode: "slots"; groupingId: string }
+  | { mode: "edit-slot"; groupingId: string; slotId?: string }
+  | { mode: "logistic-partners" };
+
+export type FulfillmentDeliveryMode = "Store Collection" | "Local Delivery" | "Overseas Delivery";
+
+export type FulfillmentGrouping = {
+  id: string;
+  groupName: string;
+  code: string;
+  startDate: string;
+  endDate: string;
+  priority: number;
+  active: boolean;
+  tenantEnabled: boolean;
+  maxPerTenant: number | "";
+  deliveryMode: FulfillmentDeliveryMode;
+  limitSelectedDistributionCenter: boolean;
+  stockLocation: string;
+};
+
+export type CollectionLocation = {
+  id: string;
+  name: string;
+  brandCodes?: string[];
+  address1?: string;
+  address2?: string;
+  address3?: string;
+  postalCode?: string;
+  country?: string;
+  geoLat?: string;
+  geoLng?: string;
+  desktopImageSrc?: string;
+  desktopImageName?: string;
+  mobileImageSrc?: string;
+  mobileImageName?: string;
+  active: boolean;
+  openingHours?: string;
+  closingHours?: string;
+};
+
+export type FulfillmentPredefinedFieldKey =
+  | "blockOffDatesAndTimes"
+  | "blockedDates"
+  | "collectionLocations"
+  | "excludedBrands"
+  | "excludedCategories"
+  | "excludedProducts"
+  | "freeDeliveryMinSpend"
+  | "includedBrands"
+  | "includedCategories"
+  | "includedProducts"
+  | "logisticPartner"
+  | "numberOfDeliverySlots"
+  | "openingAndClosingHours"
+  | "recipientNotificationEmails"
+  | "timeslot";
+
+export type FulfillmentPredefinedFieldSetting = {
+  key: FulfillmentPredefinedFieldKey;
+  label: string;
+  enabled: boolean;
+};
+
+export type LogisticPartner = {
+  id: string;
+  name: string;
+  code: string;
+  enabled: boolean;
+  integratedLogistic: boolean;
+};
+
+export type StockLocation = {
+  id: string;
+  name: string;
+  code: string;
+  active: boolean;
+};
+
+export type FulfillmentSlot = {
+  id: string;
+  groupingId: string;
+  name: string;
+  code: string;
+  mode: FulfillmentDeliveryMode;
+  startingDate: string;
+  endingDate: string;
+  price: string;
+  updatedAt: string;
+};
+
+export type FulfillmentFieldType =
+  | "Text Box"
+  | "WYSIWYG"
+  | "Geo Location"
+  | "Dropdown List"
+  | "Checkbox"
+  | "Date Picker"
+  | "Multiple Select";
+
+export type FulfillmentFieldSection =
+  | "Additional Info"
+  | "General Information"
+  | "Qualifier"
+  | "Fulfillment Settings"
+  | "Advanced Settings";
+
+export type FulfillmentDynamicField = {
+  id: string;
+  enabled: boolean;
+  required: boolean;
+  property: string;
+  columnLabel: string;
+  fieldName: string;
+  fieldType: FulfillmentFieldType;
+  section: FulfillmentFieldSection;
+};
+
+const LS_KEYS = {
+  fulfillmentPredefinedFields: "dcms.estore.fulfillment.predefinedFields.v1",
+  collectionLocations: "dcms.estore.fulfillment.collectionLocations.v1",
+  logisticPartners: "dcms.estore.fulfillment.logisticPartners.v1",
+};
+
+const DEFAULT_BRANDS: BrandListRow[] = [
+  {
+    code: "CAS-7721",
+    name: "Luxe Heritage Group",
+    imageAlt: "Minimalist abstract geometric logo with sharp angles and clean lines on a neutral background",
+    imageSrc:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuCE3gnGOwxCBJd-O91kFWC9Ys7MmX3uUyKEP-Uue7NKGilCk0aTlec5YS0d89W8x9X8lkFFpgpHVGV3OTFE7z1Kf6xTIMgldQEaj23BDB0Mtbv9BM66FWGZxZ6pMOJmbzOcMIXlCDJHHewraamlXGLG10IQ4Dj0iVkie9tj7INZzIeLlaFZ7NAzTRb_bi7sWHuiRmYFDCePqwhSc4knDdag68Xf1rqs61T6Rcndy0QGtMQFBuMRLTgEX1fBqRnBJfJV1E1j8AvJKSA",
+    active: true,
+  },
+  {
+    code: "VEL-4490",
+    name: "Velocity Tech Systems",
+    imageAlt: "Modern corporate emblem with a circular motif and elegant serif typography in a dark muted tone",
+    imageSrc:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuBOW2Bfv61jFiGsVEhs7pzGpS2bL8mHHiCdt3wGBYJ_ood63gKxVLi90yWNmxSQ7mhrlQ3p9VmqGoBTixTSsBi9zOrCnT1n0TSew0T3VEsqKqtdiUPOkvLmI6-5nodDQxlZpHnpWLE6aa1tw7yCiISzAgIDdR22bNseDLp-UUPH7h465EwLX5K5cuYiIyZrUDNNsjZ6xe9s4Frg-I-4hjmFYXRHpU-42kVk5L0mwUp9xsrKgyqj0KTv29mjGsNBAKQDGn9F0vWs0i4",
+    active: true,
+  },
+  {
+    code: "NOM-1022",
+    name: "Nomad Consulting Ltd.",
+    imageAlt: "Monochrome architectural brand logo using bold slab-serif lettering for a professional consulting firm",
+    imageSrc:
+      "https://lh3.googleusercontent.com/aida-public/AB6AXuB7yIQm-Rz09NCKbfnAZSD_9byiIdPPRNMvM1zXkTvyIowg7YuBmlKlQnwxaS8E0aITXNzhLloRDUYZljsWGyHB7ExQysjzKkTNPOg7NHucWjXDqdtDDb658MXRzFMDnyOCI4yCJgMy7tOks2pnxS_yLLsL1-FHXBqE2YhkrZkb5ym2Nbv-Zj_QohTQ7PfY-dFy7p0DiUxzLm9-wRbWIq-ilG5Sh0amZH3_jZmD0KfT0LuHvXN05S7bOnalnXlWaroTbAAijJdKV_I",
+    active: false,
+  },
+  {
+    code: "AUR-5501",
+    name: "Aura Essentials",
+    imageAlt: "Stylized floral emblem logo in soft golden tones on a clean white field for a luxury skincare brand",
+    imageSrc: "https://lh3.googleusercontent.com/aida-public/AB6AXuAMgUTMGnlA5lx3Ejy3wYKSGMHWnJv8lCV_jSKJ2sVYXFo94qLsU4VjhhZLcgBNfst7UdqOk45Ld4PSbA4U9mtdFPfI6iXkwbrSlXMkg_UdlONO9bGP6roflznlaLK3HdEAqeL9ef6KZmVW4uptu5pb_PNpTgkX_8JYm4Di2d2JaUHbOQ_SzXCCzLbeyb0I67i5nfwf1u2gNeJiSJk5IB0nweV7Xwm2hT-_bIw",
+    active: true,
+  },
+];
+
+const DEFAULT_PREDEFINED_FIELDS: FulfillmentPredefinedFieldSetting[] = [
+  { key: "blockOffDatesAndTimes", label: "Block Off Dates and Times", enabled: true },
+  { key: "blockedDates", label: "Blocked Dates", enabled: true },
+  { key: "collectionLocations", label: "Collection Locations", enabled: true },
+  { key: "excludedBrands", label: "Excluded Brands", enabled: true },
+  { key: "excludedCategories", label: "Excluded Categories", enabled: true },
+  { key: "excludedProducts", label: "Excluded Products", enabled: true },
+  { key: "freeDeliveryMinSpend", label: "Free Delivery Min Spend", enabled: true },
+  { key: "includedBrands", label: "Included Brands", enabled: true },
+  { key: "includedCategories", label: "Included Categories", enabled: true },
+  { key: "includedProducts", label: "Included Products", enabled: true },
+  { key: "logisticPartner", label: "Logistic Partner", enabled: true },
+  { key: "numberOfDeliverySlots", label: "Number of Delivery Slots", enabled: true },
+  { key: "openingAndClosingHours", label: "Opening and Closing Hours", enabled: true },
+  { key: "recipientNotificationEmails", label: "Recipient Notification Emails", enabled: true },
+  { key: "timeslot", label: "Timeslot", enabled: true },
+];
+
+function safeJsonParse<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function EStoreApp({ languages }: { languages?: import("./useUmbracoLanguages").UmbracoLanguage[] }) {
   const [page, setPage] = useState<EStorePageId>("brands");
   const [brandForm, setBrandForm] = useState<BrandFormState>({ mode: "idle" });
+  const [productForm, setProductForm] = useState<ProductFormState>({ mode: "idle" });
+  const [attributeForm, setAttributeForm] = useState<AttributeFormState>({ mode: "idle" });
+  const [promoForm, setPromoForm] = useState<PromoFormState>({ mode: "idle" });
+  const [fulfillmentSection, setFulfillmentSection] = useState<FulfillmentSection>("config");
+  const [fulfillmentForm, setFulfillmentForm] = useState<FulfillmentFormState>({ mode: "idle" });
+
+  const [brands, setBrands] = useState<BrandListRow[]>(DEFAULT_BRANDS);
+
+  const [predefinedFieldSettings, setPredefinedFieldSettings] = useState<FulfillmentPredefinedFieldSetting[]>(
+    () => safeJsonParse<FulfillmentPredefinedFieldSetting[]>(localStorage.getItem(LS_KEYS.fulfillmentPredefinedFields)) ?? DEFAULT_PREDEFINED_FIELDS
+  );
+
+  const [logisticPartners, setLogisticPartners] = useState<LogisticPartner[]>(
+    () =>
+      safeJsonParse<LogisticPartner[]>(localStorage.getItem(LS_KEYS.logisticPartners)) ?? [
+        { id: "lp-1", name: "DHL", code: "DHL", enabled: true, integratedLogistic: true },
+        { id: "lp-2", name: "FedEx", code: "FEDEX", enabled: true, integratedLogistic: true },
+        { id: "lp-3", name: "Ninja Van", code: "NINJA_VAN", enabled: false, integratedLogistic: false },
+        { id: "lp-4", name: "J&T Express", code: "JNT", enabled: true, integratedLogistic: false },
+      ]
+  );
+
+  const [fulfillmentGroupings, setFulfillmentGroupings] = useState<FulfillmentGrouping[]>([
+    {
+      id: "grp-1",
+      groupName: "Standard Delivery",
+      code: "STD_DELIVERY",
+      startDate: "2026-04-01T00:00",
+      endDate: "",
+      priority: 10,
+      active: true,
+      tenantEnabled: false,
+      maxPerTenant: "",
+      deliveryMode: "Local Delivery",
+      limitSelectedDistributionCenter: false,
+      stockLocation: "",
+    },
+  ]);
+
+  const defaultCollectionLocations = useMemo<CollectionLocation[]>(
+    () => [
+      {
+        id: "LOC_MAIN",
+        name: "Main Store",
+        brandCodes: ["CAS-7721", "VEL-4490"],
+        address1: "123 Market Street",
+        address2: "",
+        address3: "",
+        postalCode: "000000",
+        country: "Singapore",
+        geoLat: "1.3000",
+        geoLng: "103.8000",
+        active: true,
+        openingHours: "10:00",
+        closingHours: "22:00",
+      },
+      {
+        id: "LOC_WAREHOUSE",
+        name: "Warehouse Pickup",
+        brandCodes: ["AUR-5501"],
+        address1: "88 Industrial Ave",
+        address2: "",
+        address3: "",
+        postalCode: "000000",
+        country: "Singapore",
+        geoLat: "1.3100",
+        geoLng: "103.8200",
+        active: true,
+        openingHours: "09:00",
+        closingHours: "18:00",
+      },
+    ],
+    []
+  );
+
+  const [collectionLocations, setCollectionLocations] = useState<CollectionLocation[]>(
+    () => safeJsonParse<CollectionLocation[]>(localStorage.getItem(LS_KEYS.collectionLocations)) ?? defaultCollectionLocations
+  );
+
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.collectionLocations, JSON.stringify(collectionLocations));
+  }, [collectionLocations]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.fulfillmentPredefinedFields, JSON.stringify(predefinedFieldSettings));
+  }, [predefinedFieldSettings]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.logisticPartners, JSON.stringify(logisticPartners));
+  }, [logisticPartners]);
+
+  const [stockLocations, setStockLocations] = useState<StockLocation[]>([
+    { id: "dc-1", name: "DC - Central", code: "DC_CENTRAL", active: true },
+    { id: "dc-2", name: "DC - East", code: "DC_EAST", active: true },
+    { id: "dc-3", name: "DC - West", code: "DC_WEST", active: false },
+  ]);
+
+  const [fulfillmentSlots, setFulfillmentSlots] = useState<FulfillmentSlot[]>([
+    {
+      id: "slot-1",
+      groupingId: "grp-1",
+      name: "10am – 4pm",
+      code: "SLOT_10_16",
+      mode: "Local Delivery",
+      startingDate: "2026-04-01T00:00",
+      endingDate: "",
+      price: "5.99",
+      updatedAt: "2026-04-10 09:30",
+    },
+    {
+      id: "slot-2",
+      groupingId: "grp-1",
+      name: "4pm – 10pm",
+      code: "SLOT_16_22",
+      mode: "Local Delivery",
+      startingDate: "2026-04-01T00:00",
+      endingDate: "",
+      price: "7.99",
+      updatedAt: "2026-04-12 15:20",
+    },
+  ]);
+
+  const [dynamicFields, setDynamicFields] = useState<FulfillmentDynamicField[]>([
+    {
+      id: "df-1",
+      enabled: true,
+      required: false,
+      property: "deliveryNote",
+      columnLabel: "Delivery Note",
+      fieldName: "delivery_note",
+      fieldType: "Text Box",
+      section: "Additional Info",
+    },
+    {
+      id: "df-2",
+      enabled: false,
+      required: false,
+      property: "pickupInstructions",
+      columnLabel: "Pickup Instructions",
+      fieldName: "pickup_instructions",
+      fieldType: "WYSIWYG",
+      section: "Additional Info",
+    },
+  ]);
 
   function handlePageChange(id: EStorePageId) {
     if (id !== "brands") setBrandForm({ mode: "idle" });
+    if (id !== "products") setProductForm({ mode: "idle" });
+    if (id !== "attributes") setAttributeForm({ mode: "idle" });
+    if (id !== "promo-codes") setPromoForm({ mode: "idle" });
+    if (id !== "fulfillment-options") {
+      setFulfillmentForm({ mode: "idle" });
+      setFulfillmentSection("config");
+    }
     setPage(id);
   }
 
   return (
+    <LanguageProvider languages={languages}>
     <EStoreLayout page={page} onPageChange={handlePageChange}>
       {page === "brands" &&
         (brandForm.mode !== "idle" ? (
@@ -53,13 +439,186 @@ export function EStoreApp() {
                 },
               })
             }
+            rows={brands}
+            onRowsChange={setBrands}
           />
         ))}
       {page === "categories" && <CategoriesPage />}
-      {page === "products" && <ProductsPage />}
-      {page === "attributes" && <AttributesPage />}
-      {page === "promo-codes" && <PromotionsPage />}
-      {page === "fulfillment-options" && <FulfillmentOptionsPage />}
+      {page === "products" &&
+        (productForm.mode === "product-config" ? (
+          <ProductConfigPage onBack={() => setProductForm({ mode: "idle" })} />
+        ) : productForm.mode === "category-assignment" ? (
+          <CategoryAssignmentPage onBack={() => setProductForm({ mode: "idle" })} />
+        ) : productForm.mode === "inventory-import" ? (
+          <ProductInventoryImportPage onBack={() => setProductForm({ mode: "idle" })} />
+        ) : productForm.mode === "image-import" ? (
+          <ProductImageImportPage onBack={() => setProductForm({ mode: "idle" })} />
+        ) : productForm.mode === "import" ? (
+          <ProductImportPage onBack={() => setProductForm({ mode: "idle" })} />
+        ) : productForm.mode !== "idle" ? (
+          <EditProductPage
+            mode={productForm.mode === "add" ? "add" : "edit"}
+            product={productForm.mode === "edit" ? productForm.data : undefined}
+            onBack={() => setProductForm({ mode: "idle" })}
+          />
+        ) : (
+          <ProductsPage
+            onAddProduct={() => setProductForm({ mode: "add" })}
+            onEditProduct={(row) => setProductForm({ mode: "edit", data: row })}
+            onImportProduct={() => setProductForm({ mode: "import" })}
+            onImageImport={() => setProductForm({ mode: "image-import" })}
+            onInventoryImport={() => setProductForm({ mode: "inventory-import" })}
+            onCategoryAssignment={() => setProductForm({ mode: "category-assignment" })}
+            onProductConfig={() => setProductForm({ mode: "product-config" })}
+          />
+        ))}
+      {page === "attributes" &&
+        (attributeForm.mode === "attr-import" ? (
+          <AttributeImportPage onBack={() => setAttributeForm({ mode: "idle" })} />
+        ) : attributeForm.mode !== "idle" ? (
+          <EditAttributePage
+            mode={attributeForm.mode === "add" ? "add" : "edit"}
+            attribute={attributeForm.mode === "edit" ? attributeForm.data : undefined}
+            onBack={() => setAttributeForm({ mode: "idle" })}
+          />
+        ) : (
+          <AttributesPage
+            onCreateAttribute={() => setAttributeForm({ mode: "add" })}
+            onEditAttribute={(row) => setAttributeForm({ mode: "edit", data: row })}
+            onImportValues={() => setAttributeForm({ mode: "attr-import" })}
+          />
+        ))}
+      {page === "promo-codes" &&
+        (promoForm.mode === "exclusion-list" ? (
+          <PromoExclusionListPage onBack={() => setPromoForm({ mode: "idle" })} />
+        ) : promoForm.mode === "grouped" ? (
+          <GroupedPromoCodesPage
+            parentPromo={promoForm.parent}
+            onBack={() => setPromoForm({ mode: "idle" })}
+            onEditChild={(child) => setPromoForm({ mode: "edit", data: child })}
+          />
+        ) : promoForm.mode !== "idle" ? (
+          <EditPromoPage
+            mode={promoForm.mode === "add" ? "add" : "edit"}
+            promoType={promoForm.mode === "add" ? promoForm.promoType : "standard"}
+            promo={promoForm.mode === "edit" ? promoForm.data : undefined}
+            onBack={() => setPromoForm({ mode: "idle" })}
+          />
+        ) : (
+          <PromotionsPage
+            onCreatePromo={(type) => setPromoForm({ mode: "add", promoType: type })}
+            onEditPromo={(row) => setPromoForm({ mode: "edit", data: row })}
+            onViewCodes={(row) => setPromoForm({ mode: "grouped", parent: row })}
+            onOpenExclusionList={() => setPromoForm({ mode: "exclusion-list" })}
+          />
+        ))}
+      {page === "fulfillment-options" &&
+        (fulfillmentForm.mode === "logistic-partners" ? (
+          <LogisticPartnerManagementPage
+            partners={logisticPartners}
+            onChange={setLogisticPartners}
+            onBack={() => setFulfillmentForm({ mode: "idle" })}
+          />
+        ) : fulfillmentForm.mode === "slots" ? (
+          <FulfillmentSlotsPage
+            grouping={fulfillmentGroupings.find((g) => g.id === fulfillmentForm.groupingId)!}
+            slots={fulfillmentSlots.filter((s) => s.groupingId === fulfillmentForm.groupingId)}
+            onBack={() => setFulfillmentForm({ mode: "idle" })}
+            onCreate={() => {
+              const slotId = `slot-${Math.random().toString(36).slice(2, 8)}`;
+              setFulfillmentSlots((prev) => [
+                {
+                  id: slotId,
+                  groupingId: fulfillmentForm.groupingId,
+                  name: "New Slot",
+                  code: "NEW_SLOT",
+                  mode: fulfillmentGroupings.find((g) => g.id === fulfillmentForm.groupingId)?.deliveryMode ?? "Local Delivery",
+                  startingDate: "",
+                  endingDate: "",
+                  price: "0.00",
+                  updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+                },
+                ...prev,
+              ]);
+              setFulfillmentForm({ mode: "edit-slot", groupingId: fulfillmentForm.groupingId, slotId });
+            }}
+            onEdit={(slotId) => setFulfillmentForm({ mode: "edit-slot", groupingId: fulfillmentForm.groupingId, slotId })}
+            onDelete={(slotId) => setFulfillmentSlots((prev) => prev.filter((s) => s.id !== slotId))}
+          />
+        ) : fulfillmentForm.mode === "edit-slot" ? (
+          <EditFulfillmentOptionPage
+            grouping={fulfillmentGroupings.find((g) => g.id === fulfillmentForm.groupingId)}
+            slot={fulfillmentSlots.find((s) => s.id === fulfillmentForm.slotId)}
+            collectionLocations={collectionLocations}
+            stockLocations={stockLocations}
+            dynamicFields={dynamicFields}
+            predefinedFieldSettings={predefinedFieldSettings}
+            logisticPartners={logisticPartners}
+            onSave={(slot) => {
+              setFulfillmentSlots((prev) => {
+                const exists = prev.some((s) => s.id === slot.id);
+                return exists ? prev.map((s) => (s.id === slot.id ? slot : s)) : [slot, ...prev];
+              });
+            }}
+            onBack={() => setFulfillmentForm({ mode: "idle" })}
+          />
+        ) : fulfillmentSection === "locations" ? (
+          <CollectionLocationsPage
+            locations={collectionLocations}
+            onChange={setCollectionLocations}
+            brands={brands}
+            onBack={() => setFulfillmentSection("config")}
+          />
+        ) : fulfillmentSection === "allocation" ? (
+          <DeliveryAllocationPage
+            stockLocations={stockLocations}
+            onChange={setStockLocations}
+            onBack={() => setFulfillmentSection("config")}
+          />
+        ) : (
+          <FulfillmentOptionsPage
+            section={fulfillmentSection}
+            onSectionChange={setFulfillmentSection}
+            groupings={fulfillmentGroupings}
+            slots={fulfillmentSlots}
+            stockLocations={stockLocations}
+            dynamicFields={dynamicFields}
+            onDynamicFieldsChange={setDynamicFields}
+            predefinedFieldSettings={predefinedFieldSettings}
+            onPredefinedFieldSettingsChange={setPredefinedFieldSettings}
+            onOpenLogisticPartners={() => setFulfillmentForm({ mode: "logistic-partners" })}
+            onCreateGrouping={(next) => {
+              const id = `grp-${Math.random().toString(36).slice(2, 8)}`;
+              setFulfillmentGroupings((prev) => [{ ...next, id }, ...prev]);
+              return id;
+            }}
+            onUpdateGrouping={(id, next) =>
+              setFulfillmentGroupings((prev) => prev.map((g) => (g.id === id ? { ...next, id } : g)))
+            }
+            onDeleteGrouping={(id) => setFulfillmentGroupings((prev) => prev.filter((g) => g.id !== id))}
+            onViewDeliverySlots={(groupingId) => setFulfillmentForm({ mode: "slots", groupingId })}
+            onCreateTimeSlot={(groupingId) => {
+              const slotId = `slot-${Math.random().toString(36).slice(2, 8)}`;
+              const grp = fulfillmentGroupings.find((g) => g.id === groupingId);
+              setFulfillmentSlots((prev) => [
+                {
+                  id: slotId,
+                  groupingId,
+                  name: "New Slot",
+                  code: "NEW_SLOT",
+                  mode: grp?.deliveryMode ?? "Local Delivery",
+                  startingDate: "",
+                  endingDate: "",
+                  price: "0.00",
+                  updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+                },
+                ...prev,
+              ]);
+              setFulfillmentForm({ mode: "edit-slot", groupingId, slotId });
+            }}
+          />
+        ))}
     </EStoreLayout>
+    </LanguageProvider>
   );
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import {
   IconAdd,
   IconCalendarToday,
@@ -39,28 +40,145 @@ const btnFooterGhost =
 const btnFooterPrimary =
   "px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2";
 
-type CatNode = { id: string; name: string; active?: boolean; children?: CatNode[] };
+type CatNode = {
+  id: string;
+  name: string;
+  active?: boolean;
+  publishFrom?: string;   // ISO date string, e.g. "2024-01-01"
+  publishUntil?: string;  // ISO date string — past date = expired
+  sortOrder?: number;
+  children?: CatNode[];
+};
 type PageMode =
   | { kind: "edit"; nodeId: string }
   | { kind: "add"; parentId: string | null };
 type EditTab = "general" | "images" | "navbar" | "product-page" | "seo";
 
-const TREE: CatNode[] = [
+// ─── Category Name Field ──────────────────────────────────────────────────────
+
+function CategoryNameField({
+  isAddMode,
+  defaultEnValue,
+}: {
+  isAddMode: boolean;
+  defaultEnValue: string;
+}) {
+  return (
+    <MultiLangInput
+      label="Category Name (Multi-language)"
+      defaultValues={{
+        en: isAddMode ? "" : defaultEnValue,
+        zh: isAddMode ? "" : "@12% 折扣",
+      }}
+      placeholders={{ en: "e.g. Men, Women, Kids", vn: "Tên danh mục", zh: "中文名称", ja: "カテゴリ名" }}
+    />
+  );
+}
+
+const INITIAL_TREE: CatNode[] = [
   {
     id: "c1",
     name: "@12%rebate",
     active: true,
+    publishFrom: "2024-01-01",
+    publishUntil: "2027-12-31",
+    sortOrder: 1,
     children: [
-      { id: "c1a", name: "Sub-category A", active: true },
-      { id: "c1b", name: "Sub-category B", active: false },
+      {
+        id: "c1a",
+        name: "Sub-category A",
+        active: true,
+        publishFrom: "2024-01-01",
+        publishUntil: "2027-12-31",
+        sortOrder: 1,
+      },
+      {
+        id: "c1b",
+        name: "Sub-category B",
+        active: false,
+        publishFrom: "2023-06-01",
+        publishUntil: "2024-03-15",  // expired
+        sortOrder: 2,
+      },
     ],
   },
-  { id: "c2", name: "1-12-REBATE", active: true },
-  { id: "c3", name: "Anniversary", active: false },
-  { id: "c4", name: "CGCategory", active: true },
-  { id: "c5", name: "Electronics", active: true },
-  { id: "c6", name: "Furniture", active: true },
+  {
+    id: "c2",
+    name: "1-12-REBATE",
+    active: true,
+    publishFrom: "2023-12-01",
+    publishUntil: "2024-02-28",  // expired
+    sortOrder: 2,
+  },
+  {
+    id: "c3",
+    name: "Anniversary",
+    active: false,
+    publishFrom: "2023-09-01",
+    publishUntil: "2023-12-31",  // expired
+    sortOrder: 3,
+  },
+  {
+    id: "c4",
+    name: "CGCategory",
+    active: true,
+    publishFrom: "2024-03-01",
+    publishUntil: "2028-06-30",
+    sortOrder: 4,
+  },
+  {
+    id: "c5",
+    name: "Electronics",
+    active: true,
+    publishFrom: "2024-01-01",
+    publishUntil: "2028-12-31",
+    sortOrder: 5,
+  },
+  {
+    id: "c6",
+    name: "Furniture",
+    active: true,
+    publishFrom: "2024-06-01",
+    publishUntil: "2027-06-30",
+    sortOrder: 6,
+  },
 ];
+
+// ─── Tree mutation helpers ────────────────────────────────────────────────────
+
+function removeNode(
+  nodes: CatNode[],
+  id: string
+): { tree: CatNode[]; removed: CatNode | null } {
+  let removed: CatNode | null = null;
+  const tree = nodes
+    .filter((n) => {
+      if (n.id === id) { removed = n; return false; }
+      return true;
+    })
+    .map((n) => {
+      if (!n.children?.length) return n;
+      const result = removeNode(n.children, id);
+      if (result.removed) removed = result.removed;
+      return { ...n, children: result.tree };
+    });
+  return { tree, removed };
+}
+
+function insertNode(
+  nodes: CatNode[],
+  node: CatNode,
+  parentId: string | null
+): CatNode[] {
+  if (parentId === null) return [...nodes, node];
+  return nodes.map((n) => {
+    if (n.id === parentId)
+      return { ...n, children: [...(n.children ?? []), node] };
+    if (n.children?.length)
+      return { ...n, children: insertNode(n.children, node, parentId) };
+    return n;
+  });
+}
 
 function collectExpandableIds(nodes: CatNode[], acc: string[] = []): string[] {
   for (const n of nodes) {
@@ -96,6 +214,82 @@ function findParentId(
     }
   }
   return undefined;
+}
+
+// ─── Expiry helpers ───────────────────────────────────────────────────────────
+
+const TODAY = new Date();
+TODAY.setHours(0, 0, 0, 0);
+
+function isExpired(node: CatNode): boolean {
+  if (!node.publishUntil) return false;
+  return new Date(node.publishUntil) < TODAY;
+}
+
+function countExpiredInTree(nodes: CatNode[]): number {
+  return nodes.reduce((acc, n) => {
+    const self = isExpired(n) ? 1 : 0;
+    const children = countExpiredInTree(n.children ?? []);
+    return acc + self + children;
+  }, 0);
+}
+
+// ─── Export to CSV (Excel-compatible) ────────────────────────────────────────
+
+type ExportRow = {
+  "Category ID": string;
+  "Category Name": string;
+  "Parent Category": string;
+  "Sort Order": string;
+  Status: string;
+  Expired: string;
+  "Publish From": string;
+  "Publish Until": string;
+};
+
+function flattenForExport(
+  nodes: CatNode[],
+  parentName = "(Root)"
+): ExportRow[] {
+  return nodes.flatMap((n) => {
+    const row: ExportRow = {
+      "Category ID": n.id,
+      "Category Name": n.name,
+      "Parent Category": parentName,
+      "Sort Order": String(n.sortOrder ?? ""),
+      Status: n.active !== false ? "Active" : "Inactive",
+      Expired: isExpired(n) ? "Yes" : "No",
+      "Publish From": n.publishFrom ?? "",
+      "Publish Until": n.publishUntil ?? "",
+    };
+    return [row, ...flattenForExport(n.children ?? [], n.name)];
+  });
+}
+
+function exportCategoriesToCSV(nodes: CatNode[]) {
+  const rows = flattenForExport(nodes);
+  if (rows.length === 0) return;
+
+  const headers = Object.keys(rows[0]) as (keyof ExportRow)[];
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+
+  const csvLines = [
+    headers.map(escape).join(","),
+    ...rows.map((r) => headers.map((h) => escape(r[h])).join(",")),
+  ];
+
+  // UTF-8 BOM so Excel opens with correct encoding
+  const blob = new Blob(["\uFEFF" + csvLines.join("\r\n")], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `category-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ─── Category Tree Picker ────────────────────────────────────────────────────
@@ -194,22 +388,95 @@ function CategoryTreePicker({
 // ─── CategoriesPage ──────────────────────────────────────────────────────────
 
 export function CategoriesPage() {
-  const expandableIds = useMemo(() => collectExpandableIds(TREE), []);
+  const [treeData, setTreeData] = useState<CatNode[]>(INITIAL_TREE);
+  const expandableIds = useMemo(() => collectExpandableIds(treeData), [treeData]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["c1"]));
   const [mode, setMode] = useState<PageMode>({ kind: "edit", nodeId: "c1" });
   const [filter, setFilter] = useState("");
+  const [hideExpired, setHideExpired] = useState(true);
   const [tab, setTab] = useState<EditTab>("general");
   const [formParentId, setFormParentId] = useState<string | null>(null);
+  const [originalParentId, setOriginalParentId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
+    message: "",
+    visible: false,
+  });
+
+  // Auto-hide toast after 3 s
+  useEffect(() => {
+    if (!toast.visible) return;
+    const t = setTimeout(() => setToast((p) => ({ ...p, visible: false })), 3000);
+    return () => clearTimeout(t);
+  }, [toast.visible]);
+
+  const showToast = useCallback((message: string) => {
+    setToast({ message, visible: true });
+  }, []);
 
   useEffect(() => {
     if (mode.kind === "add") {
       setFormParentId(mode.parentId);
+      setOriginalParentId(mode.parentId);
       setTab("general");
     } else {
-      const p = findParentId(TREE, mode.nodeId);
-      setFormParentId(p !== undefined ? p : null);
+      const p = findParentId(treeData, mode.nodeId);
+      const pid = p !== undefined ? p : null;
+      setFormParentId(pid);
+      setOriginalParentId(pid);
     }
+  // treeData intentionally excluded — only sync when mode changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
+
+  const isAddMode = mode.kind === "add";
+
+  // Reclassification — detected when parent picker changes from original
+  const isReclassifying =
+    !isAddMode && formParentId !== originalParentId;
+  const reclassifyFromLabel =
+    originalParentId === null
+      ? "Top Level"
+      : (findNodeName(treeData, originalParentId) ?? "Unknown");
+  const reclassifyToLabel =
+    formParentId === null
+      ? "Top Level"
+      : (findNodeName(treeData, formParentId) ?? "Unknown");
+
+  const handleSaveCategory = useCallback(() => {
+    if (isAddMode) {
+      showToast("Category created successfully.");
+      setShowSuccessModal(true);
+      return;
+    }
+
+    if (isReclassifying && mode.kind === "edit") {
+      const { tree: treeWithout, removed } = removeNode(treeData, mode.nodeId);
+      if (removed) {
+        const newTree = insertNode(treeWithout, removed, formParentId);
+        setTreeData(newTree);
+        setOriginalParentId(formParentId);
+        // Expand new parent so the moved node is visible
+        if (formParentId) {
+          setExpanded((prev) => new Set([...prev, formParentId]));
+        }
+        showToast(
+          formParentId === null
+            ? `"${removed.name}" reclassified as a top-level category.`
+            : `"${removed.name}" moved under "${reclassifyToLabel}".`
+        );
+      }
+    } else {
+      showToast("Category saved.");
+    }
+  }, [
+    isAddMode,
+    isReclassifying,
+    mode,
+    treeData,
+    formParentId,
+    reclassifyToLabel,
+    showToast,
+  ]);
 
   const expandAll = useCallback(() => setExpanded(new Set(expandableIds)), [expandableIds]);
   const collapseAll = useCallback(() => setExpanded(new Set()), []);
@@ -230,7 +497,11 @@ export function CategoriesPage() {
   // ── Tree rendering ──────────────────────────────────────────────────────────
 
   const filterLower = filter.trim().toLowerCase();
+  const expiredCount = useMemo(() => countExpiredInTree(treeData), [treeData]);
+
   const nodeMatches = (n: CatNode): boolean => {
+    // Hide expired nodes when checkbox is checked
+    if (hideExpired && isExpired(n)) return false;
     if (!filterLower) return true;
     if (n.name.toLowerCase().includes(filterLower)) return true;
     return n.children?.some(nodeMatches) ?? false;
@@ -251,9 +522,17 @@ export function CategoriesPage() {
         ? `${rowBase} bg-primary/10 text-primary font-semibold`
         : `${rowBase} text-on-surface-variant hover:bg-surface-container-high`;
 
+      const nodeExpired = isExpired(node);
+
       const inactiveBadge = !isActive && (
-        <span className="shrink-0 rounded-full bg-outline-variant/25 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-on-surface-variant">
+        <span className="shrink-0 rounded-full bg-outline-variant/25 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-on-surface-variant group-hover:hidden">
           Inactive
+        </span>
+      );
+
+      const expiredBadge = nodeExpired && (
+        <span className="shrink-0 rounded-full bg-error/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-error group-hover:hidden">
+          Expired
         </span>
       );
 
@@ -292,13 +571,14 @@ export function CategoriesPage() {
             <div
               role="button"
               tabIndex={0}
-              className={rowCls}
+              className={`${rowCls} ${nodeExpired ? "opacity-60" : ""}`}
               onClick={() => setMode({ kind: "edit", nodeId: node.id })}
               onKeyDown={(e) => e.key === "Enter" && setMode({ kind: "edit", nodeId: node.id })}
             >
               <span className="inline-flex w-5 shrink-0" aria-hidden />
               <IconTag className={`h-4 w-4 shrink-0 ${!isActive ? "opacity-40" : "opacity-80"}`} />
               <span className={`truncate ${!isActive ? "opacity-50" : ""}`}>{node.name}</span>
+              {expiredBadge}
               {inactiveBadge}
               {actionBtns}
             </div>
@@ -311,7 +591,7 @@ export function CategoriesPage() {
           <div
             role="button"
             tabIndex={0}
-            className={rowCls}
+            className={`${rowCls} ${nodeExpired ? "opacity-60" : ""}`}
             onClick={() => setMode({ kind: "edit", nodeId: node.id })}
             onKeyDown={(e) => e.key === "Enter" && setMode({ kind: "edit", nodeId: node.id })}
           >
@@ -339,6 +619,7 @@ export function CategoriesPage() {
               )}
               <span className={`truncate ${!isActive ? "opacity-50" : ""}`}>{node.name}</span>
             </span>
+            {expiredBadge}
             {inactiveBadge}
             {actionBtns}
           </div>
@@ -356,11 +637,10 @@ export function CategoriesPage() {
   const [restrictAccess, setRestrictAccess] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-  const isAddMode = mode.kind === "add";
   const editNodeName =
-    mode.kind === "edit" ? (findNodeName(TREE, mode.nodeId) ?? "Category") : "";
+    mode.kind === "edit" ? (findNodeName(treeData, mode.nodeId) ?? "Category") : "";
   const addParentName =
-    isAddMode && mode.parentId ? findNodeName(TREE, mode.parentId) : null;
+    isAddMode && mode.parentId ? findNodeName(treeData, mode.parentId) : null;
 
   const rightPanelTitle = isAddMode
     ? mode.parentId === null
@@ -385,7 +665,7 @@ export function CategoriesPage() {
 
   return (
     <div
-      className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low"
+      className="-m-6 flex h-[calc(100dvh-6rem)] flex-col bg-surface-container-low overflow-hidden"
       aria-label="Category management"
     >
       {/* Page header */}
@@ -413,7 +693,10 @@ export function CategoriesPage() {
           <button
             type="button"
             className="flex items-center gap-2 rounded-md bg-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant transition-colors hover:bg-surface-variant/80"
-            onClick={() => console.info("[Categories] Export (placeholder)")}
+            onClick={() => {
+              exportCategoriesToCSV(treeData);
+              showToast("Category export downloaded.");
+            }}
           >
             <IconDownload className="h-4 w-4 shrink-0" />
             Export Categories
@@ -421,9 +704,9 @@ export function CategoriesPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-6 p-6">
+      <div className="flex min-h-0 flex-1 gap-6 p-6 overflow-hidden">
         {/* ── Left: hierarchy ─────────────────────────────────────────────── */}
-        <section className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
+        <section className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm" style={{ minHeight: 0 }}>
           <div className="border-b border-outline-variant/10 p-4">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant">
@@ -466,9 +749,35 @@ export function CategoriesPage() {
               <IconSort className="h-3.5 w-3.5 shrink-0" />
               Sort Categories
             </button>
+
           </div>
           <div className="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-4">
-            {renderTree(TREE)}
+            {renderTree(treeData)}
+          </div>
+
+          {/* Hide Expired toggle — pinned at bottom of tree panel */}
+          <div className="shrink-0 border-t border-outline-variant/10 px-4 py-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[11px] font-medium text-on-surface-variant transition-colors hover:bg-surface-container-high select-none">
+              <input
+                type="checkbox"
+                checked={hideExpired}
+                onChange={(e) => setHideExpired(e.target.checked)}
+                className="h-3.5 w-3.5 cursor-pointer accent-primary"
+                aria-label="Hide expired categories"
+              />
+              <span>Hide Expired</span>
+              {expiredCount > 0 && (
+                <span
+                  className={`ml-auto rounded-full px-1.5 py-px text-[9px] font-bold tabular-nums ${
+                    hideExpired
+                      ? "bg-outline-variant/30 text-on-surface-variant"
+                      : "bg-error/10 text-error"
+                  }`}
+                >
+                  {expiredCount}
+                </span>
+              )}
+            </label>
           </div>
         </section>
 
@@ -558,14 +867,27 @@ export function CategoriesPage() {
                       <CategoryTreePicker
                         value={formParentId}
                         onChange={setFormParentId}
-                        tree={TREE}
+                        tree={treeData}
                         excludeId={mode.kind === "edit" ? mode.nodeId : undefined}
                       />
-                      <p className="text-[10px] text-on-surface-variant">
-                        {formParentId === null
-                          ? "This category will be a top-level root."
-                          : "This category will appear under the selected parent."}
-                      </p>
+                      {isReclassifying ? (
+                        <div className="flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/80 px-3 py-2 dark:border-amber-500/30 dark:bg-amber-900/20">
+                          <IconInfo className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                          <p className="text-[10px] leading-relaxed text-amber-800 dark:text-amber-300">
+                            <span className="font-bold">Reclassify:</span>{" "}
+                            <span className="font-medium">{reclassifyFromLabel}</span>
+                            {" → "}
+                            <span className="font-medium">{reclassifyToLabel}</span>
+                            {". Save to apply."}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-on-surface-variant">
+                          {formParentId === null
+                            ? "This category will be a top-level root."
+                            : "This category will appear under the selected parent."}
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <label className={labelBase}>Internal Identifier</label>
@@ -578,35 +900,10 @@ export function CategoriesPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <label className={labelBase}>Category Name (Multi-language)</label>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <span className="text-[10px] font-bold uppercase text-outline">English (EN)</span>
-                        <input
-                          className={inputBase}
-                          defaultValue={isAddMode ? "" : editNodeName}
-                          placeholder={isAddMode ? "e.g. Men, Women, Kids" : ""}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <span className="text-[10px] font-bold uppercase text-outline">Chinese (ZH)</span>
-                        <input
-                          className={inputBase}
-                          defaultValue={isAddMode ? "" : "@12% 折扣"}
-                          placeholder={isAddMode ? "中文名称" : ""}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <span className="text-[10px] font-bold uppercase text-outline">Vietnamese (VN)</span>
-                        <input className={inputBase} placeholder="Tên danh mục" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <span className="text-[10px] font-bold uppercase text-outline">Japanese (JA)</span>
-                        <input className={inputBase} placeholder="カテゴリ名" />
-                      </div>
-                    </div>
-                  </div>
+                  <CategoryNameField
+                    isAddMode={isAddMode}
+                    defaultEnValue={isAddMode ? "" : editNodeName}
+                  />
                 </div>
               )}
 
@@ -911,10 +1208,16 @@ export function CategoriesPage() {
                           <IconLink className="h-4 w-4" />
                         </button>
                       </div>
-                      <textarea
-                        className={`min-h-[140px] ${inputBase} resize-y`}
-                        placeholder="Enter category overview and description..."
+                      <MultiLangTextarea
+                        label=""
                         rows={5}
+                        placeholders={{
+                          en: "Enter category overview and description...",
+                          vn: "Nhập mô tả danh mục...",
+                          zh: "输入类别概述和描述...",
+                          ja: "カテゴリの概要と説明を入力してください...",
+                        }}
+                        className="min-h-[140px] rounded-none border-0 focus:ring-0"
                       />
                     </div>
                   </div>
@@ -927,44 +1230,48 @@ export function CategoriesPage() {
                   {/* SEO Metadata */}
                   <div className="space-y-5">
                     <h3 className={sectionHeading}>SEO &amp; Metadata</h3>
-                    <div className="space-y-2">
-                      <label className={labelBase}>Meta Title</label>
-                      <input
-                        className={inputBase}
-                        defaultValue={isAddMode ? "" : "Shop @12%rebate Category Online | Exclusive Deals"}
-                        placeholder={isAddMode ? "e.g. Shop Electronics Online | Best Deals" : ""}
-                      />
-                      <p className="text-[10px] text-on-surface-variant">
-                        Text that appears on the browser's title bar and tab.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <label className={labelBase}>Meta Keywords</label>
-                      <input
-                        className={inputBase}
-                        defaultValue={isAddMode ? "" : "rebate, deals, cashback, enterprise savings"}
-                        placeholder="Comma-separated keywords, e.g. electronics, gadgets, tech"
-                      />
-                      <p className="text-[10px] text-on-surface-variant">
-                        Relevant keywords to help search engines improve this category's visibility.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <label className={labelBase}>Meta Description</label>
-                      <textarea
-                        className={inputBase}
-                        rows={3}
-                        defaultValue={
-                          isAddMode
-                            ? ""
-                            : "Discover huge savings in our rebate category. Browse high-quality items with guaranteed 12% cash back for enterprise members."
-                        }
-                        placeholder={isAddMode ? "Describe this category for search engines..." : ""}
-                      />
-                      <p className="text-[10px] text-on-surface-variant">
-                        Brief overview displayed in search result listings.
-                      </p>
-                    </div>
+                    <MultiLangInput
+                      label="Meta Title"
+                      defaultValues={{
+                        en: isAddMode ? "" : "Shop @12%rebate Category Online | Exclusive Deals",
+                      }}
+                      placeholders={{
+                        en: isAddMode ? "e.g. Shop Electronics Online | Best Deals" : "",
+                        vn: "VD: Mua sắm điện tử | Ưu đãi tốt nhất",
+                        zh: "例：网上购物电子产品 | 最优惠",
+                        ja: "例：エレクトロニクスをオンラインで購入 | 最高のお得",
+                      }}
+                      hint="Text that appears on the browser's title bar and tab."
+                    />
+                    <MultiLangInput
+                      label="Meta Keywords"
+                      defaultValues={{
+                        en: isAddMode ? "" : "rebate, deals, cashback, enterprise savings",
+                      }}
+                      placeholders={{
+                        en: "Comma-separated keywords, e.g. electronics, gadgets, tech",
+                        vn: "Từ khóa cách nhau bằng dấu phẩy",
+                        zh: "以逗号分隔的关键词",
+                        ja: "カンマ区切りのキーワード",
+                      }}
+                      hint="Relevant keywords to help search engines improve this category's visibility."
+                    />
+                    <MultiLangTextarea
+                      label="Meta Description"
+                      rows={3}
+                      defaultValues={{
+                        en: isAddMode
+                          ? ""
+                          : "Discover huge savings in our rebate category. Browse high-quality items with guaranteed 12% cash back for enterprise members.",
+                      }}
+                      placeholders={{
+                        en: isAddMode ? "Describe this category for search engines..." : "",
+                        vn: "Mô tả ngắn về danh mục này cho công cụ tìm kiếm...",
+                        zh: "为搜索引擎描述此类别...",
+                        ja: "検索エンジン向けにこのカテゴリを説明してください...",
+                      }}
+                      hint="Brief overview displayed in search result listings."
+                    />
                   </div>
 
                   {/* Google Search Preview */}
@@ -1072,7 +1379,8 @@ export function CategoriesPage() {
                   if (isAddMode) {
                     setMode({ kind: "edit", nodeId: "c1" });
                   } else {
-                    console.info("[Categories] Discard changes (placeholder)");
+                    // Reset parent picker to original (discard reclassification)
+                    setFormParentId(originalParentId);
                   }
                 }}
               >
@@ -1080,22 +1388,38 @@ export function CategoriesPage() {
               </button>
               <button
                 type="button"
-                className={btnFooterPrimary}
-                onClick={() => {
-                  if (isAddMode) {
-                    console.info("[Categories] Create category (placeholder)", { formParentId });
-                    setShowSuccessModal(true);
-                  } else {
-                    console.info("[Categories] Save (placeholder)");
-                  }
-                }}
+                className={isReclassifying
+                  ? "px-6 py-2 bg-amber-600 text-white rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-amber-600/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2"
+                  : btnFooterPrimary}
+                onClick={handleSaveCategory}
               >
                 <IconSave className="h-4 w-4" />
-                {isAddMode ? "Create Category" : "Save Category"}
+                {isAddMode ? "Create Category" : isReclassifying ? "Save & Reclassify" : "Save Category"}
               </button>
             </div>
           </footer>
         </section>
+      </div>
+
+      {/* ── Toast notification ── */}
+      <div
+        aria-live="polite"
+        className={`fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 transition-all duration-300 ${
+          toast.visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0 pointer-events-none"
+        }`}
+      >
+        <div className="flex items-center gap-3 rounded-xl bg-on-surface px-5 py-3 shadow-2xl">
+          <IconCheckCircle className="h-4 w-4 shrink-0 text-primary" />
+          <span className="text-sm font-medium text-surface">{toast.message}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="ml-2 rounded p-0.5 text-surface/60 hover:text-surface transition-colors"
+            onClick={() => setToast((p) => ({ ...p, visible: false }))}
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* ── Success Confirmation Modal ── */}
@@ -1122,7 +1446,7 @@ export function CategoriesPage() {
                   The new category has been saved and is now available in the hierarchy.
                   {formParentId === null
                     ? " It was added as a top-level category."
-                    : ` It was added under "${findNodeName(TREE, formParentId) ?? "the selected parent"}".`}
+                    : ` It was added under "${findNodeName(treeData, formParentId) ?? "the selected parent"}".`}
                 </p>
               </div>
               <div className="flex w-full flex-col gap-2">

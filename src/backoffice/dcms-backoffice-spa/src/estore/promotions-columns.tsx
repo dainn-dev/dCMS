@@ -1,5 +1,5 @@
 import type { ColumnDef } from "@tanstack/react-table";
-import { IconChevronDown, IconChevronUp, IconDelete, IconEdit, IconUnfoldMore } from "../orders/icons";
+import { IconChevronDown, IconChevronUp, IconDelete, IconEdit, IconFormatListBulleted, IconUnfoldMore } from "../orders/icons";
 
 export type PromoListRow = {
   id: string;
@@ -64,7 +64,8 @@ function SortHeader({
 
 export function createPromotionColumns(
   onEdit?: (id: string) => void,
-  onDelete?: (id: string) => void
+  onDelete?: (id: string) => void,
+  onViewCodes?: (id: string) => void
 ): ColumnDef<PromoListRow>[] {
   return [
     {
@@ -202,19 +203,30 @@ export function createPromotionColumns(
       enableSorting: false,
       enableHiding: false,
       cell: ({ row }) => (
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-1">
           <button
             type="button"
             className="rounded p-2 text-on-surface-variant transition-all hover:bg-primary/10 hover:text-primary"
             aria-label="Edit"
+            title="Edit promo code"
             onClick={() => onEdit?.(row.original.id)}
           >
             <IconEdit className="h-[18px] w-[18px]" />
           </button>
           <button
             type="button"
+            className="rounded p-2 text-on-surface-variant transition-all hover:bg-secondary/10 hover:text-secondary"
+            aria-label="View codes"
+            title="View grouped codes"
+            onClick={() => onViewCodes?.(row.original.id)}
+          >
+            <IconFormatListBulleted className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
             className="rounded p-2 text-on-surface-variant transition-all hover:bg-error-container hover:text-error"
             aria-label="Delete"
+            title="Delete promo code"
             onClick={() => onDelete?.(row.original.id)}
           >
             <IconDelete className="h-[18px] w-[18px]" />

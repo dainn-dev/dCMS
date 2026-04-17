@@ -142,7 +142,7 @@ export function createBrandColumns(
             aria-label="Brand hierarchy"
             onClick={() => console.info("[Brands] Tree", row.original.code)}
           >
-            <IconAccountTree className="text-lg" />
+            <IconAccountTree className="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -150,7 +150,7 @@ export function createBrandColumns(
             aria-label="Delete brand"
             onClick={() => onDelete?.(row.original.code)}
           >
-            <IconDelete className="text-lg" />
+            <IconDelete className="h-4 w-4" />
           </button>
         </div>
       ),

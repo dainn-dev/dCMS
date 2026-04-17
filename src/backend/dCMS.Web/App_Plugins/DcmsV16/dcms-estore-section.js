@@ -12,10 +12,36 @@ function resolveUrl(path) {
   }
 }
 
+/**
+ * Fetch languages from the dCMS backoffice API.
+ * Uses the backoffice cookie session (credentials: "same-origin") — no Bearer token needed.
+ * Endpoint: GET /umbraco/dcms/api/language/all  (DcmsLanguageController)
+ * Falls back to an empty array on any error so the SPA still mounts.
+ * @returns {Promise<Array<{isoCode:string,name:string,isDefault:boolean,isMandatory:boolean}>>}
+ */
+async function fetchUmbracoLanguages() {
+  try {
+    const res = await fetch("/umbraco/dcms/api/language/all", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return (json.items ?? []).map((l) => ({
+      isoCode: String(l.isoCode ?? ""),
+      name: String(l.name ?? l.isoCode ?? ""),
+      isDefault: Boolean(l.isDefault),
+      isMandatory: Boolean(l.isMandatory),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
-  /** @type {{ mount?: (el: HTMLElement) => void, unmount?: (el: HTMLElement) => void } | null} */
+  /** @type {{ mount?: (el: HTMLElement, opts?: object) => void, unmount?: (el: HTMLElement) => void } | null} */
   #spa = null;
 
   constructor() {
@@ -33,6 +59,9 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
     this.innerHTML = `<div data-react-root style="position:absolute;inset:0"></div>`;
     this.#host = this.querySelector("[data-react-root]");
     if (!this.#host) return;
+
+    // Fetch languages from our custom backoffice API (cookie auth, no Bearer token needed).
+    const languages = await fetchUmbracoLanguages();
 
     try {
       // Fetch CSS text and inject a <style> tag directly inside THIS element,
@@ -55,7 +84,8 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
       if (!jsRes.ok) throw new Error(`GET ${jsUrl} -> ${jsRes.status} ${jsRes.statusText}`);
 
       this.#spa = await import(/* @vite-ignore */ SPA_JS);
-      this.#spa?.mount?.(this.#host);
+      // Pass pre-fetched languages so React doesn't need to call the Management API itself.
+      this.#spa?.mount?.(this.#host, { languages });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (this.#host) {

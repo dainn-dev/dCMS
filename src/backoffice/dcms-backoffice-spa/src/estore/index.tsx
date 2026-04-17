@@ -1,17 +1,22 @@
 import { createRoot, type Root } from "react-dom/client";
 import React from "react";
 import { EStoreApp } from "./EStoreApp";
+import type { UmbracoLanguage } from "./useUmbracoLanguages";
 import "../styles.css";
+
+type MountOptions = {
+  languages?: UmbracoLanguage[];
+};
 
 const roots = new WeakMap<HTMLElement, Root>();
 
-export function mount(host: HTMLElement) {
+export function mount(host: HTMLElement, options?: MountOptions) {
   if (roots.has(host)) return;
   const root = createRoot(host);
   roots.set(host, root);
   root.render(
     <React.StrictMode>
-      <EStoreApp />
+      <EStoreApp languages={options?.languages} />
     </React.StrictMode>
   );
 }
