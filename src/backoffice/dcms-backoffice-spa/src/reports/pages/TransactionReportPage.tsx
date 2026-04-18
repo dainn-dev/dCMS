@@ -196,10 +196,10 @@ const ecommerceColumns: ColumnDef<EcommerceRow>[] = [
   { accessorKey: "date", header: "Date", cell: ({ row }) => <span className="text-xs text-on-surface-variant">{row.getValue("date")}</span> },
 ];
 
-const TAB_LABELS: Record<ReportTab, { title: string; spec: string }> = {
-  summary: { title: "Transaction summary", spec: "7.1.1" },
-  details: { title: "Transaction details", spec: "7.1.2" },
-  ecommerce: { title: "Ecommerce payments", spec: "7.1.3" },
+const TAB_LABELS: Record<ReportTab, { title: string }> = {
+  summary: { title: "Transaction summary" },
+  details: { title: "Transaction details" },
+  ecommerce: { title: "Ecommerce payments" },
 };
 
 function filterByBrand<T extends { brandCode?: string }>(rows: T[], brand: string): T[] {
@@ -368,7 +368,7 @@ export function TransactionReportPage() {
       <div className="border-b border-outline-variant/10 bg-surface px-6">
         <div className="flex flex-wrap gap-1" role="tablist" aria-label="Transaction report type">
           {(Object.keys(TAB_LABELS) as ReportTab[]).map((id) => {
-            const { title, spec } = TAB_LABELS[id];
+            const { title } = TAB_LABELS[id];
             const active = tab === id;
             return (
               <button
@@ -384,7 +384,6 @@ export function TransactionReportPage() {
                 onClick={() => setTab(id)}
               >
                 {title}
-                <span className="ml-1.5 font-medium opacity-70">({spec})</span>
               </button>
             );
           })}

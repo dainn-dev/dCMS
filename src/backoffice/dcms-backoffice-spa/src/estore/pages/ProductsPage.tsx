@@ -290,6 +290,32 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
     });
   }, [activeCategories, activeQuickAccess]);
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+
+  const allFilteredSelected =
+    filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.id));
+  const someFilteredSelected = filteredRows.some((r) => selectedIds.has(r.id));
+
+  function toggleSelectAllFiltered(checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const r of filteredRows) {
+        if (checked) next.add(r.id);
+        else next.delete(r.id);
+      }
+      return next;
+    });
+  }
+
+  function toggleRowSelected(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
   const filteredCatOptions = FILTER_CATEGORIES.filter((c) =>
     c.toLowerCase().includes(catSearch.toLowerCase())
   );
@@ -526,8 +552,14 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
                 <th className="w-10 px-6 py-4 text-center">
                   <input
                     type="checkbox"
-                    className="rounded-sm border-outline text-primary focus:ring-primary"
+                    className="h-3.5 w-3.5 cursor-pointer rounded border-outline-variant accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                     aria-label="Select all"
+                    checked={allFilteredSelected}
+                    disabled={filteredRows.length === 0}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+                    }}
+                    onChange={(e) => toggleSelectAllFiltered(e.target.checked)}
                   />
                 </th>
                 <th className="w-20 px-4 py-4">Image</th>
@@ -562,8 +594,10 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
                   <td className="px-6 py-4 text-center">
                     <input
                       type="checkbox"
-                      className="rounded-sm border-outline text-primary focus:ring-primary"
+                      className="h-3.5 w-3.5 cursor-pointer rounded border-outline-variant accent-primary"
                       aria-label={`Select ${row.name}`}
+                      checked={selectedIds.has(row.id)}
+                      onChange={(e) => toggleRowSelected(row.id, e.target.checked)}
                     />
                   </td>
                   <td className="px-4 py-4">

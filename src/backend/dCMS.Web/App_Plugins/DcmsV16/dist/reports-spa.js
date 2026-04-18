@@ -54642,9 +54642,9 @@ const o6 = [
   },
   { accessorKey: "date", header: "Date", cell: ({ row: D }) => /* @__PURE__ */ bt.jsx("span", { className: "text-xs text-on-surface-variant", children: D.getValue("date") }) }
 ], tv = {
-  summary: { title: "Transaction summary", spec: "7.1.1" },
-  details: { title: "Transaction details", spec: "7.1.2" },
-  ecommerce: { title: "Ecommerce payments", spec: "7.1.3" }
+  summary: { title: "Transaction summary" },
+  details: { title: "Transaction details" },
+  ecommerce: { title: "Ecommerce payments" }
 };
 function X8(D, at) {
   return at === "all" ? D : D.filter((s) => s.brandCode === at);
@@ -54727,23 +54727,16 @@ function Q8() {
       )
     ] }),
     /* @__PURE__ */ bt.jsx("div", { className: "border-b border-outline-variant/10 bg-surface px-6", children: /* @__PURE__ */ bt.jsx("div", { className: "flex flex-wrap gap-1", role: "tablist", "aria-label": "Transaction report type", children: Object.keys(tv).map((R) => {
-      const { title: w, spec: x } = tv[R], C = D === R;
-      return /* @__PURE__ */ bt.jsxs(
+      const { title: w } = tv[R], x = D === R;
+      return /* @__PURE__ */ bt.jsx(
         "button",
         {
           type: "button",
           role: "tab",
-          "aria-selected": C,
-          className: `border-b-2 px-4 py-3 text-xs font-bold transition-colors ${C ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-on-surface"}`,
+          "aria-selected": x,
+          className: `border-b-2 px-4 py-3 text-xs font-bold transition-colors ${x ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-on-surface"}`,
           onClick: () => at(R),
-          children: [
-            w,
-            /* @__PURE__ */ bt.jsxs("span", { className: "ml-1.5 font-medium opacity-70", children: [
-              "(",
-              x,
-              ")"
-            ] })
-          ]
+          children: w
         },
         R
       );

@@ -1,16 +1,19 @@
 import type { ReactNode } from "react";
 import type { ComponentType } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconAccountTree,
+  IconApartment,
   IconBolt,
   IconBox,
   IconChevronDown,
   IconGrid,
+  IconGroup,
   IconHelp,
   IconLocalOffer,
   IconLocationOn,
   IconMap,
+  IconPerson,
   IconShipping,
   IconStore,
   IconTag,
@@ -31,7 +34,10 @@ export type EStorePageId =
   | "promo-codes"
   | "fulfillment-options"
   | "fulfillment-delivery-allocation"
-  | "fulfillment-collection-locations";
+  | "fulfillment-collection-locations"
+  | "access-users"
+  | "access-roles"
+  | "access-tenants";
 
 type NavItem = {
   id: EStorePageId;
@@ -42,6 +48,7 @@ type NavItem = {
   /** Visually group under Products (US-20 / §4.4). */
   nestUnderProducts?: boolean;
   nestUnderFulfillment?: boolean;
+  nestUnderAccess?: boolean;
 };
 
 const navItems: NavItem[] = [
@@ -58,6 +65,9 @@ const navItems: NavItem[] = [
   { id: "fulfillment-options", label: "Fulfillment Options", Icon: IconShipping },
   { id: "fulfillment-delivery-allocation", label: "Delivery Allocation", Icon: IconMap, nestUnderFulfillment: true },
   { id: "fulfillment-collection-locations", label: "Collection Location", Icon: IconLocationOn, nestUnderFulfillment: true },
+  { id: "access-users", label: "Users", Icon: IconPerson },
+  { id: "access-roles", label: "Roles", Icon: IconGroup, nestUnderAccess: true },
+  { id: "access-tenants", label: "Tenants", Icon: IconApartment, nestUnderAccess: true },
 ];
 
 /** Top-level eStore routes — keep in sync with `navItems` for hash URL parsing. */
@@ -67,24 +77,38 @@ function nestParentOf(item: NavItem): EStorePageId | null {
   if (item.nestUnderBrands) return "brands";
   if (item.nestUnderProducts) return "products";
   if (item.nestUnderFulfillment) return "fulfillment-options";
+  if (item.nestUnderAccess) return "access-users";
   return null;
 }
 
-function itemHasSubmenu(parentId: EStorePageId): boolean {
-  return navItems.some((i) => nestParentOf(i) === parentId);
+function itemHasSubmenu(parentId: EStorePageId, items: NavItem[]): boolean {
+  return items.some((i) => nestParentOf(i) === parentId);
 }
+
+/** <c>estore</c>: full commerce nav. <c>access</c>: Umbraco Access section — only Users / Roles / Tenants. */
+export type EStoreSidebarScope = "estore" | "access";
 
 type Props = {
   page: EStorePageId;
   onPageChange: (id: EStorePageId) => void;
   children: ReactNode;
+  /** <c>access</c> = only Users/Roles/Tenants. <c>estore</c> = commerce only (no Access items). */
+  sidebarScope?: EStoreSidebarScope;
 };
 
-export function EStoreLayout({ page, onPageChange, children }: Props) {
+export function EStoreLayout({ page, onPageChange, children, sidebarScope = "estore" }: Props) {
   const [expandedSubmenus, setExpandedSubmenus] = useState<Set<EStorePageId>>(() => new Set());
 
+  const sidebarNavItems = useMemo(
+    () =>
+      sidebarScope === "access"
+        ? navItems.filter((i) => i.id.startsWith("access-"))
+        : navItems.filter((i) => !i.id.startsWith("access-")),
+    [sidebarScope],
+  );
+
   useEffect(() => {
-    const current = navItems.find((i) => i.id === page);
+    const current = sidebarNavItems.find((i) => i.id === page);
     const parent = current ? nestParentOf(current) : null;
     if (parent) {
       setExpandedSubmenus((prev) => {
@@ -94,7 +118,7 @@ export function EStoreLayout({ page, onPageChange, children }: Props) {
         return next;
       });
     }
-  }, [page]);
+  }, [page, sidebarNavItems]);
 
   function toggleSubmenu(parentId: EStorePageId) {
     setExpandedSubmenus((prev) => {
@@ -115,18 +139,21 @@ export function EStoreLayout({ page, onPageChange, children }: Props) {
         className="flex flex-col shrink-0 bg-stone-50 border-r border-outline-variant/20"
         style={{ width: 240, overflowY: "auto" }}
       >
-        <nav className="flex-1 space-y-1 pb-4" aria-label="eStore navigation">
-          {navItems.map((item) => {
+        <nav
+          className="flex-1 space-y-1 pb-4"
+          aria-label={sidebarScope === "access" ? "Access navigation" : "eStore navigation"}
+        >
+          {sidebarNavItems.map((item) => {
             const ItemIcon = item.Icon;
-            const nested = item.nestUnderBrands || item.nestUnderProducts || item.nestUnderFulfillment;
+            const nested = item.nestUnderBrands || item.nestUnderProducts || item.nestUnderFulfillment || item.nestUnderAccess;
             const parentId = nestParentOf(item);
             if (parentId && !expandedSubmenus.has(parentId)) {
               return null;
             }
 
-            const hasSubmenu = itemHasSubmenu(item.id);
+            const hasSubmenu = itemHasSubmenu(item.id, sidebarNavItems);
             const submenuOpen = expandedSubmenus.has(item.id);
-            const childOfCurrent = navItems.some((i) => nestParentOf(i) === item.id && i.id === page);
+            const childOfCurrent = sidebarNavItems.some((i) => nestParentOf(i) === item.id && i.id === page);
             const rowActive = item.id === page || childOfCurrent;
 
             const rowTone =

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { eStoreHashForPage, parseEStorePageFromHash } from "./estoreHashRouting";
-import { EStoreLayout, type EStorePageId } from "./layout/EStoreLayout";
+import { EStoreLayout, type EStorePageId, type EStoreSidebarScope } from "./layout/EStoreLayout";
 import { LanguageProvider } from "./LanguageContext";
 import type { BrandListRow } from "./pages/BrandsPage";
 import { BrandsPage } from "./pages/BrandsPage";
@@ -38,6 +38,15 @@ import { CampaignsPage } from "./pages/CampaignsPage";
 import { EditCampaignPage } from "./pages/EditCampaignPage";
 import { PromotionsPage } from "./pages/PromotionsPage";
 import { LogisticPartnerManagementPage } from "./pages/LogisticPartnerManagementPage";
+import { UsersPage } from "./pages/access/UsersPage";
+import { UserFormPage } from "./pages/access/UserFormPage";
+import { ChangePasswordModal } from "./pages/access/ChangePasswordModal";
+import { RolesPage } from "./pages/access/RolesPage";
+import { RoleFormPage } from "./pages/access/RoleFormPage";
+import { ManageModulesPage } from "./pages/access/ManageModulesPage";
+import { TenantsPage } from "./pages/access/TenantsPage";
+import { TenantFormPage } from "./pages/access/TenantFormPage";
+import type { RoleRow } from "./pages/access/RolesPage";
 
 type BrandEditData = Pick<BrandListRow, "code" | "name" | "active" | "imageSrc" | "imageAlt">;
 
@@ -76,6 +85,23 @@ type FulfillmentFormState =
   | { mode: "slots"; groupingId: string }
   | { mode: "edit-slot"; groupingId: string; slotId?: string }
   | { mode: "logistic-partners" };
+
+type AccessUserFormState =
+  | { mode: "idle" }
+  | { mode: "add" }
+  | { mode: "edit"; userId: string }
+  | { mode: "change-password"; userId: string; userName: string };
+
+type AccessRoleFormState =
+  | { mode: "idle" }
+  | { mode: "add" }
+  | { mode: "edit"; roleAlias: string }
+  | { mode: "manage-modules"; roleAlias: string; roleName: string };
+
+type AccessTenantFormState =
+  | { mode: "idle" }
+  | { mode: "add" }
+  | { mode: "edit"; tenantId: string };
 
 export type FulfillmentDeliveryMode = "Store Collection" | "Local Delivery" | "Overseas Delivery";
 
@@ -267,14 +293,47 @@ function safeJsonParse<T>(raw: string | null): T | null {
   }
 }
 
-export function EStoreApp({ languages }: { languages?: import("./useUmbracoLanguages").UmbracoLanguage[] }) {
-  const [page, setPage] = useState<EStorePageId>(() => parseEStorePageFromHash() ?? "brands");
+function initialPageForScope(sidebarScope: EStoreSidebarScope): EStorePageId {
+  const parsed = parseEStorePageFromHash();
+  if (sidebarScope === "access") {
+    if (parsed && parsed.startsWith("access-")) return parsed;
+    return "access-users";
+  }
+  if (parsed && parsed.startsWith("access-")) return "brands";
+  return parsed ?? "brands";
+}
+
+export function EStoreApp({
+  languages,
+  sidebarScope = "estore",
+}: {
+  languages?: import("./useUmbracoLanguages").UmbracoLanguage[];
+  sidebarScope?: EStoreSidebarScope;
+}) {
+  const [page, setPage] = useState<EStorePageId>(() => initialPageForScope(sidebarScope));
   const [brandForm, setBrandForm] = useState<BrandFormState>({ mode: "idle" });
   const [productForm, setProductForm] = useState<ProductFormState>({ mode: "idle" });
   const [attributeForm, setAttributeForm] = useState<AttributeFormState>({ mode: "idle" });
   const [promoForm, setPromoForm] = useState<PromoFormState>({ mode: "idle" });
   const [campaignForm, setCampaignForm] = useState<CampaignFormState>({ mode: "idle" });
   const [fulfillmentForm, setFulfillmentForm] = useState<FulfillmentFormState>({ mode: "idle" });
+  const [accessUserForm, setAccessUserForm] = useState<AccessUserFormState>({ mode: "idle" });
+  const [accessRoleForm, setAccessRoleForm] = useState<AccessRoleFormState>({ mode: "idle" });
+  const [accessTenantForm, setAccessTenantForm] = useState<AccessTenantFormState>({ mode: "idle" });
+
+  // Demo role data shared between RolesPage and ManageModulesPage for roleName lookup
+  const [accessRoles] = useState<RoleRow[]>([
+    { alias: "it-admin", name: "IT Administrator", description: "", isTenantRole: false, memberCount: 2 },
+    { alias: "sys-admin", name: "System Administrator", description: "", isTenantRole: false, memberCount: 3 },
+    { alias: "ecom-mgr", name: "Ecommerce Manager", description: "", isTenantRole: false, memberCount: 5 },
+    { alias: "tenant-pm", name: "Tenant Product Manager", description: "", isTenantRole: true, memberCount: 12 },
+    { alias: "tenant-inv-mgr", name: "Tenant Inventory Manager", description: "", isTenantRole: true, memberCount: 8 },
+    { alias: "operations", name: "Operations", description: "", isTenantRole: false, memberCount: 7 },
+    { alias: "finance", name: "Finance", description: "", isTenantRole: false, memberCount: 4 },
+    { alias: "brand-mgr", name: "Brand Manager", description: "", isTenantRole: true, memberCount: 15 },
+    { alias: "product-upload", name: "Product Upload", description: "", isTenantRole: true, memberCount: 10 },
+    { alias: "guest", name: "Guest", description: "", isTenantRole: false, memberCount: 3 },
+  ]);
 
   const [brands, setBrands] = useState<BrandListRow[]>(DEFAULT_BRANDS);
 
@@ -448,6 +507,13 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
     if (!inFulfillmentArea) {
       setFulfillmentForm({ mode: "idle" });
     }
+    const inAccessArea =
+      id === "access-users" || id === "access-roles" || id === "access-tenants";
+    if (!inAccessArea) {
+      setAccessUserForm({ mode: "idle" });
+      setAccessRoleForm({ mode: "idle" });
+      setAccessTenantForm({ mode: "idle" });
+    }
   }
 
   function handlePageChange(id: EStorePageId) {
@@ -463,16 +529,32 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
     function onHashChange() {
       const p = parseEStorePageFromHash();
       if (!p) return;
+      if (sidebarScope === "access" && !p.startsWith("access-")) {
+        window.location.hash = eStoreHashForPage("access-users");
+        return;
+      }
+      if (sidebarScope === "estore" && p.startsWith("access-")) {
+        window.location.hash = eStoreHashForPage("brands");
+        return;
+      }
       resetNestedFormsForPage(p);
       setPage(p);
     }
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  }, [sidebarScope]);
 
   useEffect(() => {
     const p = parseEStorePageFromHash();
     if (!p) {
+      window.location.hash = eStoreHashForPage(sidebarScope === "access" ? "access-users" : "brands");
+      return;
+    }
+    if (sidebarScope === "access" && !p.startsWith("access-")) {
+      window.location.hash = eStoreHashForPage("access-users");
+      return;
+    }
+    if (sidebarScope === "estore" && p.startsWith("access-")) {
       window.location.hash = eStoreHashForPage("brands");
       return;
     }
@@ -480,11 +562,11 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
     if (window.location.hash !== preferred) {
       window.location.hash = preferred;
     }
-  }, []);
+  }, [sidebarScope]);
 
   return (
     <LanguageProvider languages={languages}>
-    <EStoreLayout page={page} onPageChange={handlePageChange}>
+    <EStoreLayout page={page} onPageChange={handlePageChange} sidebarScope={sidebarScope}>
       {page === "brands" &&
         (brandForm.mode !== "idle" ? (
           <EditBrandPage
@@ -717,6 +799,75 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
               ]);
               setFulfillmentForm({ mode: "edit-slot", groupingId, slotId });
             }}
+          />
+        ))}
+      {/* ── Access: Users ── */}
+      {page === "access-users" &&
+        (accessUserForm.mode === "change-password" ? (
+          <ChangePasswordModal
+            userId={accessUserForm.userId}
+            userName={accessUserForm.userName}
+            onSave={() => setAccessUserForm({ mode: "idle" })}
+            onClose={() => setAccessUserForm({ mode: "idle" })}
+          />
+        ) : accessUserForm.mode !== "idle" ? (
+          <UserFormPage
+            mode={accessUserForm.mode === "add" ? "add" : "edit"}
+            userId={accessUserForm.mode === "edit" ? accessUserForm.userId : undefined}
+            onSave={() => setAccessUserForm({ mode: "idle" })}
+            onCancel={() => setAccessUserForm({ mode: "idle" })}
+          />
+        ) : (
+          <UsersPage
+            onAddUser={() => setAccessUserForm({ mode: "add" })}
+            onEditUser={(userId) => setAccessUserForm({ mode: "edit", userId })}
+            onChangePassword={(userId) => {
+              // Look up userName from demo data for the modal title
+              const userName = userId;
+              setAccessUserForm({ mode: "change-password", userId, userName });
+            }}
+          />
+        ))}
+
+      {/* ── Access: Roles ── */}
+      {page === "access-roles" &&
+        (accessRoleForm.mode === "manage-modules" ? (
+          <ManageModulesPage
+            roleAlias={accessRoleForm.roleAlias}
+            roleName={accessRoleForm.roleName}
+            onBack={() => setAccessRoleForm({ mode: "idle" })}
+          />
+        ) : accessRoleForm.mode !== "idle" ? (
+          <RoleFormPage
+            mode={accessRoleForm.mode === "add" ? "add" : "edit"}
+            roleAlias={accessRoleForm.mode === "edit" ? accessRoleForm.roleAlias : undefined}
+            onSave={() => setAccessRoleForm({ mode: "idle" })}
+            onCancel={() => setAccessRoleForm({ mode: "idle" })}
+          />
+        ) : (
+          <RolesPage
+            onAddRole={() => setAccessRoleForm({ mode: "add" })}
+            onEditRole={(roleAlias) => setAccessRoleForm({ mode: "edit", roleAlias })}
+            onManageModules={(roleAlias) => {
+              const roleName = accessRoles.find((r) => r.alias === roleAlias)?.name ?? roleAlias;
+              setAccessRoleForm({ mode: "manage-modules", roleAlias, roleName });
+            }}
+          />
+        ))}
+
+      {/* ── Access: Tenants ── */}
+      {page === "access-tenants" &&
+        (accessTenantForm.mode !== "idle" ? (
+          <TenantFormPage
+            mode={accessTenantForm.mode === "add" ? "add" : "edit"}
+            tenantId={accessTenantForm.mode === "edit" ? accessTenantForm.tenantId : undefined}
+            onSave={() => setAccessTenantForm({ mode: "idle" })}
+            onCancel={() => setAccessTenantForm({ mode: "idle" })}
+          />
+        ) : (
+          <TenantsPage
+            onAddTenant={() => setAccessTenantForm({ mode: "add" })}
+            onEditTenant={(tenantId) => setAccessTenantForm({ mode: "edit", tenantId })}
           />
         ))}
     </EStoreLayout>

@@ -101,3 +101,14 @@ _Thêm decisions vào đây khi chúng được đưa ra._
 **Decision:** Catalog và Inventory persistence dùng **PostgreSQL** với **Npgsql** + **Dapper** (không EF cho runtime paths này). SQL migrations là file `.sql` idempotent (`CREATE IF NOT EXISTS`), versioned theo số `00x_`. Optimistic concurrency cho `VariantStock`: cột bigint **`Revision`** (ứng dụng map vào `VariantStock.RowVersion`), `UPDATE ... SET "Revision" = "Revision" + 1 ... AND "Revision" = @expected RETURNING`.
 **Reason:** Tránh lock-in SQL Server cho microservices headless; Dapper giữ throughput tốt; PG không có `ROWVERSION` — revision counter tương đương pattern optimistic locking.
 **Alternatives considered:** Giữ SQL Server; dùng EF migrations thay vì SQL files (chậm hơn cho hot paths, đổi scope lớn); `xmin` system column (khó map Dapper/portable bằng long).
+
+
+---
+
+## Decision: Hai lớp phân quyền — Umbraco User Groups vs bảng / RBAC tùy chỉnh (Platform)
+
+**Date:** 2026-04-18
+**Decision:** Giữ **hai lớp** tách biệt: (1) **Umbraco IUserGroup + Allowed Sections** — quyết định user có thấy section backoffice tùy chỉnh (E-Store, Orders, …) hay không; (2) **Platform DB + JWT + ASP.NET policies** (assignment kiểu StoreUsers, DcmsRoles / DcmsPolicies) — quyết định quyền nghiệp vụ và scope tenant / brand / store trên API và dữ liệu.
+**Reason:** Umbraco membership mô hình hóa *shell* CMS theo section; RBAC eCommerce cần gán động, đa scope và kiểm tra tại API — không map 1-1 với group Umbraco. Trộn hai concern dễ gây hiểu nhầm CR (“đã vào được SPA = đủ quyền”).
+**Implementation notes:** Grant section qua `GrantDcmsCustomSectionsNotificationHandler` + `DcmsSectionAliases`; API dựa JWT + middleware/policy, không suy luận chỉ từ Umbraco group.
+**Alternatives considered:** Chỉ Umbraco groups cho mọi thứ (quá thô, thiếu scope); chỉ bảng custom (không tích hợp tree/section Umbraco, khó vận hành backoffice).

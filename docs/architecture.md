@@ -160,6 +160,40 @@ Chain Admin → Umbraco Backoffice (Siêu thị instance)
   → manage users & roles → Platform DB StoreUsers
 ```
 
+## Phân quyền backoffice & API — kiến trúc hai lớp
+
+dCMS **không** gom toàn bộ vào một hệ permission đơn lẻ. Hai lớp tách biệt: **Umbraco User Groups** (section backoffice) và **Platform RBAC** (bảng gán quyền + JWT + policy ASP.NET). Khi code review cần phân biệt *vào được menu* với *được gọi API đúng scope*.
+
+### Lớp 1 — Umbraco User Groups (backoffice shell)
+
+| Khía cạnh | Nội dung |
+|-----------|----------|
+| **Công nghệ** | `IUserGroup` / `IUserGroupService`, **Allowed Sections** trên group Umbraco. |
+| **Mục đích** | User có **thấy** section tùy biến (E-Store, Orders, Approval, Reports) hay không. |
+| **Độ chi tiết** | Thô — theo section CMS; không diễn tả Chain / Brand / Store. |
+| **Code** | `src/backend/dCMS.Web/DcmsSectionAliases.cs`; `GrantDcmsCustomSectionsNotificationHandler` (grant mặc định Admin/Editor). |
+
+Ví dụ: user thuộc group Writers chưa được thêm section → không mở SPA dù vẫn là user hợp lệ trong Umbraco.
+
+### Lớp 2 — RBAC nghiệp vụ (Platform DB + JWT + policy)
+
+| Khía cạnh | Nội dung |
+|-----------|----------|
+| **Công nghệ** | Platform DB: ví dụ `StoreUsers` (`userId`, `tenantId`, `brandId?`, `storeId?`, `roles[]`); JWT chứa claims; `DcmsPolicies` / `DcmsRoles` trong `src/backend/dCMS.AspNetCore.Auth/`. |
+| **Mục đích** | Ai được làm gì trên Commerce/Catalog API; phạm vi tenant / brand / store. |
+| **Độ chi tiết** | Mịn — roles động, hierarchy; middleware khớp storeId / tenant trên route. |
+
+Đã thấy section E-Store (lớp 1) vẫn có thể **403** nếu lớp 2 thiếu policy hoặc sai scope.
+
+### Luồng trách nhiệm
+
+```text
+Umbraco login → User Groups (lớp 1) → có / không thấy section + SPA
+HTTP API → JWT + assignment Platform (lớp 2) → allow / deny
+```
+
+**Nguyên tắc:** lớp 1 = vào UI; lớp 2 = đúng vai trò và đúng dữ liệu. Không thay Umbraco groups cho toàn RBAC eCommerce; cũng không coi “Admin Umbraco” là đủ mọi quyền API.
+
 ## Multi-Tenant Architecture (Tenant = Siêu thị)
 
 Mỗi **Siêu thị (Tenant)** có:

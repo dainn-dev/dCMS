@@ -7,4 +7,5 @@ public static class DcmsSectionAliases
     public const string Reports = "dcmsReports";
     public const string Approval = "dcmsApproval";
     public const string EStore = "dcmsEStore";
+    public const string Access = "dcmsAccess";
 }

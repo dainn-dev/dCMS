@@ -605,3 +605,30 @@ export function IconOpenWith({ className = "h-4 w-4" }: { className?: string }) 
     </svg>
   );
 }
+
+/** apartment / building — tenants */
+export function IconApartment({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M17 11V3H7v4H3v14h8v-4h2v4h8V11h-4zM7 19H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5v-2h2v2zm4 4H9v-2h2v2zm0-4H9v-2h2v2zm0-4H9V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2zm4 8h-2v-2h2v2zm0-4h-2v-2h2v2z" />
+    </svg>
+  );
+}
+
+/** key — change password */
+export function IconKey({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" />
+    </svg>
+  );
+}
+
+/** admin_panel_settings — module management */
+export function IconAdminPanel({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M17 11c.34 0 .67.03 1 .08V6.27L10.5 3 3 6.27v4.91c0 4.54 3.2 8.79 7.5 9.82.55-.13 1.08-.32 1.6-.55C11.41 19.47 11 18.28 11 17c0-3.31 2.69-6 6-6zm-6.5 6.77v.01l-.5.22-.5-.22C6.3 16.49 4 13.43 4 10.18V7l6.5-2.78 1.5.64V11c0 .02-.01.04-.01.06C10.08 12.18 10 13.08 10 14v-1c0 .34.03.67.08 1H11c0 .01-.01.03-.01.04-.39 1.12-.65 2.29-.62 3.5l.03.23zM21 14.5V13l-1.25.5c-.17-.38-.39-.73-.67-1.03l.5-1.22-1.3-.75-.93.93c-.38-.15-.79-.23-1.22-.23s-.84.08-1.22.23l-.93-.93-1.3.75.5 1.22c-.28.3-.5.65-.67 1.03L12 13v1.5l1.25.5c.17.38.39.73.67 1.03l-.5 1.22 1.3.75.93-.93c.38.15.79.23 1.22.23s.84-.08 1.22-.23l.93.93 1.3-.75-.5-1.22c.28-.3.5-.65.67-1.03L21 14.5zm-4.12 1.62c-.76.76-2 .76-2.76 0s-.76-2 0-2.76 2-.76 2.76 0 .76 2 0 2.76z" />
+    </svg>
+  );
+}

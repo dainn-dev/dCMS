@@ -11,6 +11,32 @@
       "js": "/App_Plugins/DcmsV16/dcms-hide-getting-started.js"
     },
     {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.CustomFontPicker",
+      "name": "Dainn Custom Font Picker",
+      "element": "/App_Plugins/DcmsV16/dcms-font-picker-property-editor.js",
+      "elementName": "dcms-font-picker-property-editor",
+      "meta": {
+        "label": "Dainn Custom Font Picker",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.CustomColorPicker",
+      "name": "Dainn Custom Color Picker",
+      "element": "/App_Plugins/DcmsV16/dcms-color-picker-property-editor.js",
+      "elementName": "dcms-color-picker-property-editor",
+      "meta": {
+        "label": "Dainn Custom Color Picker",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
       "type": "headerApp",
       "alias": "Dcms.HeaderApp.Notifications",
       "name": "Notifications",
@@ -64,6 +90,17 @@
       "meta": {
         "label": "Reports",
         "pathname": "dcms-reports"
+      }
+    },
+    {
+      "type": "section",
+      "alias": "dcmsAccess",
+      "name": "Access",
+      "weight": 956,
+      "element": "/App_Plugins/DcmsV16/dcms-access-section.js",
+      "meta": {
+        "label": "Access",
+        "pathname": "dcms-access"
       }
     },
     {
