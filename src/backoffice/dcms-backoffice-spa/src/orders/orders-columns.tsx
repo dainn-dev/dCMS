@@ -12,6 +12,7 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
   "Delivered": "bg-green-100 text-green-700",
   "Returned": "bg-orange-100 text-orange-700",
   "Admin Cancelled": "bg-red-100 text-red-700",
+  "Pending Cancellation": "bg-orange-100 text-orange-800",
   "User Cancelled": "bg-red-100 text-red-700",
   "Partially Fulfilled": "bg-yellow-100 text-yellow-700",
 };

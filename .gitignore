@@ -53,3 +53,4 @@ src/backend/dCMS.Messaging.Contracts/bin/
 src/backend/.vs/
 src/backoffice/dcms-backoffice-spa/node_modules/
 design/
+scripts/

@@ -10,6 +10,7 @@ import {
   IconPerson,
   IconPhone,
   IconPrint,
+  IconReceipt,
   IconShipping,
   IconVisibility,
 } from "../icons";
@@ -32,8 +33,9 @@ const ORDER_STATUSES = [
   "Delivered",
   "Returned",
   "Admin Cancelled",
-  "User Cancelled",
   "Partially Fulfilled",
+  "Pending Cancellation",
+  "User Cancelled",
 ] as const;
 
 type OrderStatus = (typeof ORDER_STATUSES)[number];
@@ -50,9 +52,13 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
   "Delivered": "bg-green-100 text-green-700",
   "Returned": "bg-orange-100 text-orange-700",
   "Admin Cancelled": "bg-red-100 text-red-700",
-  "User Cancelled": "bg-red-100 text-red-700",
   "Partially Fulfilled": "bg-yellow-100 text-yellow-700",
+  "Pending Cancellation": "bg-orange-100 text-orange-800",
+  "User Cancelled": "bg-red-100 text-red-700",
 };
+
+// Statuses that lock an order from further editing
+const LOCKED_STATUSES: OrderStatus[] = ["Picked Up", "Returned", "Delivered"];
 
 export function OrderDetailPage({ orderId, mode, onBack }: Props) {
   const isAction = mode === "action";
@@ -68,6 +74,9 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
   const [resendModalOpen, setResendModalOpen] = useState(false);
   const [resendMessage, setResendMessage] = useState("");
 
+  // Payment Details modal
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+
   // Customer edit
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [customer, setCustomer] = useState({
@@ -82,15 +91,35 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
   const [editingDelivery, setEditingDelivery] = useState(false);
   const [delivery, setDelivery] = useState({
     orderType: "Delivery" as (typeof ORDER_TYPES)[number],
+    contactName: "Alexander Hamilton",
+    contactNumber: "+1 (555) 019-2234",
+    cardNo: "VISA ****4321",
+    receiptNo: "RCP-2024-001122",
+    shippingStatus: "In Transit",
     logisticPartner: "Priority Express",
     trackingNumber: "TRK-8829-00192-A",
+    deliveryOption: "Standard Delivery (2–3 Business Days)",
+    deliveryDate: "26 Oct 2023",
     timeslot: "Tomorrow, 10:00 AM – 12:00 PM",
+    collectionOption: "",
+    collectionDate: "",
+    address: "123 Financial Plaza, Floor 14\nNew York City, NY 10005\nUnited States",
+    deliveryItemsAmount: "1,240.00",
+    deliveryFeeAmount: "25.00",
+    discount: "0.00",
+    deliveryRemarks: "",
     actualDeliveryFee: "25.00",
   });
   const [deliveryDraft, setDeliveryDraft] = useState(delivery);
 
-  // Item-level statuses + cancellations
+  // Item-level statuses — confirmed values
   const [itemStatuses, setItemStatuses] = useState<Record<string, OrderStatus>>({
+    "AV-MAX-0019": "Open Order",
+    "WTCH-H-042": "Open Order",
+    "AUD-ZW-100": "Open Order",
+  });
+  // Item-level status drafts — staged (pending Update click)
+  const [itemStatusDrafts, setItemStatusDrafts] = useState<Record<string, OrderStatus>>({
     "AV-MAX-0019": "Open Order",
     "WTCH-H-042": "Open Order",
     "AUD-ZW-100": "Open Order",
@@ -100,18 +129,44 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
   // Remark input
   const [remarkText, setRemarkText] = useState("");
 
+  const isLocked = LOCKED_STATUSES.includes(orderStatus);
+
   function handleGroupStatusChange(status: OrderStatus) {
     setOrderStatus(status);
     setGroupActionsOpen(false);
   }
 
-  function handleItemStatusChange(sku: string, status: OrderStatus) {
-    setItemStatuses((prev) => ({ ...prev, [sku]: status }));
+  function handleItemStatusDraftChange(sku: string, status: OrderStatus) {
+    setItemStatusDrafts((prev) => ({ ...prev, [sku]: status }));
+  }
+
+  function handleUpdateItemStatus(sku: string) {
+    const newStatus = itemStatusDrafts[sku];
+    const updatedStatuses = { ...itemStatuses, [sku]: newStatus };
+    setItemStatuses(updatedStatuses);
+
+    // Validation: if all items are cancelled, derive order-level status from the most recent update
+    const allCancelled = Object.values(updatedStatuses).every(
+      (s) => s === "Admin Cancelled" || s === "User Cancelled"
+    );
+    if (allCancelled) {
+      setOrderStatus(newStatus as "Admin Cancelled" | "User Cancelled");
+    }
+    console.info(`[Orders] Update item ${sku} → ${newStatus}`);
   }
 
   function handleCancelItem(sku: string) {
     setCancelledItems((prev) => new Set(prev).add(sku));
-    setItemStatuses((prev) => ({ ...prev, [sku]: "Admin Cancelled" }));
+    const updatedStatuses = { ...itemStatuses, [sku]: "Admin Cancelled" as OrderStatus };
+    setItemStatuses(updatedStatuses);
+    setItemStatusDrafts((prev) => ({ ...prev, [sku]: "Admin Cancelled" }));
+
+    const allCancelled = Object.values(updatedStatuses).every(
+      (s) => s === "Admin Cancelled" || s === "User Cancelled"
+    );
+    if (allCancelled) {
+      setOrderStatus("Admin Cancelled");
+    }
   }
 
   function handlePostRemark() {
@@ -125,6 +180,8 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
     setResendModalOpen(false);
     setResendMessage("");
   }
+
+  const canEdit = isAction && !isLocked;
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -167,7 +224,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
         </div>
 
         <div className="flex gap-2 shrink-0 flex-wrap">
-          {/* Print dropdown */}
+          {/* Actions dropdown */}
           <div className="relative">
             <button
               type="button"
@@ -175,12 +232,15 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
               onClick={() => { setPrintMenuOpen((v) => !v); setGroupActionsOpen(false); }}
             >
               <IconPrint className="h-4 w-4" />
-              Print
+              Actions
               <IconChevronDown className="h-3 w-3" />
             </button>
             {printMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-outline-variant/20 z-20 py-1">
-                {["Delivery Receipt", "Gift Receipt", "Packing Slip"].map((doc) => (
+              <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-outline-variant/20 z-20 py-1">
+                <p className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  Print
+                </p>
+                {["Delivery Receipt", "Packing Slip"].map((doc) => (
                   <button
                     key={doc}
                     type="button"
@@ -190,6 +250,26 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                     {doc}
                   </button>
                 ))}
+                <div className="border-t border-outline-variant/10 mt-1 pt-1">
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-xs hover:bg-surface-container-low text-on-surface transition-colors flex items-center gap-2"
+                    onClick={() => { console.info("[Orders] View Order Confirmation"); setPrintMenuOpen(false); }}
+                  >
+                    <IconReceipt className="h-3.5 w-3.5 text-on-surface-variant" />
+                    View Order Confirmation
+                  </button>
+                  {isAction && (
+                    <button
+                      type="button"
+                      className="w-full text-left px-4 py-2 text-xs hover:bg-surface-container-low text-on-surface transition-colors flex items-center gap-2"
+                      onClick={() => { setResendModalOpen(true); setPrintMenuOpen(false); }}
+                    >
+                      <IconMail className="h-3.5 w-3.5 text-on-surface-variant" />
+                      Resend Order Confirmation
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -208,7 +288,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                   <IconChevronDown className="h-3 w-3" />
                 </button>
                 {groupActionsOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-52 bg-white rounded-lg shadow-lg border border-outline-variant/20 z-20 py-1">
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-lg shadow-lg border border-outline-variant/20 z-20 py-1">
                     <p className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
                       Update All Items To
                     </p>
@@ -229,17 +309,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                 )}
               </div>
 
-              {/* Resend Confirmation */}
-              <button
-                type="button"
-                className="flex items-center gap-2 px-4 py-2 text-xs font-semibold border border-outline-variant/30 rounded-lg bg-white hover:bg-surface-container-low transition-all text-on-surface"
-                onClick={() => setResendModalOpen(true)}
-              >
-                <IconMail className="h-4 w-4" />
-                Resend Confirmation
-              </button>
-
-              {/* Update Status (primary CTA) */}
+              {/* Save (primary CTA) */}
               <button
                 type="button"
                 className="px-4 py-2 bg-primary text-white font-semibold text-xs rounded-lg shadow-md hover:bg-primary-container transition-all"
@@ -263,6 +333,11 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
             </span>
             {" "}— Use <strong>Group Actions</strong> to update all items, or change individual item statuses below.
           </span>
+          {isLocked && (
+            <span className="ml-auto text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+              Order Locked — No Further Edits
+            </span>
+          )}
         </div>
       )}
 
@@ -278,37 +353,44 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
               {orderStatus}
             </span>
           </div>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-on-surface-variant">Order No</span>
-              <span className="text-xs font-bold text-on-surface">{orderId}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-on-surface-variant">Order Date</span>
-              <span className="text-xs font-medium text-on-surface">Oct 24, 2023, 14:32</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-on-surface-variant">DO Number</span>
-              <span className="text-xs font-medium text-on-surface">DO-7729-X</span>
-            </div>
-            <div className="flex justify-between items-start">
-              <span className="text-xs text-on-surface-variant">Order Type</span>
-              {isAction ? (
-                <select
-                  className="text-xs font-semibold text-primary bg-transparent border-0 border-b border-primary/30 focus:ring-0 focus:border-primary cursor-pointer text-right"
-                  value={deliveryDraft.orderType}
-                  onChange={(e) =>
-                    setDeliveryDraft((d) => ({ ...d, orderType: e.target.value as typeof delivery.orderType }))
-                  }
+          <div className="space-y-3">
+            <InfoRow label="Order No" value={<span className="font-bold">{orderId}</span>} />
+            <InfoRow label="Order Date" value="Oct 24, 2023, 14:32" />
+            <InfoRow label="DO Number" value="DO-7729-X" />
+            <InfoRow label="Delivery Orders" value="1" />
+            <InfoRow
+              label="Order Type"
+              value={
+                canEdit ? (
+                  <select
+                    className="text-xs font-semibold text-primary bg-transparent border-0 border-b border-primary/30 focus:ring-0 focus:border-primary cursor-pointer text-right"
+                    value={deliveryDraft.orderType}
+                    onChange={(e) =>
+                      setDeliveryDraft((d) => ({ ...d, orderType: e.target.value as typeof delivery.orderType }))
+                    }
+                  >
+                    {ORDER_TYPES.map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="font-semibold text-primary">{delivery.orderType}</span>
+                )
+              }
+            />
+            <InfoRow
+              label="Payment Method"
+              value={
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-primary hover:underline focus:outline-none"
+                  onClick={() => setPaymentModalOpen(true)}
+                  title="View payment details"
                 >
-                  {ORDER_TYPES.map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-xs font-semibold text-primary">{delivery.orderType}</span>
-              )}
-            </div>
+                  Multi Payment ↗
+                </button>
+              }
+            />
           </div>
         </section>
 
@@ -318,7 +400,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
             <h3 className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">
               Customer &amp; Payment
             </h3>
-            {isAction && !editingCustomer && (
+            {canEdit && !editingCustomer && (
               <button
                 type="button"
                 className="text-[10px] font-bold text-primary hover:underline"
@@ -327,7 +409,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                 Edit
               </button>
             )}
-            {isAction && editingCustomer && (
+            {canEdit && editingCustomer && (
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -430,29 +512,51 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
             </div>
           )}
 
-          {/* Payment methods */}
+          {/* Payment methods — clickable to show details */}
           <div className="mt-4 pt-4 border-t border-outline-variant/10">
-            <p className="text-[11px] font-semibold text-on-surface-variant uppercase mb-2">
-              Payment Methods
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <span className="px-2 py-1 bg-surface-container-low rounded text-[10px] font-semibold text-on-surface">
-                Payment Gateway — $1,100.00
-              </span>
-              <span className="px-2 py-1 bg-surface-container-low rounded text-[10px] font-semibold text-on-surface">
-                E-Voucher — $41.00
-              </span>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold text-on-surface-variant uppercase">
+                Payment Methods
+              </p>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-primary hover:underline"
+                onClick={() => setPaymentModalOpen(true)}
+              >
+                View Details
+              </button>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="px-2 py-1 bg-surface-container-low rounded text-[10px] font-semibold text-on-surface hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+                onClick={() => setPaymentModalOpen(true)}
+                title="View payment details"
+              >
+                Payment Gateway — $1,100.00
+              </button>
+              <button
+                type="button"
+                className="px-2 py-1 bg-surface-container-low rounded text-[10px] font-semibold text-on-surface hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+                onClick={() => setPaymentModalOpen(true)}
+                title="View payment details"
+              >
+                E-Voucher — $41.00
+              </button>
+            </div>
+            <p className="text-[10px] text-on-surface-variant mt-1">
+              Click a payment method to view transaction details.
+            </p>
           </div>
         </section>
 
-        {/* Delivery Logistics */}
+        {/* Delivery Order Details */}
         <section className="md:col-span-8 bg-surface-container-lowest p-5 rounded-xl shadow-sm border border-outline-variant/10">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest">
               Delivery Order Details
             </h3>
-            {isAction && !editingDelivery && (
+            {canEdit && !editingDelivery && (
               <button
                 type="button"
                 className="text-[10px] font-bold text-primary hover:underline"
@@ -461,7 +565,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                 Edit
               </button>
             )}
-            {isAction && editingDelivery && (
+            {canEdit && editingDelivery && (
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -483,30 +587,96 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
 
           {editingDelivery ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-3">
-                <Field label="Logistic Partner">
-                  <input
-                    className={inputCls}
-                    value={deliveryDraft.logisticPartner}
-                    onChange={(e) => setDeliveryDraft((d) => ({ ...d, logisticPartner: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Tracking Number">
-                  <input
-                    className={inputCls}
-                    value={deliveryDraft.trackingNumber}
-                    onChange={(e) => setDeliveryDraft((d) => ({ ...d, trackingNumber: e.target.value }))}
+              <Field label="Contact Name">
+                <input
+                  className={inputCls}
+                  value={deliveryDraft.contactName}
+                  onChange={(e) => setDeliveryDraft((d) => ({ ...d, contactName: e.target.value }))}
+                />
+              </Field>
+              <Field label="Contact Number">
+                <input
+                  className={inputCls}
+                  value={deliveryDraft.contactNumber}
+                  onChange={(e) => setDeliveryDraft((d) => ({ ...d, contactNumber: e.target.value }))}
+                />
+              </Field>
+              <Field label="Logistic Partner">
+                <input
+                  className={inputCls}
+                  value={deliveryDraft.logisticPartner}
+                  onChange={(e) => setDeliveryDraft((d) => ({ ...d, logisticPartner: e.target.value }))}
+                />
+              </Field>
+              <Field label="Tracking Number">
+                <input
+                  className={inputCls}
+                  value={deliveryDraft.trackingNumber}
+                  onChange={(e) => setDeliveryDraft((d) => ({ ...d, trackingNumber: e.target.value }))}
+                />
+              </Field>
+              {deliveryDraft.orderType === "Delivery" && (
+                <>
+                  <Field label="Delivery Option">
+                    <input
+                      className={inputCls}
+                      value={deliveryDraft.deliveryOption}
+                      onChange={(e) => setDeliveryDraft((d) => ({ ...d, deliveryOption: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label="Delivery Date">
+                    <input
+                      className={inputCls}
+                      value={deliveryDraft.deliveryDate}
+                      onChange={(e) => setDeliveryDraft((d) => ({ ...d, deliveryDate: e.target.value }))}
+                    />
+                  </Field>
+                </>
+              )}
+              {deliveryDraft.orderType === "Self Collection" && (
+                <>
+                  <Field label="Collection Option">
+                    <input
+                      className={inputCls}
+                      value={deliveryDraft.collectionOption}
+                      onChange={(e) => setDeliveryDraft((d) => ({ ...d, collectionOption: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label="Collection Date">
+                    <input
+                      className={inputCls}
+                      value={deliveryDraft.collectionDate}
+                      onChange={(e) => setDeliveryDraft((d) => ({ ...d, collectionDate: e.target.value }))}
+                    />
+                  </Field>
+                </>
+              )}
+              <Field label="Delivery / Collection Timeslot">
+                <input
+                  className={inputCls}
+                  value={deliveryDraft.timeslot}
+                  onChange={(e) => setDeliveryDraft((d) => ({ ...d, timeslot: e.target.value }))}
+                />
+              </Field>
+              <div className="md:col-span-2">
+                <Field label="Delivery Address">
+                  <textarea
+                    className={`${inputCls} h-20 resize-none`}
+                    value={deliveryDraft.address}
+                    onChange={(e) => setDeliveryDraft((d) => ({ ...d, address: e.target.value }))}
                   />
                 </Field>
               </div>
-              <div className="space-y-3">
-                <Field label="Delivery / Collection Timeslot">
+              <div className="md:col-span-2">
+                <Field label="Remarks">
                   <input
                     className={inputCls}
-                    value={deliveryDraft.timeslot}
-                    onChange={(e) => setDeliveryDraft((d) => ({ ...d, timeslot: e.target.value }))}
+                    value={deliveryDraft.deliveryRemarks}
+                    onChange={(e) => setDeliveryDraft((d) => ({ ...d, deliveryRemarks: e.target.value }))}
                   />
                 </Field>
+              </div>
+              <div className="md:col-span-2">
                 <Field label="Actual Delivery Fee (Admin Override)">
                   <div className="flex items-center">
                     <span className="px-2.5 py-2 text-xs bg-surface-container-high border border-outline-variant/20 rounded-l text-on-surface-variant">
@@ -522,49 +692,79 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                     />
                   </div>
                   <p className="text-[10px] text-on-surface-variant mt-1">
-                    Does not affect the customer's sales order value.
+                    Does not affect the customer's sales order value. Only available if logistic partner is not system-integrated.
                   </p>
                 </Field>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-3">
+              {/* Contact & Recipient */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <DeliveryCard label="Contact Name" value={delivery.contactName} />
+                <DeliveryCard label="Contact Number" value={delivery.contactNumber} />
+                <DeliveryCard label="Card No" value={delivery.cardNo} mono />
+              </div>
+
+              {/* Order & Shipping Reference */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <DeliveryCard label="DO Number" value="DO-7729-X" />
+                <DeliveryCard label="Receipt No" value={delivery.receiptNo} />
+                <DeliveryCard label="Shipping Status" value={delivery.shippingStatus} highlight />
+              </div>
+
+              {/* Logistics */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <DeliveryCard label="Logistic Partner" value={delivery.logisticPartner} />
+                <DeliveryCard label="Tracking Number" value={delivery.trackingNumber} mono />
+                <DeliveryCard label="Timeslot" value={delivery.timeslot} />
+              </div>
+
+              {/* Delivery-specific */}
+              {delivery.orderType === "Delivery" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <DeliveryCard label="Delivery Option" value={delivery.deliveryOption} />
+                  <DeliveryCard label="Delivery Date" value={delivery.deliveryDate} />
+                </div>
+              )}
+
+              {/* Self Collection-specific */}
+              {delivery.orderType === "Self Collection" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <DeliveryCard label="Collection Option" value={delivery.collectionOption || "—"} />
+                  <DeliveryCard label="Collection Date" value={delivery.collectionDate || "—"} />
+                </div>
+              )}
+
+              {/* Address */}
               <div className="p-3 bg-surface-container-low rounded-lg">
-                <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">
-                  Logistic Partner
-                </p>
-                <p className="text-xs font-semibold text-on-surface">{delivery.logisticPartner}</p>
+                <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">Address</p>
+                <p className="text-xs text-on-surface whitespace-pre-line">{delivery.address}</p>
               </div>
+
+              {/* Amounts */}
+              <div className="grid grid-cols-3 gap-3">
+                <DeliveryCard label="Delivery Items Amount" value={`$${delivery.deliveryItemsAmount}`} />
+                <DeliveryCard label="Delivery Fee Amount" value={`$${delivery.deliveryFeeAmount}`} />
+                <DeliveryCard label="Discount" value={`-$${delivery.discount}`} />
+              </div>
+
+              {/* Remarks */}
+              {delivery.deliveryRemarks && (
+                <div className="p-3 bg-surface-container-low rounded-lg">
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">Remarks</p>
+                  <p className="text-xs text-on-surface italic">"{delivery.deliveryRemarks}"</p>
+                </div>
+              )}
+
+              {/* Actual Delivery Fee */}
               <div className="p-3 bg-surface-container-low rounded-lg">
-                <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">
-                  Tracking Number
-                </p>
-                <p className="text-xs font-bold text-primary font-mono select-all">
-                  {delivery.trackingNumber}
-                </p>
-              </div>
-              <div className="p-3 bg-surface-container-low rounded-lg">
-                <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">
-                  Timeslot
-                </p>
-                <p className="text-xs font-semibold text-on-surface">{delivery.timeslot}</p>
-              </div>
-              <div className="p-3 bg-surface-container-low rounded-lg md:col-span-1">
-                <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">
-                  Recipient
-                </p>
-                <p className="text-xs font-semibold text-on-surface">{customer.name}</p>
-                <p className="text-[10px] text-on-surface-variant mt-1 truncate">
-                  Office Reception - Tower 2
-                </p>
-              </div>
-              <div className="p-3 bg-surface-container-low rounded-lg md:col-span-2">
                 <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">
                   Actual Delivery Fee
                 </p>
                 <p className="text-xs font-bold text-on-surface">${delivery.actualDeliveryFee}</p>
                 <p className="text-[10px] text-on-surface-variant mt-1">
-                  Admin override — does not affect customer total.
+                  Admin override — does not affect customer total. Only editable when logistic partner is not system-integrated.
                 </p>
               </div>
             </div>
@@ -578,20 +778,24 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
           </h3>
           <div className="space-y-3">
             <div className="flex justify-between text-xs">
-              <span className="opacity-80">Subtotal</span>
+              <span className="opacity-80">Order Amount</span>
               <span className="font-medium">$1,240.00</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span className="opacity-80">Shipping Fee</span>
+              <span className="opacity-80">Delivery Fee</span>
               <span className="font-medium">$25.00</span>
             </div>
             <div className="flex justify-between text-xs">
-              <span className="opacity-80">Promotional Discount</span>
+              <span className="opacity-80">Handling Fee</span>
+              <span className="font-medium">$0.00</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="opacity-80">Promo Code Discount</span>
               <span className="font-bold text-yellow-300">-$124.00</span>
             </div>
             <div className="pt-3 mt-3 border-t border-white/20">
               <div className="flex justify-between items-baseline">
-                <span className="text-xs font-bold uppercase">Total Payable</span>
+                <span className="text-xs font-bold uppercase">Total Amount Payable</span>
                 <span className="text-xl font-extrabold tracking-tighter">$1,141.00</span>
               </div>
             </div>
@@ -610,7 +814,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
             </h3>
             <div className="flex items-center gap-3">
               <span className="text-[11px] text-on-surface-variant font-medium">3 Items Total</span>
-              {isAction && (
+              {canEdit && (
                 <button
                   type="button"
                   className="text-[10px] font-bold text-primary hover:underline"
@@ -625,34 +829,24 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-surface-container-high">
-                  <th className="text-left py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                    Product
-                  </th>
-                  <th className="text-left py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                    Brand
-                  </th>
-                  <th className="text-right py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                    Qty
-                  </th>
-                  <th className="text-right py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                    Unit Price
-                  </th>
-                  <th className="text-right py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                    Total
-                  </th>
-                  <th className="text-center py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                    Item Status
-                  </th>
+                  <th className="text-left py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Product</th>
+                  <th className="text-left py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Brand</th>
+                  <th className="text-right py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Qty</th>
+                  <th className="text-right py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Unit Price</th>
+                  <th className="text-right py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Total</th>
+                  <th className="text-center py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Item Status</th>
                   {isAction && (
-                    <th className="text-center py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">
-                      Action
-                    </th>
+                    <th className="text-center py-3 px-5 text-[11px] font-bold text-primary uppercase tracking-tight">Action</th>
                   )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/10">
                 {lineItems.map((item) => {
                   const isCancelled = cancelledItems.has(item.sku);
+                  const confirmedStatus = itemStatuses[item.sku];
+                  const draftStatus = itemStatusDrafts[item.sku];
+                  const isDirty = draftStatus !== confirmedStatus;
+
                   return (
                     <tr
                       key={item.sku}
@@ -669,38 +863,41 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                           </div>
                         </div>
                       </td>
-                      <td className="py-4 px-5 text-xs text-on-surface-variant font-medium">
-                        {item.brand}
-                      </td>
-                      <td className="py-4 px-5 text-right text-xs font-semibold text-on-surface">
-                        {item.qty}
-                      </td>
-                      <td className="py-4 px-5 text-right text-xs text-on-surface-variant font-medium">
-                        {item.unitPrice}
-                      </td>
-                      <td className="py-4 px-5 text-right text-xs font-bold text-on-surface">
-                        {item.total}
-                      </td>
+                      <td className="py-4 px-5 text-xs text-on-surface-variant font-medium">{item.brand}</td>
+                      <td className="py-4 px-5 text-right text-xs font-semibold text-on-surface">{item.qty}</td>
+                      <td className="py-4 px-5 text-right text-xs text-on-surface-variant font-medium">{item.unitPrice}</td>
+                      <td className="py-4 px-5 text-right text-xs font-bold text-on-surface">{item.total}</td>
                       <td className="py-4 px-5 text-center">
                         {isAction && !isCancelled ? (
-                          <select
-                            className="text-[10px] font-bold bg-surface-container-low border border-outline-variant/20 rounded px-2 py-1 focus:ring-1 focus:ring-primary/40 cursor-pointer"
-                            value={itemStatuses[item.sku]}
-                            onChange={(e) =>
-                              handleItemStatusChange(item.sku, e.target.value as OrderStatus)
-                            }
-                          >
-                            {ORDER_STATUSES.map((s) => (
-                              <option key={s}>{s}</option>
-                            ))}
-                          </select>
+                          <div className="flex flex-col items-center gap-1.5">
+                            <select
+                              className="text-[10px] font-bold bg-surface-container-low border border-outline-variant/20 rounded px-2 py-1 focus:ring-1 focus:ring-primary/40 cursor-pointer"
+                              value={draftStatus}
+                              onChange={(e) =>
+                                handleItemStatusDraftChange(item.sku, e.target.value as OrderStatus)
+                              }
+                            >
+                              {ORDER_STATUSES.map((s) => (
+                                <option key={s}>{s}</option>
+                              ))}
+                            </select>
+                            {isDirty && (
+                              <button
+                                type="button"
+                                className="text-[10px] font-bold text-white bg-primary hover:bg-primary-container px-2 py-0.5 rounded transition-colors"
+                                onClick={() => handleUpdateItemStatus(item.sku)}
+                              >
+                                Update
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <span
                             className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              STATUS_STYLES[itemStatuses[item.sku]]
+                              STATUS_STYLES[confirmedStatus]
                             }`}
                           >
-                            {itemStatuses[item.sku]}
+                            {confirmedStatus}
                           </span>
                         )}
                       </td>
@@ -749,53 +946,31 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
             Internal System Log &amp; Remarks
           </h3>
           <div className="space-y-4">
-            <div className="flex gap-4 relative">
-              <div className="absolute left-[11px] top-6 bottom-0 w-0.5 bg-outline-variant/20" />
-              <div className="h-6 w-6 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center z-10 shrink-0">
-                <IconCheckCircle className="h-3.5 w-3.5" />
-              </div>
-              <div className="pb-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-on-surface">Order Verified</span>
-                  <span className="text-[10px] text-on-surface-variant">Today, 09:12 AM</span>
-                </div>
-                <p className="text-xs text-on-surface-variant">
-                  Identity verification successful. Address match confirmed via GIS services.
-                </p>
-                <p className="text-[10px] font-semibold text-primary mt-1">Operator: Sarah J.</p>
-              </div>
-            </div>
-            <div className="flex gap-4 relative">
-              <div className="absolute left-[11px] top-6 bottom-0 w-0.5 bg-outline-variant/20" />
-              <div className="h-6 w-6 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center z-10 shrink-0">
-                <IconShipping className="h-3.5 w-3.5" />
-              </div>
-              <div className="pb-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-on-surface">Dispatched to Warehouse</span>
-                  <span className="text-[10px] text-on-surface-variant">Today, 08:00 AM</span>
-                </div>
-                <p className="text-xs text-on-surface-variant">
-                  Consolidated with Batch #NY-8829 for priority processing at Warehouse 4B.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-4">
-              <div className="h-6 w-6 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center z-10 shrink-0">
-                <IconEditNote className="h-3.5 w-3.5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-bold text-on-surface">Manual Note Added</span>
-                  <span className="text-[10px] text-on-surface-variant">Yesterday, 17:45 PM</span>
-                </div>
-                <p className="text-xs text-on-surface italic">
-                  "Customer requested to leave the package at the main reception if the office is
-                  closed."
-                </p>
-                <p className="text-[10px] font-semibold text-primary mt-1">Operator: System Automated</p>
-              </div>
-            </div>
+            <LogEntry
+              icon={<IconCheckCircle className="h-3.5 w-3.5" />}
+              iconBg="bg-primary-container text-on-primary-container"
+              title="Order Verified"
+              time="Today, 09:12 AM"
+              body="Identity verification successful. Address match confirmed via GIS services."
+              operator="Sarah J."
+              hasLine
+            />
+            <LogEntry
+              icon={<IconShipping className="h-3.5 w-3.5" />}
+              iconBg="bg-surface-container-high text-on-surface-variant"
+              title="Dispatched to Warehouse"
+              time="Today, 08:00 AM"
+              body="Consolidated with Batch #NY-8829 for priority processing at Warehouse 4B."
+              hasLine
+            />
+            <LogEntry
+              icon={<IconEditNote className="h-3.5 w-3.5" />}
+              iconBg="bg-surface-container-high text-on-surface-variant"
+              title="Manual Note Added"
+              time="Yesterday, 17:45 PM"
+              body={'"Customer requested to leave the package at the main reception if the office is closed."'}
+              operator="System Automated"
+            />
           </div>
 
           {/* Add remark — action mode only */}
@@ -814,7 +989,7 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
                 className="bg-primary text-white px-4 py-2 rounded text-xs font-semibold hover:bg-primary-container transition-colors"
                 onClick={handlePostRemark}
               >
-                Post Note
+                Add Remark
               </button>
             </div>
           )}
@@ -860,11 +1035,152 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
           </div>
         </div>
       )}
+
+      {/* Payment Details Modal */}
+      {paymentModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-on-surface">Payment Details</h2>
+              <button
+                type="button"
+                className="text-[10px] font-bold text-on-surface-variant hover:text-on-surface"
+                onClick={() => setPaymentModalOpen(false)}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <p className="text-xs text-on-surface-variant">
+              Order <span className="font-semibold text-on-surface">#{orderId}</span> was paid using multiple payment methods.
+            </p>
+
+            {/* Payment method 1: Gateway */}
+            <div className="p-4 rounded-xl border border-outline-variant/20 bg-surface-container-lowest space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Payment Gateway</p>
+                <span className="text-[10px] font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+                  Completed
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                <PaymentRow label="Amount" value="$1,100.00" />
+                <PaymentRow label="Transaction ID" value="TXN-20231024-8829" mono />
+                <PaymentRow label="Card" value="VISA ****4321" />
+                <PaymentRow label="Date" value="Oct 24, 2023, 14:32" />
+                <PaymentRow label="Gateway" value="Stripe" />
+              </div>
+            </div>
+
+            {/* Payment method 2: E-Voucher */}
+            <div className="p-4 rounded-xl border border-outline-variant/20 bg-surface-container-lowest space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">E-Voucher / Points</p>
+                <span className="text-[10px] font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full border border-green-200">
+                  Redeemed
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                <PaymentRow label="Amount" value="$41.00" />
+                <PaymentRow label="Voucher Code" value="EXECUTIVE-2023-FIRST" mono />
+                <PaymentRow label="Type" value="Promotional Voucher" />
+                <PaymentRow label="Date" value="Oct 24, 2023, 14:32" />
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center px-1 pt-1 border-t border-outline-variant/10">
+              <span className="text-xs font-bold text-on-surface">Total Paid</span>
+              <span className="text-sm font-extrabold text-primary">$1,141.00</span>
+            </div>
+
+            <p className="text-[10px] text-on-surface-variant">
+              Note: Having two different payment methods from different payment gateways is not allowed. Only Payment Gateway + Voucher/Points combinations are supported.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex justify-between items-center">
+      <span className="text-xs text-on-surface-variant">{label}</span>
+      <span className="text-xs text-on-surface text-right">{value}</span>
+    </div>
+  );
+}
+
+function DeliveryCard({
+  label,
+  value,
+  mono = false,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="p-3 bg-surface-container-low rounded-lg">
+      <p className="text-[10px] font-bold text-on-surface-variant uppercase mb-1">{label}</p>
+      <p
+        className={`text-xs font-semibold ${mono ? "font-mono text-primary select-all" : ""} ${
+          highlight ? "text-blue-700" : "text-on-surface"
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function PaymentRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between items-center">
+      <span className="text-[11px] text-on-surface-variant">{label}</span>
+      <span className={`text-[11px] font-semibold text-on-surface ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function LogEntry({
+  icon,
+  iconBg,
+  title,
+  time,
+  body,
+  operator,
+  hasLine = false,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  title: string;
+  time: string;
+  body: string;
+  operator?: string;
+  hasLine?: boolean;
+}) {
+  return (
+    <div className="flex gap-4 relative">
+      {hasLine && <div className="absolute left-[11px] top-6 bottom-0 w-0.5 bg-outline-variant/20" />}
+      <div className={`h-6 w-6 rounded-full flex items-center justify-center z-10 shrink-0 ${iconBg}`}>
+        {icon}
+      </div>
+      <div className="pb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-xs font-bold text-on-surface">{title}</span>
+          <span className="text-[10px] text-on-surface-variant">{time}</span>
+        </div>
+        <p className="text-xs text-on-surface-variant">{body}</p>
+        {operator && <p className="text-[10px] font-semibold text-primary mt-1">Operator: {operator}</p>}
+      </div>
+    </div>
+  );
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -881,28 +1197,7 @@ const inputCls =
   "w-full bg-surface-container-low border border-outline-variant/20 rounded px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary";
 
 const lineItems = [
-  {
-    name: "Air Velocity Max X2",
-    sku: "AV-MAX-0019",
-    brand: "Lumina Sport",
-    qty: 1,
-    unitPrice: "$450.00",
-    total: "$450.00",
-  },
-  {
-    name: "Heritage Chrono Silver",
-    sku: "WTCH-H-042",
-    brand: "Stark & Co.",
-    qty: 1,
-    unitPrice: "$590.00",
-    total: "$590.00",
-  },
-  {
-    name: "Zenith Wireless Audio",
-    sku: "AUD-ZW-100",
-    brand: "AudioZen",
-    qty: 1,
-    unitPrice: "$200.00",
-    total: "$200.00",
-  },
+  { name: "Air Velocity Max X2", sku: "AV-MAX-0019", brand: "Lumina Sport", qty: 1, unitPrice: "$450.00", total: "$450.00" },
+  { name: "Heritage Chrono Silver", sku: "WTCH-H-042", brand: "Stark & Co.", qty: 1, unitPrice: "$590.00", total: "$590.00" },
+  { name: "Zenith Wireless Audio", sku: "AUD-ZW-100", brand: "AudioZen", qty: 1, unitPrice: "$200.00", total: "$200.00" },
 ];

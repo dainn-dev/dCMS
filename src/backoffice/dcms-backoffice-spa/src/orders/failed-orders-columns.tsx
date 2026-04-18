@@ -3,11 +3,11 @@ import { IconChevronDown, IconChevronUp, IconUnfoldMore, IconVisibility } from "
 import type { FailedOrder, FailedOrderStatus } from "./types";
 
 const STATUS_STYLES: Record<FailedOrderStatus, string> = {
-  "Payment Failed": "bg-red-100 text-red-700",
-  "Address Error": "bg-orange-100 text-orange-700",
-  "Auth Failed": "bg-red-100 text-red-700",
-  "Stock Error": "bg-amber-100 text-amber-700",
-  "System Error": "bg-purple-100 text-purple-700",
+  "Payment Failed": "bg-red-100 text-red-800",
+  "Address Error": "bg-orange-100 text-orange-800",
+  "Auth Failed": "bg-sky-100 text-sky-800",
+  "Stock Error": "bg-amber-100 text-amber-800",
+  "System Error": "bg-purple-100 text-purple-800",
 };
 
 function SortHeader({
@@ -120,7 +120,7 @@ export function createFailedOrderColumns(
       cell: ({ row }) => (
         <div className="flex flex-col">
           <span className="text-xs font-bold text-on-surface">{row.getValue("customerName")}</span>
-          <span className="text-[10px] text-on-surface-variant">{row.original.contactNo}</span>
+          <span className="text-[10px] text-on-surface-variant">{row.original.customerContactNo ?? "—"}</span>
           <span className="text-[10px] text-on-surface-variant">{row.original.customerEmail}</span>
         </div>
       ),
@@ -133,16 +133,16 @@ export function createFailedOrderColumns(
         <SortHeader label="Delivery Date" isSorted={column.getIsSorted()} onToggle={() => column.toggleSorting(column.getIsSorted() === "asc")} />
       ),
       cell: ({ row }) => (
-        <span className="text-xs text-on-surface-variant">{row.getValue("deliveryDate")}</span>
+        <span className="text-xs text-on-surface-variant">{row.getValue("deliveryDate") ?? "—"}</span>
       ),
     },
 
     // ── Delivery Option ─────────────────────────────────────────────────────
     {
       accessorKey: "deliveryOption",
-      header: "Option",
+      header: "Delivery Option",
       cell: ({ row }) => (
-        <span className="text-xs text-on-surface-variant">{row.getValue("deliveryOption")}</span>
+        <span className="text-xs text-on-surface-variant">{row.getValue("deliveryOption") ?? "—"}</span>
       ),
     },
 
@@ -150,12 +150,21 @@ export function createFailedOrderColumns(
     {
       accessorKey: "fulfilledDate",
       header: ({ column }) => (
-        <SortHeader label="Fulfilled" isSorted={column.getIsSorted()} onToggle={() => column.toggleSorting(column.getIsSorted() === "asc")} />
+        <SortHeader label="Fulfilled Date" isSorted={column.getIsSorted()} onToggle={() => column.toggleSorting(column.getIsSorted() === "asc")} />
       ),
       cell: ({ row }) => (
         <span className="text-xs text-on-surface-variant">
           {row.getValue("fulfilledDate") ?? "N/A"}
         </span>
+      ),
+    },
+
+    // ── Shipping status ─────────────────────────────────────────────────────
+    {
+      accessorKey: "shippingStatus",
+      header: "Shipping",
+      cell: ({ row }) => (
+        <span className="text-xs text-on-surface-variant">{row.getValue("shippingStatus") ?? "—"}</span>
       ),
     },
 
@@ -178,7 +187,7 @@ export function createFailedOrderColumns(
       accessorKey: "processedBy",
       header: "Processed By",
       cell: ({ row }) => (
-        <span className="text-xs text-on-surface-variant font-mono">{row.getValue("processedBy")}</span>
+        <span className="text-xs text-on-surface-variant font-mono">{row.getValue("processedBy") ?? "—"}</span>
       ),
     },
 
@@ -188,7 +197,7 @@ export function createFailedOrderColumns(
       header: "Tags",
       cell: ({ row }) => (
         <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium italic bg-secondary-container/20 text-secondary">
-          {row.getValue("tags")}
+          {row.getValue("tags") ?? "—"}
         </span>
       ),
     },
@@ -196,9 +205,9 @@ export function createFailedOrderColumns(
     // ── Payment Method ──────────────────────────────────────────────────────
     {
       accessorKey: "paymentMethod",
-      header: "Payment",
+      header: "Payment Method",
       cell: ({ row }) => (
-        <span className="text-xs text-on-surface-variant">{row.getValue("paymentMethod")}</span>
+        <span className="text-xs text-on-surface-variant">{row.getValue("paymentMethod") ?? "—"}</span>
       ),
     },
 
@@ -224,3 +233,19 @@ export function createFailedOrderColumns(
     },
   ];
 }
+
+export const FAILED_ORDER_COLUMN_LABELS: Record<string, string> = {
+  doNumber: "DO Number",
+  orderId: "Order Number",
+  orderDate: "Order Date",
+  type: "Type",
+  customerName: "Customer",
+  deliveryDate: "Delivery Date",
+  deliveryOption: "Delivery Option",
+  fulfilledDate: "Fulfilled Date",
+  shippingStatus: "Shipping",
+  status: "Status",
+  processedBy: "Processed By",
+  tags: "Tags",
+  paymentMethod: "Payment Method",
+};

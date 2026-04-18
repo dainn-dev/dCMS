@@ -2,7 +2,12 @@ import type { ReactNode } from "react";
 import type { ComponentType } from "react";
 import { IconHelp, IconReceipt, IconRefund, IconWarning } from "../icons";
 
-export type OrdersPageId = "order-processing" | "failed-orders" | "refund-cases" | "order-detail";
+export type OrdersPageId =
+  | "order-processing"
+  | "failed-orders"
+  | "refund-cases"
+  | "order-detail"
+  | "failed-order-detail";
 
 type NavItem = { id: OrdersPageId; label: string; Icon: ComponentType<{ className?: string }> };
 
@@ -36,7 +41,8 @@ export function OrdersLayout({ page, onPageChange, children }: Props) {
       >
         <nav className="flex-1 space-y-1 pb-4" aria-label="Orders navigation">
           {navItems.map((item) => {
-            const active = item.id === page;
+            const active =
+              item.id === page || (item.id === "failed-orders" && page === "failed-order-detail");
             const ItemIcon = item.Icon;
             return (
               <button

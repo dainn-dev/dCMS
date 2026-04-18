@@ -58,6 +58,8 @@ function applyTheme() {
 export const onInit = (_host, extensionRegistry) => {
   extensionRegistry.exclude("Umb.Dashboard.UmbracoNews");
   extensionRegistry.exclude("Umb.Section.Packages");
+  /** Default header “help” (icon-help-alt) — replaced by dCMS “Thông báo” header app in umbraco-package.json */
+  extensionRegistry.exclude("Umb.HeaderApp.Help");
 
   // Apply immediately, then re-apply after UUI CSS finishes loading
   // (it loads async and overrides :root vars set by an earlier onInit call).

@@ -11,14 +11,15 @@
       "js": "/App_Plugins/DcmsV16/dcms-hide-getting-started.js"
     },
     {
-      "type": "section",
-      "alias": "dcmsOrders",
-      "name": "Orders",
-      "weight": 950,
-      "element": "/App_Plugins/DcmsV16/dcms-orders-section.js",
+      "type": "headerApp",
+      "alias": "Dcms.HeaderApp.Notifications",
+      "name": "Notifications",
+      "kind": "button",
+      "weight": 100,
       "meta": {
-        "label": "Orders",
-        "pathname": "dcms-orders"
+        "label": "Notifications",
+        "icon": "icon-bell",
+        "href": "#"
       }
     },
     {
@@ -30,6 +31,39 @@
       "meta": {
         "label": "eStore",
         "pathname": "dcms-estore"
+      }
+    },
+    {
+      "type": "section",
+      "alias": "dcmsOrders",
+      "name": "Orders",
+      "weight": 959,
+      "element": "/App_Plugins/DcmsV16/dcms-orders-section.js",
+      "meta": {
+        "label": "Orders",
+        "pathname": "dcms-orders"
+      }
+    },
+    {
+      "type": "section",
+      "alias": "dcmsApproval",
+      "name": "Approval",
+      "weight": 958,
+      "element": "/App_Plugins/DcmsV16/dcms-approval-section.js",
+      "meta": {
+        "label": "Approval",
+        "pathname": "dcms-approval"
+      }
+    },
+    {
+      "type": "section",
+      "alias": "dcmsReports",
+      "name": "Reports",
+      "weight": 957,
+      "element": "/App_Plugins/DcmsV16/dcms-reports-section.js",
+      "meta": {
+        "label": "Reports",
+        "pathname": "dcms-reports"
       }
     },
     {

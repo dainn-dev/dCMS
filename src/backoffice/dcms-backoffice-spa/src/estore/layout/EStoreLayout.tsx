@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ComponentType } from "react";
 import {
+  IconBolt,
   IconBox,
   IconGrid,
   IconHelp,
@@ -8,23 +9,39 @@ import {
   IconShipping,
   IconStore,
   IconTag,
+  IconTrendingUp,
+  IconTune,
 } from "../../orders/icons";
 
 export type EStorePageId =
   | "brands"
+  | "brand-configuration"
   | "categories"
   | "products"
+  | "product-best-sellers"
   | "attributes"
+  | "campaigns"
   | "promo-codes"
   | "fulfillment-options";
 
-type NavItem = { id: EStorePageId; label: string; Icon: ComponentType<{ className?: string }> };
+type NavItem = {
+  id: EStorePageId;
+  label: string;
+  Icon: ComponentType<{ className?: string }>;
+  /** Visually group under Brands (US-18 / §4.2). */
+  nestUnderBrands?: boolean;
+  /** Visually group under Products (US-20 / §4.4). */
+  nestUnderProducts?: boolean;
+};
 
 const navItems: NavItem[] = [
   { id: "brands", label: "Brands", Icon: IconStore },
+  { id: "brand-configuration", label: "Brand Configuration", Icon: IconTune, nestUnderBrands: true },
   { id: "categories", label: "Categories", Icon: IconGrid },
   { id: "products", label: "Products", Icon: IconBox },
+  { id: "product-best-sellers", label: "Best Seller Settings", Icon: IconTrendingUp, nestUnderProducts: true },
   { id: "attributes", label: "Attributes", Icon: IconTag },
+  { id: "campaigns", label: "Campaigns", Icon: IconBolt },
   { id: "promo-codes", label: "Promo Codes", Icon: IconLocalOffer },
   { id: "fulfillment-options", label: "Fulfillment Options", Icon: IconShipping },
 ];
@@ -50,21 +67,24 @@ export function EStoreLayout({ page, onPageChange, children }: Props) {
           {navItems.map((item) => {
             const active = item.id === page;
             const ItemIcon = item.Icon;
+            const nested = item.nestUnderBrands || item.nestUnderProducts;
+            const pad = nested ? "pl-10 pr-6" : "px-6";
             return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onPageChange(item.id)}
-                aria-current={active ? "page" : undefined}
-                className={`flex w-full items-center px-6 py-3 transition-all duration-200 ease-in-out border-r-4 text-xs font-medium ${
-                  active
-                    ? "text-red-700 bg-red-50 font-bold border-red-700"
-                    : "text-stone-500 hover:bg-stone-200 border-transparent"
-                }`}
-              >
-                <ItemIcon className="mr-3 h-5 w-5 shrink-0 opacity-80" />
-                <span>{item.label}</span>
-              </button>
+              <div key={item.id}>
+                <button
+                  type="button"
+                  onClick={() => onPageChange(item.id)}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex w-full items-center ${pad} py-3 transition-all duration-200 ease-in-out border-r-4 text-xs font-medium ${
+                    active
+                      ? "text-red-700 bg-red-50 font-bold border-red-700"
+                      : "text-stone-500 hover:bg-stone-200 border-transparent"
+                  }`}
+                >
+                  <ItemIcon className="mr-3 h-5 w-5 shrink-0 opacity-80" />
+                  <span>{item.label}</span>
+                </button>
+              </div>
             );
           })}
         </nav>

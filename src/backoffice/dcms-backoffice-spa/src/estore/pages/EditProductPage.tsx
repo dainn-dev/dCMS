@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import {
   IconAdd,
@@ -72,8 +72,11 @@ type ProductImage = {
   id: string;
   name: string;
   alt: string;
-  /** bg colour used as thumbnail placeholder */
+  /** bg colour used when `src` is missing */
   color: string;
+  /** data URL (image) or blob: URL (video) */
+  src?: string;
+  isVideo?: boolean;
 };
 
 type Props = {
@@ -231,6 +234,61 @@ export function EditProductPage({ mode, product, onBack }: Props) {
     { open: false, imageId: "" }
   );
   const [editorImageId, setEditorImageId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagesRef = useRef<ProductImage[]>([]);
+  const [configureMainOpen, setConfigureMainOpen] = useState(false);
+  const [variantNotice, setVariantNotice] = useState("");
+  const [galleryNotice, setGalleryNotice] = useState("");
+
+  const MAX_MEDIA_BYTES = 40 * 1024 * 1024;
+
+  const ingestFiles = useCallback((files: FileList | File[]) => {
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) continue;
+      if (file.size > MAX_MEDIA_BYTES) continue;
+      const id = `img-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const src = reader.result;
+          if (typeof src !== "string") return;
+          setImages((prev) => [
+            ...prev,
+            { id, name: file.name, alt: "", color: "#e5e7eb", src, isVideo: false },
+          ]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        const src = URL.createObjectURL(file);
+        setImages((prev) => [
+          ...prev,
+          { id, name: file.name, alt: "", color: "#0f172a", src, isVideo: true },
+        ]);
+      }
+    }
+  }, []);
+
+  imagesRef.current = images;
+  useEffect(
+    () => () => {
+      imagesRef.current.forEach((img) => {
+        if (img.src?.startsWith("blob:")) URL.revokeObjectURL(img.src);
+      });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!variantNotice) return;
+    const t = setTimeout(() => setVariantNotice(""), 4000);
+    return () => clearTimeout(t);
+  }, [variantNotice]);
+
+  useEffect(() => {
+    if (!galleryNotice) return;
+    const t = setTimeout(() => setGalleryNotice(""), 4000);
+    return () => clearTimeout(t);
+  }, [galleryNotice]);
 
   // ── General tab state ─────────────────────────────────────────────────────
   const [itemType, setItemType] = useState<ItemType>("physical");
@@ -782,6 +840,11 @@ export function EditProductPage({ mode, product, onBack }: Props) {
               {/* Product Images */}
               <div>
                 <h3 className={sectionTitle}>Product Images & Videos</h3>
+                {galleryNotice ? (
+                  <p className="mb-3 rounded-md border border-outline-variant/30 bg-surface-container-high px-3 py-2 text-[11px] text-on-surface-variant">
+                    {galleryNotice}
+                  </p>
+                ) : null}
 
                 {/* Inline image editor */}
                 {editorImageId !== null && (() => {
@@ -837,16 +900,38 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                           </button>
                         </div>
                       </div>
-                      {/* Mock canvas */}
-                      <div
-                        className="flex min-h-[300px] items-center justify-center rounded-b-xl"
-                        style={{ backgroundColor: img?.color ?? "#f3f4f6" }}
-                      >
-                        <div className="text-center">
-                          <IconImage className="mx-auto h-16 w-16 text-white/60 mb-3" />
-                          <p className="text-sm font-semibold text-white/80">{img?.name}</p>
-                          <p className="text-[11px] text-white/60 mt-1">Use the toolbar above to edit this image</p>
-                        </div>
+                      {/* Preview (uploaded media or colour placeholder) */}
+                      <div className="flex min-h-[300px] items-center justify-center overflow-hidden rounded-b-xl bg-black/5">
+                        {img?.src ? (
+                          img.isVideo ? (
+                            <video
+                              src={img.src}
+                              className="max-h-[min(70vh,520px)] w-full object-contain"
+                              controls
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <img
+                              src={img.src}
+                              alt={img.alt || ""}
+                              className="max-h-[min(70vh,520px)] w-full object-contain"
+                            />
+                          )
+                        ) : (
+                          <div
+                            className="flex min-h-[300px] w-full flex-col items-center justify-center"
+                            style={{ backgroundColor: img?.color ?? "#f3f4f6" }}
+                          >
+                            <div className="text-center">
+                              <IconImage className="mx-auto mb-3 h-16 w-16 text-white/60" />
+                              <p className="text-sm font-semibold text-white/80">{img?.name}</p>
+                              <p className="mt-1 text-[11px] text-white/60">
+                                Use the toolbar above to edit this image
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -862,11 +947,25 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                         className="group relative w-[160px] shrink-0 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface shadow-sm"
                       >
                         {/* Thumbnail */}
-                        <div
-                          className="flex h-[120px] items-center justify-center"
-                          style={{ backgroundColor: img.color }}
-                        >
-                          <IconImage className="h-10 w-10 text-white/60" />
+                        <div className="relative flex h-[120px] w-full items-center justify-center overflow-hidden bg-black/5">
+                          {img.src ? (
+                            img.isVideo ? (
+                              <video
+                                src={img.src}
+                                className="h-full w-full object-cover"
+                                muted
+                                playsInline
+                                loop
+                              />
+                            ) : (
+                              <img src={img.src} alt="" className="h-full w-full object-cover" />
+                            )
+                          ) : (
+                            <>
+                              <div className="absolute inset-0" style={{ backgroundColor: img.color }} />
+                              <IconImage className="relative z-[1] h-10 w-10 text-white/60" />
+                            </>
+                          )}
                         </div>
 
                         {/* Filename */}
@@ -884,7 +983,13 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                             aria-label="View Media"
                             title="View Media"
                             className="rounded p-1 text-on-surface-variant hover:text-primary transition-colors"
-                            onClick={() => console.info(`[Images] View media: ${img.name}`)}
+                            onClick={() => {
+                              if (!img.src) {
+                                setGalleryNotice("Add a file first — mock placeholders have no URL.");
+                                return;
+                              }
+                              window.open(img.src, "_blank", "noopener,noreferrer");
+                            }}
                           >
                             <IconVisibility className="h-4 w-4" />
                           </button>
@@ -902,7 +1007,9 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                             aria-label="Optimize Image"
                             title="Optimize Image"
                             className="rounded p-1 text-on-surface-variant hover:text-primary transition-colors"
-                            onClick={() => console.info(`[Images] Optimize: ${img.name}`)}
+                            onClick={() =>
+                              setGalleryNotice("Image optimization is not available in this demo build.")
+                            }
                           >
                             <IconAutoFixHigh className="h-4 w-4" />
                           </button>
@@ -929,10 +1036,29 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                     ))}
 
                     {/* Add image dropzone */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*,video/*"
+                      className="sr-only"
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                        if (e.target.files?.length) ingestFiles(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
                     <div
                       className="flex w-[160px] shrink-0 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/20 bg-primary/5 px-3 py-6 transition-colors hover:border-primary/40 hover:bg-primary/10"
-                      onDragOver={(e) => e.preventDefault()}
-                      onClick={() => console.info("[Images] Choose files (placeholder)")}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (e.dataTransfer.files?.length) ingestFiles(e.dataTransfer.files);
+                      }}
+                      onClick={() => fileInputRef.current?.click()}
                     >
                       <IconCloudUpload className="h-8 w-8 text-primary/40" />
                       <p className="text-center text-[10px] font-semibold leading-snug text-primary/70">
@@ -947,6 +1073,11 @@ export function EditProductPage({ mode, product, onBack }: Props) {
               {/* Variants */}
               <div>
                 <h3 className={sectionTitle}>Variants</h3>
+                {variantNotice ? (
+                  <p className="mb-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-primary">
+                    {variantNotice}
+                  </p>
+                ) : null}
                 <div className="flex items-center gap-4 rounded-lg border border-outline-variant/20 bg-surface p-4">
                   <div className="flex-1">
                     <p className="text-sm font-semibold text-on-surface">Main Product Configuration</p>
@@ -957,7 +1088,7 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                   <button
                     type="button"
                     className="shrink-0 rounded-md bg-surface-container-high px-4 py-2 text-xs font-bold text-on-surface-variant transition-colors hover:bg-surface-variant"
-                    onClick={() => console.info("[EditProduct] Configure main product (placeholder)")}
+                    onClick={() => setConfigureMainOpen(true)}
                   >
                     Configure Main Product
                   </button>
@@ -1135,7 +1266,7 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                       label="Meta Keywords"
                       placeholders={{
                         en: "Enter keywords separated by commas…",
-                        vn: "Nhập từ khóa, cách nhau bằng dấu phẩy...",
+                        vn: "Nhập từ khóa cách nhau bằng dấu phẩy...",
                         zh: "输入以逗号分隔的关键词...",
                         ja: "カンマ区切りでキーワードを入力...",
                       }}
@@ -1262,6 +1393,44 @@ export function EditProductPage({ mode, product, onBack }: Props) {
         </section>
       </div>
 
+      {/* ── Configure main product (variants) ───────────────────────────── */}
+      {configureMainOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 backdrop-blur-sm p-4"
+          onClick={() => setConfigureMainOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-on-surface">Configure main product</h3>
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              Choose how this SKU relates to variant listings. In production this would load variant SKUs from your
+              catalog service.
+            </p>
+            <div className="mt-5 flex flex-col gap-3">
+              <button
+                type="button"
+                className="w-full rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-left text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+                onClick={() => {
+                  setVariantNotice("This SKU is set as the main product for storefront listing (demo).");
+                  setConfigureMainOpen(false);
+                }}
+              >
+                Set Self as Main Product
+              </button>
+              <button
+                type="button"
+                className={btnFooterGhost + " w-full text-center"}
+                onClick={() => setConfigureMainOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Edit Alt Text modal ──────────────────────────────────────────── */}
       {altTextModal.open && (
         <div
@@ -1343,8 +1512,11 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                   type="button"
                   className="rounded-md bg-error px-5 py-2 text-xs font-bold uppercase tracking-widest text-white hover:opacity-90 transition-opacity"
                   onClick={() => {
-                    setImages((prev) => prev.filter((i) => i.id !== deleteConfirm.imageId));
-                    if (editorImageId === deleteConfirm.imageId) setEditorImageId(null);
+                    const rid = deleteConfirm.imageId;
+                    const victim = images.find((i) => i.id === rid);
+                    if (victim?.src?.startsWith("blob:")) URL.revokeObjectURL(victim.src);
+                    setImages((prev) => prev.filter((i) => i.id !== rid));
+                    if (editorImageId === rid) setEditorImageId(null);
                     setDeleteConfirm({ open: false, imageId: "" });
                   }}
                 >

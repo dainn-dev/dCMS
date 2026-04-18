@@ -21,6 +21,10 @@ import {
   IconSearch,
   IconVisibility,
 } from "../../orders/icons";
+import {
+  downloadInventoryImportTemplateXlsx,
+  downloadProductImportTemplateXlsx,
+} from "../exportProductImportTemplates";
 
 const labelFilter = "text-[10px] font-bold text-on-surface-variant uppercase tracking-wider";
 const inputFilter =
@@ -44,7 +48,8 @@ export type ProductListRow = {
   imageAlt: string;
 };
 
-const PRODUCT_ROWS: ProductListRow[] = [
+/** Demo catalog rows — shared with Best Seller Settings (US-20). */
+export const DEMO_PRODUCT_ROWS: ProductListRow[] = [
   {
     id: "1",
     name: "Vantage Series 5 Watch",
@@ -143,39 +148,6 @@ function statusBadgeClasses(variant: ProductListRow["statusVariant"]) {
   }
 }
 
-function downloadImportTemplate() {
-  const headers = [
-    "UPC","SKU","PID1","PID2","Product Name","Category","Brand",
-    "Retail Price","Current Price","Qty","eStore Qty","eStore CutOff Qty",
-    "Item Type","Enable Collection","Enable Delivery","Enable Overseas Delivery",
-    "Inventory Sync","Delivery Start Date","Delivery Lead Time","Handling Fee",
-    "ATTRIB_COLOR","ATTRIB_SIZE","ATTRIB_STYLE",
-    "Meta Title","Meta Keywords","Meta Description","Product URL",
-  ];
-  const bom = "\uFEFF";
-  const csv = bom + headers.join(",") + "\n";
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "product-import-template.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function downloadInventoryTemplate() {
-  const headers = ["UPC", "Product Name", "Store ID", "Store Quantity", "Replace Quantity"];
-  const bom = "\uFEFF";
-  const csv = bom + headers.join(",") + "\n";
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "inventory-import-template.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 type ProductsPageProps = {
   onAddProduct?: () => void;
   onEditProduct?: (row: ProductListRow) => void;
@@ -223,7 +195,7 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
 
     if (exportType === "products") {
       const headers = ["UPC", "SKU", "Product Name", "Category", "Brand", "Retail Price", "Qty", "eStore Status", "Status", "Last Modified"];
-      const rows = PRODUCT_ROWS.slice(0, 50).map((r) =>
+      const rows = DEMO_PRODUCT_ROWS.slice(0, 50).map((r) =>
         [r.upc, r.sku, r.name, r.categoryPath, r.brand, r.price, r.qty, r.eStoreLabel, r.statusLabel, r.modified]
           .map((v) => `"${String(v).replace(/"/g, '""')}"`)
           .join(",")
@@ -232,14 +204,14 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
       filename = exportFormat === "excel" ? "products-export.xlsx" : "products-export.csv";
     } else if (exportType === "inventory") {
       const headers = ["UPC", "Product Name", "Store ID", "Store Name", "Store Quantity"];
-      const rows = PRODUCT_ROWS.slice(0, 50).map((r) =>
+      const rows = DEMO_PRODUCT_ROWS.slice(0, 50).map((r) =>
         [`"${r.upc}"`, `"${r.name}"`, `"STR-001"`, `"Main Store"`, `"${r.qty}"`].join(",")
       );
       csv = bom + [headers.join(","), ...rows].join("\n");
       filename = exportFormat === "excel" ? "inventory-qty-export.xlsx" : "inventory-qty-export.csv";
     } else if (exportType === "preview") {
       const headers = ["UPC", "SKU", "Product Name", "Preview URL"];
-      const rows = PRODUCT_ROWS.slice(0, 50).map((r) =>
+      const rows = DEMO_PRODUCT_ROWS.slice(0, 50).map((r) =>
         [`"${r.upc}"`, `"${r.sku}"`, `"${r.name}"`, `"https://preview.dcms.local/products/${r.id}"`].join(",")
       );
       csv = bom + [headers.join(","), ...rows].join("\n");
@@ -305,7 +277,7 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
 
   // ── Filtering logic ───────────────────────────────────────────────────────
   const filteredRows = useMemo(() => {
-    return PRODUCT_ROWS.filter((row) => {
+    return DEMO_PRODUCT_ROWS.filter((row) => {
       if (activeCategories.length > 0) {
         const topLevel = row.categoryPath.split(" > ")[0];
         if (!activeCategories.includes(topLevel)) return false;
@@ -413,7 +385,10 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); downloadImportTemplate(); }}
+                  onClick={() => {
+                    setGroupOpen(false);
+                    void downloadProductImportTemplateXlsx();
+                  }}
                 >
                   <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
                   Product Import Template
@@ -421,7 +396,10 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); downloadInventoryTemplate(); }}
+                  onClick={() => {
+                    setGroupOpen(false);
+                    void downloadInventoryImportTemplateXlsx();
+                  }}
                 >
                   <IconBox className="h-4 w-4 shrink-0 text-primary" />
                   Inventory Import Template
@@ -674,9 +652,9 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
         <footer className="flex flex-col items-center justify-between gap-4 bg-surface-container px-6 py-4 sm:flex-row">
           <div className="flex flex-wrap items-center gap-4 text-[11px] font-medium text-on-surface-variant">
             <span>
-              {filteredRows.length === PRODUCT_ROWS.length
+              {filteredRows.length === DEMO_PRODUCT_ROWS.length
                 ? `Showing 1 to ${filteredRows.length} of ${filteredRows.length} entries`
-                : `Showing ${filteredRows.length} of ${PRODUCT_ROWS.length} entries (filtered)`}
+                : `Showing ${filteredRows.length} of ${DEMO_PRODUCT_ROWS.length} entries (filtered)`}
             </span>
             <div className="flex items-center gap-2">
               <label htmlFor="products-page-size">Show</label>

@@ -3,11 +3,13 @@ import {
   IconArrowBack,
   IconCheckCircle,
   IconDelete,
+  IconDownload,
   IconEdit,
   IconFormatListBulleted,
   IconWarning,
 } from "../../orders/icons";
 import type { PromoListRow } from "../promotions-columns";
+import { exportGroupedPromoCodesToXlsx } from "../exportPromoCodesXlsx";
 
 // ── Mock child rows ───────────────────────────────────────────────────────────
 type ChildPromoRow = {
@@ -112,8 +114,30 @@ export function GroupedPromoCodesPage({ parentPromo, onBack, onEditChild }: Prop
             </div>
           </div>
         </div>
-        <div className="shrink-0 rounded-full bg-surface-container-high px-4 py-1.5 text-xs font-bold text-on-surface-variant">
-          {rows.length} code{rows.length !== 1 ? "s" : ""}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-3 py-2 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-container-high"
+            onClick={() =>
+              void exportGroupedPromoCodesToXlsx(
+                parentPromo.code,
+                rows.map((r) => ({
+                  code: r.code,
+                  status: r.status,
+                  startDate: r.startDate,
+                  endDate: r.endDate,
+                  used: r.used,
+                  limit: r.limit,
+                }))
+              )
+            }
+          >
+            <IconDownload className="h-4 w-4 shrink-0 text-primary" />
+            Export Excel
+          </button>
+          <div className="rounded-full bg-surface-container-high px-4 py-1.5 text-xs font-bold text-on-surface-variant">
+            {rows.length} code{rows.length !== 1 ? "s" : ""}
+          </div>
         </div>
       </div>
 
@@ -196,7 +220,7 @@ export function GroupedPromoCodesPage({ parentPromo, onBack, onEditChild }: Prop
               <div>
                 <h3 className="text-sm font-bold text-on-surface">Delete Promo Code</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
-                  Are you sure you want to delete this code? This action cannot be undone.
+                  Delete <strong className="text-on-surface font-mono">{rows.find((r) => r.id === deleteTarget)?.code}</strong>? This cannot be undone.
                 </p>
               </div>
             </div>

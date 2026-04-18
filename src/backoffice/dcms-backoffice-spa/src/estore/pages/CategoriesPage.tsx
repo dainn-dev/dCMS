@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
+import { exportCategoriesToXlsx } from "../exportCategoriesXlsx";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import {
   IconAdd,
@@ -6,6 +15,7 @@ import {
   IconCheckCircle,
   IconChevronDown,
   IconChevronRight,
+  IconChevronUp,
   IconCloudUpload,
   IconDelete,
   IconDownload,
@@ -17,7 +27,6 @@ import {
   IconFormatUnderlined,
   IconFolder,
   IconFolderOpen,
-  IconImage,
   IconInfo,
   IconLink,
   IconOpenInNew,
@@ -27,6 +36,7 @@ import {
   IconTag,
   IconUnfoldLess,
   IconUnfoldMore,
+  IconWarning,
 } from "../../orders/icons";
 
 const labelBase =
@@ -216,6 +226,50 @@ function findParentId(
   return undefined;
 }
 
+function findNodeRef(nodes: CatNode[], id: string): CatNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.children?.length) {
+      const f = findNodeRef(n.children, id);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+
+function getOrderingContext(nodes: CatNode[], parentId: string | null): CatNode[] {
+  if (parentId === null) return [...nodes];
+  const p = findNodeRef(nodes, parentId);
+  return p?.children ? [...p.children] : [];
+}
+
+function applySiblingOrder(nodes: CatNode[], parentId: string | null, ordered: CatNode[]): CatNode[] {
+  if (parentId === null) return ordered.map((n) => ({ ...n }));
+  return nodes.map((n) => {
+    if (n.id === parentId) return { ...n, children: ordered.map((c) => ({ ...c })) };
+    if (n.children?.length) return { ...n, children: applySiblingOrder(n.children, parentId, ordered) };
+    return n;
+  });
+}
+
+function firstNodeIdInTree(nodes: CatNode[]): string | null {
+  if (!nodes.length) return null;
+  return nodes[0].id;
+}
+
+function collectParentsWithChildren(
+  nodes: CatNode[],
+  acc: { id: string; name: string }[] = []
+): { id: string; name: string }[] {
+  for (const n of nodes) {
+    if (n.children?.length) {
+      acc.push({ id: n.id, name: n.name });
+      collectParentsWithChildren(n.children, acc);
+    }
+  }
+  return acc;
+}
+
 // ─── Expiry helpers ───────────────────────────────────────────────────────────
 
 const TODAY = new Date();
@@ -234,62 +288,102 @@ function countExpiredInTree(nodes: CatNode[]): number {
   }, 0);
 }
 
-// ─── Export to CSV (Excel-compatible) ────────────────────────────────────────
+const MAX_CATEGORY_IMG_BYTES = 2 * 1024 * 1024;
 
-type ExportRow = {
-  "Category ID": string;
-  "Category Name": string;
-  "Parent Category": string;
-  "Sort Order": string;
-  Status: string;
-  Expired: string;
-  "Publish From": string;
-  "Publish Until": string;
-};
+const DEFAULT_EDIT_CATEGORY_PAGE_IMG =
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuAPJzecG9bliDfIpfU0WQn6f271QaBU3e2T3PLxsf_FCi0WH0MnpiPgUIfZrwgJcMtnCGJhehRS9NeNl9gMQMb3cr0G8gC1dMGLXHgtDE9q_rAxl09PITIVh745aZKiBD37NWVg4B4OLT3_6KFyT0UzPf3nCYvOH5rBmv4Gn9RzOfBe_4W0AJLL8IRu-RAwBZ3BwVJ5tsKCHT7zGQN2gMSi8XyGSXQAsLOHbDqpW4jkYxuBIxWRFM5npA5thm1Bw9VnFmmy5Wmbshc";
 
-function flattenForExport(
-  nodes: CatNode[],
-  parentName = "(Root)"
-): ExportRow[] {
-  return nodes.flatMap((n) => {
-    const row: ExportRow = {
-      "Category ID": n.id,
-      "Category Name": n.name,
-      "Parent Category": parentName,
-      "Sort Order": String(n.sortOrder ?? ""),
-      Status: n.active !== false ? "Active" : "Inactive",
-      Expired: isExpired(n) ? "Yes" : "No",
-      "Publish From": n.publishFrom ?? "",
-      "Publish Until": n.publishUntil ?? "",
+function CategoryImageSlot({
+  label,
+  hint,
+  aspectClass,
+  value,
+  onChange,
+  emptyHint,
+}: {
+  label: string;
+  hint: string;
+  aspectClass: string;
+  value: string;
+  onChange: (next: string) => void;
+  emptyHint: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [err, setErr] = useState("");
+
+  function pick() {
+    setErr("");
+    inputRef.current?.click();
+  }
+
+  function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      setErr("Choose an image file (JPG, PNG, WEBP).");
+      return;
+    }
+    if (f.size > MAX_CATEGORY_IMG_BYTES) {
+      setErr("Max file size is 2 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") onChange(reader.result);
     };
-    return [row, ...flattenForExport(n.children ?? [], n.name)];
-  });
-}
+    reader.readAsDataURL(f);
+  }
 
-function exportCategoriesToCSV(nodes: CatNode[]) {
-  const rows = flattenForExport(nodes);
-  if (rows.length === 0) return;
-
-  const headers = Object.keys(rows[0]) as (keyof ExportRow)[];
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
-
-  const csvLines = [
-    headers.map(escape).join(","),
-    ...rows.map((r) => headers.map((h) => escape(r[h])).join(",")),
-  ];
-
-  // UTF-8 BOM so Excel opens with correct encoding
-  const blob = new Blob(["\uFEFF" + csvLines.join("\r\n")], {
-    type: "text/csv;charset=utf-8;",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `category-export-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return (
+    <div className="space-y-3">
+      <label className={labelBase}>{label}</label>
+      <p className="text-[11px] text-on-surface-variant">{hint}</p>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/*"
+        className="sr-only"
+        onChange={onFile}
+      />
+      {value ? (
+        <div
+          className={`group relative ${aspectClass} w-full overflow-hidden rounded border border-outline-variant/20 bg-surface shadow-sm`}
+        >
+          <img alt="" src={value} className="h-full w-full object-cover" />
+          <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              type="button"
+              className="rounded-full bg-white p-1.5 text-on-surface"
+              aria-label="Replace image"
+              onClick={pick}
+            >
+              <IconEdit className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-white p-1.5 text-error"
+              aria-label="Remove image"
+              onClick={() => onChange("")}
+            >
+              <IconDelete className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={`flex ${aspectClass} w-full cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed border-outline-variant/40 bg-surface transition-colors hover:border-primary/40`}
+          onClick={pick}
+        >
+          <IconCloudUpload className="h-8 w-8 text-outline" />
+          <span className="mt-2 text-center text-[10px] text-outline">{emptyHint}</span>
+          <span className="mt-1 text-[10px] text-primary/70 underline">Choose File</span>
+        </button>
+      )}
+      {err ? <p className="text-[10px] text-error">{err}</p> : null}
+    </div>
+  );
 }
 
 // ─── Category Tree Picker ────────────────────────────────────────────────────
@@ -401,6 +495,15 @@ export function CategoriesPage() {
     message: "",
     visible: false,
   });
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [sortModalOpen, setSortModalOpen] = useState(false);
+  const [sortParentId, setSortParentId] = useState<string | null>(null);
+  const [sortDraftIds, setSortDraftIds] = useState<string[]>([]);
+  const [promoteListingOpen, setPromoteListingOpen] = useState(false);
+  const [imgMenuSrc, setImgMenuSrc] = useState("");
+  const [imgCategoryPageSrc, setImgCategoryPageSrc] = useState("");
+  const [imgThumbSrc, setImgThumbSrc] = useState("");
 
   // Auto-hide toast after 3 s
   useEffect(() => {
@@ -558,7 +661,10 @@ export function CategoriesPage() {
             type="button"
             title="Delete"
             className="rounded p-0.5 text-on-surface-variant hover:bg-error/10 hover:text-error"
-            onClick={(e) => { e.stopPropagation(); console.info("[Categories] Delete", node.id); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeleteTarget({ id: node.id, name: node.name });
+            }}
           >
             <IconDelete className="h-3.5 w-3.5" />
           </button>
@@ -653,6 +759,64 @@ export function CategoriesPage() {
       ? mode.nodeId
       : `add-${mode.parentId ?? "root"}`;
 
+  useEffect(() => {
+    setImgMenuSrc("");
+    setImgThumbSrc("");
+    setImgCategoryPageSrc(isAddMode ? "" : DEFAULT_EDIT_CATEGORY_PAGE_IMG);
+  }, [formKey, isAddMode]);
+
+  useEffect(() => {
+    if (!sortModalOpen) return;
+    const kids = getOrderingContext(treeData, sortParentId);
+    setSortDraftIds(kids.map((c) => c.id));
+  }, [sortModalOpen, sortParentId, treeData]);
+
+  const sortParentOptions = useMemo(() => {
+    const withKids = collectParentsWithChildren(treeData);
+    return [{ id: null as string | null, name: "Top level (roots)" }, ...withKids];
+  }, [treeData]);
+
+  function handleDeleteConfirm() {
+    if (!deleteTarget) return;
+    const removedId = deleteTarget.id;
+    const { tree } = removeNode(treeData, removedId);
+    setTreeData(tree);
+    setDeleteTarget(null);
+    showToast("Category deleted.");
+    if (mode.kind === "edit" && mode.nodeId === removedId) {
+      const nextId = firstNodeIdInTree(tree);
+      if (nextId) setMode({ kind: "edit", nodeId: nextId });
+      else setMode({ kind: "add", parentId: null });
+    }
+  }
+
+  function moveSortDraft(index: number, dir: -1 | 1) {
+    setSortDraftIds((ids) => {
+      const j = index + dir;
+      if (j < 0 || j >= ids.length) return ids;
+      const copy = [...ids];
+      const t = copy[index];
+      copy[index] = copy[j];
+      copy[j] = t;
+      return copy;
+    });
+  }
+
+  function applySortOrder() {
+    const kids = getOrderingContext(treeData, sortParentId);
+    const map = new Map(kids.map((c) => [c.id, c]));
+    const ordered = sortDraftIds
+      .map((id, i) => {
+        const node = map.get(id);
+        if (!node) return null;
+        return { ...node, sortOrder: i + 1 };
+      })
+      .filter(Boolean) as CatNode[];
+    setTreeData(applySiblingOrder(treeData, sortParentId, ordered));
+    setSortModalOpen(false);
+    showToast("Category order updated.");
+  }
+
   const tabs: { id: EditTab; label: string }[] = [
     { id: "general", label: "General" },
     { id: "images", label: "Images" },
@@ -693,9 +857,13 @@ export function CategoriesPage() {
           <button
             type="button"
             className="flex items-center gap-2 rounded-md bg-surface-container-high px-3 py-2 text-xs font-semibold text-on-surface-variant transition-colors hover:bg-surface-variant/80"
-            onClick={() => {
-              exportCategoriesToCSV(treeData);
-              showToast("Category export downloaded.");
+            onClick={async () => {
+              try {
+                await exportCategoriesToXlsx(treeData);
+                showToast("Category export downloaded (.xlsx).");
+              } catch {
+                showToast("Export failed. Try again.");
+              }
             }}
           >
             <IconDownload className="h-4 w-4 shrink-0" />
@@ -744,7 +912,15 @@ export function CategoriesPage() {
             <button
               type="button"
               className="flex w-full items-center justify-center gap-2 rounded border border-primary/15 bg-primary/5 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/10"
-              onClick={() => console.info("[Categories] Sort categories (placeholder)")}
+              onClick={() => {
+                let defaultParent: string | null = null;
+                if (mode.kind === "edit") {
+                  const n = findNodeRef(treeData, mode.nodeId);
+                  if (n?.children?.length) defaultParent = mode.nodeId;
+                }
+                setSortParentId(defaultParent);
+                setSortModalOpen(true);
+              }}
             >
               <IconSort className="h-3.5 w-3.5 shrink-0" />
               Sort Categories
@@ -912,86 +1088,30 @@ export function CategoriesPage() {
                 <div className="space-y-6">
                   <h3 className={sectionHeading}>Visual Assets</h3>
                   <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-
-                    {/* Menu Image */}
-                    <div className="space-y-3">
-                      <label className={labelBase}>Menu Image</label>
-                      <p className="text-[11px] text-on-surface-variant">
-                        Displayed in the eStore navigation menu.
-                      </p>
-                      <button
-                        type="button"
-                        className="flex aspect-video w-full cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed border-outline-variant/40 bg-surface transition-colors hover:border-primary/40"
-                        onClick={() => console.info("[Categories] Upload menu image (placeholder)")}
-                      >
-                        <IconCloudUpload className="h-8 w-8 text-outline" />
-                        <span className="mt-2 text-center text-[10px] text-outline">
-                          1200 × 400px recommended
-                        </span>
-                        <span className="mt-1 text-[10px] text-primary/70 underline">Choose File</span>
-                      </button>
-                    </div>
-
-                    {/* Category Page Image */}
-                    <div className="space-y-3">
-                      <label className={labelBase}>Category Page Image</label>
-                      <p className="text-[11px] text-on-surface-variant">
-                        Displayed on the category product listing page.
-                      </p>
-                      {isAddMode ? (
-                        <button
-                          type="button"
-                          className="flex aspect-video w-full cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed border-outline-variant/40 bg-surface transition-colors hover:border-primary/40"
-                          onClick={() =>
-                            console.info("[Categories] Upload category page image (placeholder)")
-                          }
-                        >
-                          <IconCloudUpload className="h-8 w-8 text-outline" />
-                          <span className="mt-1 text-[10px] text-primary/70 underline">Choose File</span>
-                        </button>
-                      ) : (
-                        <div className="group relative aspect-video overflow-hidden rounded shadow-sm">
-                          <img
-                            alt=""
-                            className="h-full w-full object-cover"
-                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuAPJzecG9bliDfIpfU0WQn6f271QaBU3e2T3PLxsf_FCi0WH0MnpiPgUIfZrwgJcMtnCGJhehRS9NeNl9gMQMb3cr0G8gC1dMGLXHgtDE9q_rAxl09PITIVh745aZKiBD37NWVg4B4OLT3_6KFyT0UzPf3nCYvOH5rBmv4Gn9RzOfBe_4W0AJLL8IRu-RAwBZ3BwVJ5tsKCHT7zGQN2gMSi8XyGSXQAsLOHbDqpW4jkYxuBIxWRFM5npA5thm1Bw9VnFmmy5Wmbshc"
-                          />
-                          <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                            <button
-                              type="button"
-                              className="rounded-full bg-white p-1.5 text-on-surface"
-                              aria-label="Edit image"
-                            >
-                              <IconEdit className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-full bg-white p-1.5 text-error"
-                              aria-label="Remove image"
-                            >
-                              <IconDelete className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Thumbnail Image */}
-                    <div className="space-y-3">
-                      <label className={labelBase}>Thumbnail Image</label>
-                      <p className="text-[11px] text-on-surface-variant">
-                        Small image to represent this category.
-                      </p>
-                      <button
-                        type="button"
-                        className="flex aspect-square w-32 cursor-pointer flex-col items-center justify-center rounded border-2 border-dashed border-outline-variant/40 bg-surface transition-colors hover:border-primary/40"
-                        onClick={() => console.info("[Categories] Upload thumbnail (placeholder)")}
-                      >
-                        <IconImage className="h-6 w-6 text-outline" />
-                        <span className="mt-2 px-2 text-center text-[10px] text-outline">200 × 200px</span>
-                        <span className="mt-1 text-[10px] text-primary/70 underline">Choose File</span>
-                      </button>
-                    </div>
+                    <CategoryImageSlot
+                      label="Menu Image"
+                      hint="Displayed in the eStore navigation menu."
+                      aspectClass="aspect-video"
+                      value={imgMenuSrc}
+                      onChange={setImgMenuSrc}
+                      emptyHint="1200 × 400px recommended"
+                    />
+                    <CategoryImageSlot
+                      label="Category Page Image"
+                      hint="Displayed on the category product listing page."
+                      aspectClass="aspect-video"
+                      value={imgCategoryPageSrc}
+                      onChange={setImgCategoryPageSrc}
+                      emptyHint="Wide banner recommended"
+                    />
+                    <CategoryImageSlot
+                      label="Thumbnail Image"
+                      hint="Small image to represent this category."
+                      aspectClass="aspect-square max-w-[200px]"
+                      value={imgThumbSrc}
+                      onChange={setImgThumbSrc}
+                      emptyHint="200 × 200px"
+                    />
                   </div>
                 </div>
               )}
@@ -1152,7 +1272,7 @@ export function CategoriesPage() {
                       <button
                         type="button"
                         className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
-                        onClick={() => console.info("[Categories] Promote products — View Listing (placeholder)")}
+                        onClick={() => setPromoteListingOpen(true)}
                       >
                         <IconOpenInNew className="h-3.5 w-3.5 shrink-0" />
                         View Listing
@@ -1237,7 +1357,7 @@ export function CategoriesPage() {
                       }}
                       placeholders={{
                         en: isAddMode ? "e.g. Shop Electronics Online | Best Deals" : "",
-                        vn: "VD: Mua sắm điện tử | Ưu đãi tốt nhất",
+                        vn: isAddMode ? "VD: Mua sắm điện tử | Ưu đãi tốt nhất" : "",
                         zh: "例：网上购物电子产品 | 最优惠",
                         ja: "例：エレクトロニクスをオンラインで購入 | 最高のお得",
                       }}
@@ -1266,7 +1386,7 @@ export function CategoriesPage() {
                       }}
                       placeholders={{
                         en: isAddMode ? "Describe this category for search engines..." : "",
-                        vn: "Mô tả ngắn về danh mục này cho công cụ tìm kiếm...",
+                        vn: isAddMode ? "Mô tả ngắn về danh mục này cho công cụ tìm kiếm..." : "",
                         zh: "为搜索引擎描述此类别...",
                         ja: "検索エンジン向けにこのカテゴリを説明してください...",
                       }}
@@ -1400,6 +1520,160 @@ export function CategoriesPage() {
           </footer>
         </section>
       </div>
+
+      {/* ── Delete category confirmation ── */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[400px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="flex items-start gap-4 p-6">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-error-container">
+                <IconWarning className="h-5 w-5 text-error" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-on-surface">Delete category</h3>
+                <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
+                  Delete &ldquo;{deleteTarget.name}&rdquo; and its sub-tree from the hierarchy? This demo only updates
+                  local state (no server).
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
+                onClick={handleDeleteConfirm}
+              >
+                <IconDelete className="h-4 w-4 shrink-0" />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sort categories (same-level reorder) ── */}
+      {sortModalOpen && (
+        <div
+          className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setSortModalOpen(false)}
+        >
+          <div
+            className="max-h-[min(90vh,560px)] w-full max-w-md overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-outline-variant/15 px-5 py-4">
+              <h3 className="text-sm font-bold text-on-surface">Sort categories</h3>
+              <p className="mt-1 text-[11px] text-on-surface-variant">
+                Reorder siblings with the arrows. Applies sort order 1…n within the selected parent.
+              </p>
+              <label className="mt-3 block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                Parent level
+              </label>
+              <select
+                className={`${inputBase} mt-1`}
+                value={sortParentId ?? ""}
+                onChange={(e) => setSortParentId(e.target.value === "" ? null : e.target.value)}
+              >
+                {sortParentOptions.map((o) => (
+                  <option key={o.id === null ? "root" : o.id} value={o.id ?? ""}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {sortDraftIds.length === 0 ? (
+                <p className="px-2 py-6 text-center text-xs text-on-surface-variant italic">
+                  No categories at this level.
+                </p>
+              ) : (
+                <ul className="space-y-1">
+                  {sortDraftIds.map((id, index) => (
+                    <li
+                      key={id}
+                      className="flex items-center gap-2 rounded-lg border border-outline-variant/15 bg-surface px-2 py-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium text-on-surface">
+                        {findNodeName(treeData, id) ?? id}
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
+                        disabled={index === 0}
+                        aria-label="Move up"
+                        onClick={() => moveSortDraft(index, -1)}
+                      >
+                        <IconChevronUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
+                        disabled={index === sortDraftIds.length - 1}
+                        aria-label="Move down"
+                        onClick={() => moveSortDraft(index, 1)}
+                      >
+                        <IconChevronDown className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-outline-variant/10 px-4 py-3">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-4 py-2 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setSortModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-on-primary hover:bg-primary-container"
+                onClick={applySortOrder}
+                disabled={sortDraftIds.length === 0}
+              >
+                Apply order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Promote products: product picker (stub) ── */}
+      {promoteListingOpen && (
+        <div
+          className="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setPromoteListingOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-bold text-on-surface">Select products</h3>
+            {/* TODO(DAI-413): Wire product selection modal when catalog / listing API is available. */}
+            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
+              Product picker is not wired yet (no listing API in this build). This dialog is a placeholder only.
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-on-primary hover:bg-primary-container"
+                onClick={() => setPromoteListingOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Toast notification ── */}
       <div

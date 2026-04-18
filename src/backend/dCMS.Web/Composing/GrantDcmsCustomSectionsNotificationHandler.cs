@@ -31,7 +31,13 @@ public sealed class GrantDcmsCustomSectionsNotificationHandler
         if (notification.RuntimeLevel != RuntimeLevel.Run)
             return;
 
-        var sections = new[] { DcmsSectionAliases.Orders, DcmsSectionAliases.EStore };
+        var sections = new[]
+        {
+            DcmsSectionAliases.EStore,
+            DcmsSectionAliases.Orders,
+            DcmsSectionAliases.Approval,
+            DcmsSectionAliases.Reports,
+        };
         var groupKeys = new[]
         {
             Constants.Security.AdminGroupKey,

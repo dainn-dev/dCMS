@@ -178,9 +178,9 @@ export function AttributeImportPage({ onBack }: Props) {
                 <code className="rounded bg-outline-variant/20 px-1.5 py-0.5">;</code>
               </p>
               <p>
-                Don't have a template? Use{" "}
+                Don&apos;t have a template? Use{" "}
                 <strong>Generate Forms → Import Template</strong>{" "}
-                on the Attributes page to download it.
+                on the Attributes page to download the <strong>.xlsx</strong> template.
               </p>
             </div>
           </div>

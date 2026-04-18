@@ -19,13 +19,22 @@ import { PromoExclusionListPage } from "./pages/PromoExclusionListPage";
 import type { PromoListRow } from "./promotions-columns";
 import type { AttributeListRow } from "./attributes-columns";
 import type { ProductListRow } from "./pages/ProductsPage";
-import { ProductsPage } from "./pages/ProductsPage";
+import { DEMO_PRODUCT_ROWS, ProductsPage } from "./pages/ProductsPage";
+import { BestSellerSettingsPage } from "./pages/BestSellerSettingsPage";
 import { AttributesPage } from "./pages/AttributesPage";
+import {
+  BrandConfigPage,
+  DEFAULT_BRAND_ADDITIONAL_FIELDS,
+  type BrandAdditionalField,
+} from "./pages/BrandConfigPage";
 import { FulfillmentOptionsPage } from "./pages/FulfillmentOptionsPage";
 import { EditFulfillmentOptionPage } from "./pages/EditFulfillmentOptionPage";
 import { CollectionLocationsPage } from "./pages/CollectionLocationsPage";
 import { DeliveryAllocationPage } from "./pages/DeliveryAllocationPage";
 import { FulfillmentSlotsPage } from "./pages/FulfillmentSlotsPage";
+import type { CampaignListRow } from "./campaigns-columns";
+import { CampaignsPage } from "./pages/CampaignsPage";
+import { EditCampaignPage } from "./pages/EditCampaignPage";
 import { PromotionsPage } from "./pages/PromotionsPage";
 import { LogisticPartnerManagementPage } from "./pages/LogisticPartnerManagementPage";
 
@@ -44,6 +53,8 @@ type PromoFormState =
   | { mode: "edit"; data: PromoListRow }
   | { mode: "grouped"; parent: PromoListRow }
   | { mode: "exclusion-list" };
+
+type CampaignFormState = { mode: "idle" } | { mode: "add" } | { mode: "edit"; data: CampaignListRow };
 
 type AttributeFormState =
   | { mode: "idle" }
@@ -187,6 +198,15 @@ const LS_KEYS = {
   fulfillmentPredefinedFields: "dcms.estore.fulfillment.predefinedFields.v1",
   collectionLocations: "dcms.estore.fulfillment.collectionLocations.v1",
   logisticPartners: "dcms.estore.fulfillment.logisticPartners.v1",
+  brandAdditionalFields: "dcms.estore.brandAdditionalFields.v1",
+  bestSellerFlags: "dcms.estore.bestSellerFlags.v1",
+};
+
+const DEFAULT_BEST_SELLER_FLAGS: Record<string, boolean> = {
+  "1": true,
+  "2": true,
+  "3": false,
+  "4": true,
 };
 
 const DEFAULT_BRANDS: BrandListRow[] = [
@@ -256,10 +276,23 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
   const [productForm, setProductForm] = useState<ProductFormState>({ mode: "idle" });
   const [attributeForm, setAttributeForm] = useState<AttributeFormState>({ mode: "idle" });
   const [promoForm, setPromoForm] = useState<PromoFormState>({ mode: "idle" });
+  const [campaignForm, setCampaignForm] = useState<CampaignFormState>({ mode: "idle" });
   const [fulfillmentSection, setFulfillmentSection] = useState<FulfillmentSection>("config");
   const [fulfillmentForm, setFulfillmentForm] = useState<FulfillmentFormState>({ mode: "idle" });
 
   const [brands, setBrands] = useState<BrandListRow[]>(DEFAULT_BRANDS);
+
+  const [brandAdditionalFields, setBrandAdditionalFields] = useState<BrandAdditionalField[]>(
+    () =>
+      safeJsonParse<BrandAdditionalField[]>(localStorage.getItem(LS_KEYS.brandAdditionalFields)) ??
+      DEFAULT_BRAND_ADDITIONAL_FIELDS
+  );
+
+  const [bestSellerFlags, setBestSellerFlags] = useState<Record<string, boolean>>(
+    () =>
+      safeJsonParse<Record<string, boolean>>(localStorage.getItem(LS_KEYS.bestSellerFlags)) ??
+      DEFAULT_BEST_SELLER_FLAGS
+  );
 
   const [predefinedFieldSettings, setPredefinedFieldSettings] = useState<FulfillmentPredefinedFieldSetting[]>(
     () => safeJsonParse<FulfillmentPredefinedFieldSetting[]>(localStorage.getItem(LS_KEYS.fulfillmentPredefinedFields)) ?? DEFAULT_PREDEFINED_FIELDS
@@ -344,6 +377,14 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
     localStorage.setItem(LS_KEYS.logisticPartners, JSON.stringify(logisticPartners));
   }, [logisticPartners]);
 
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.brandAdditionalFields, JSON.stringify(brandAdditionalFields));
+  }, [brandAdditionalFields]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_KEYS.bestSellerFlags, JSON.stringify(bestSellerFlags));
+  }, [bestSellerFlags]);
+
   const [stockLocations, setStockLocations] = useState<StockLocation[]>([
     { id: "dc-1", name: "DC - Central", code: "DC_CENTRAL", active: true },
     { id: "dc-2", name: "DC - East", code: "DC_EAST", active: true },
@@ -403,6 +444,7 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
     if (id !== "products") setProductForm({ mode: "idle" });
     if (id !== "attributes") setAttributeForm({ mode: "idle" });
     if (id !== "promo-codes") setPromoForm({ mode: "idle" });
+    if (id !== "campaigns") setCampaignForm({ mode: "idle" });
     if (id !== "fulfillment-options") {
       setFulfillmentForm({ mode: "idle" });
       setFulfillmentSection("config");
@@ -443,7 +485,22 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
             onRowsChange={setBrands}
           />
         ))}
+      {page === "brand-configuration" && (
+        <BrandConfigPage
+          savedFields={brandAdditionalFields}
+          onSave={setBrandAdditionalFields}
+          onNavigateToBrands={() => setPage("brands")}
+        />
+      )}
       {page === "categories" && <CategoriesPage />}
+      {page === "product-best-sellers" && (
+        <BestSellerSettingsPage
+          rows={DEMO_PRODUCT_ROWS}
+          bestSellerById={bestSellerFlags}
+          onBestSellerChange={setBestSellerFlags}
+          onNavigateToProducts={() => setPage("products")}
+        />
+      )}
       {page === "products" &&
         (productForm.mode === "product-config" ? (
           <ProductConfigPage onBack={() => setProductForm({ mode: "idle" })} />
@@ -470,6 +527,20 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
             onInventoryImport={() => setProductForm({ mode: "inventory-import" })}
             onCategoryAssignment={() => setProductForm({ mode: "category-assignment" })}
             onProductConfig={() => setProductForm({ mode: "product-config" })}
+          />
+        ))}
+      {page === "campaigns" &&
+        (campaignForm.mode !== "idle" ? (
+          <EditCampaignPage
+            mode={campaignForm.mode === "add" ? "add" : "edit"}
+            campaign={campaignForm.mode === "edit" ? campaignForm.data : undefined}
+            onBack={() => setCampaignForm({ mode: "idle" })}
+          />
+        ) : (
+          <CampaignsPage
+            onCreateCampaign={() => setCampaignForm({ mode: "add" })}
+            onEditCampaign={(row) => setCampaignForm({ mode: "edit", data: row })}
+            onViewCampaign={(row) => setCampaignForm({ mode: "edit", data: row })}
           />
         ))}
       {page === "attributes" &&

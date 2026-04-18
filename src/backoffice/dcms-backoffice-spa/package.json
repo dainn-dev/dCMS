@@ -7,12 +7,15 @@
     "dev": "vite",
     "build:orders": "vite build",
     "build:estore": "vite build --config vite.estore.config.ts",
+    "build:reports": "vite build --config vite.reports.config.ts",
+    "build:approval": "vite build --config vite.approval.config.ts",
     "build:dashboard": "vite build --config vite.dashboard.config.ts",
-    "build": "npm run build:orders && npm run build:estore && npm run build:dashboard",
+    "build": "npm run build:orders && npm run build:estore && npm run build:reports && npm run build:approval && npm run build:dashboard",
     "preview": "vite preview"
   },
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",
+    "exceljs": "^4.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

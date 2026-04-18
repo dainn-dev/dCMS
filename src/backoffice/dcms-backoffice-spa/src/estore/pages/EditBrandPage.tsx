@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import {
   IconArrowBack,
@@ -185,23 +185,73 @@ const ALL_BRANDS = [
   { code: "AUR-5501", name: "Aura Essentials" },
 ];
 
-// ── Image upload slot ──────────────────────────────────────────────────────
+type BrandHistoryRow = { at: string; actor: string; field: string; old: string; new: string };
+
+function mockBrandHistory(code: string, name: string): BrandHistoryRow[] {
+  const safeName = name || "—";
+  const safeCode = code || "—";
+  return [
+    { at: "2026-04-12 14:32", actor: "eStore Admin", field: "Status", old: "Inactive", new: "Active" },
+    { at: "2026-04-11 10:08", actor: "minh.hoang@example.com", field: "Brand Name", old: "Working Title", new: safeName },
+    { at: "2026-04-11 10:07", actor: "minh.hoang@example.com", field: "Brand Code", old: "TMP-0000", new: safeCode },
+    { at: "2026-04-09 15:21", actor: "Content Bot", field: "Description (EN)", old: "(empty)", new: "Updated marketing copy." },
+  ];
+}
+
+// ── Image upload slot (real file input; mock preview only) ─────────────────
 function ImageSlot({
   label,
   src,
   alt,
+  maxBytes = 2 * 1024 * 1024,
+  onFileSelected,
   onRemove,
-  onReplace,
 }: {
   label: string;
   src?: string;
   alt?: string;
+  maxBytes?: number;
+  onFileSelected: (dataUrl: string) => void;
   onRemove: () => void;
-  onReplace: () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState("");
+
+  function openPicker() {
+    setError("");
+    inputRef.current?.click();
+  }
+
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Choose a JPG, PNG, or WEBP image.");
+      return;
+    }
+    if (file.size > maxBytes) {
+      setError(`Max size is ${Math.round(maxBytes / (1024 * 1024))} MB.`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") onFileSelected(result);
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div className="space-y-1.5">
       <label className={labelBase}>{label}</label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/*"
+        className="sr-only"
+        onChange={handleFileChange}
+      />
       <div className="border-2 border-dashed border-outline-variant/40 rounded-xl p-3 flex flex-col items-center justify-center bg-surface-container-low/20">
         {src ? (
           <>
@@ -211,7 +261,10 @@ function ImageSlot({
                 type="button"
                 className="absolute top-1.5 right-1.5 p-1 bg-error text-white rounded-full shadow active:scale-90 transition-transform"
                 aria-label="Remove image"
-                onClick={onRemove}
+                onClick={() => {
+                  setError("");
+                  onRemove();
+                }}
               >
                 <IconDelete className="h-3 w-3" />
               </button>
@@ -219,7 +272,7 @@ function ImageSlot({
             <button
               type="button"
               className="w-full py-1.5 bg-surface-container-high text-primary font-bold text-[10px] uppercase tracking-widest rounded hover:bg-surface-container transition-colors"
-              onClick={onReplace}
+              onClick={openPicker}
             >
               Replace Image
             </button>
@@ -233,13 +286,14 @@ function ImageSlot({
             <button
               type="button"
               className="w-full py-1.5 bg-primary text-on-primary font-bold text-[10px] uppercase tracking-widest rounded hover:bg-primary-container transition-colors"
-              onClick={onReplace}
+              onClick={openPicker}
             >
               Choose File
             </button>
           </>
         )}
       </div>
+      {error ? <p className="text-[10px] text-error">{error}</p> : null}
     </div>
   );
 }
@@ -260,7 +314,15 @@ export function EditBrandPage({
   const [tab, setTab] = useState<EditTab>("general");
   const [actionsOpen, setActionsOpen] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [brandImageSrc, setBrandImageSrc] = useState(logoSrc?.trim() ? logoSrc : "");
+  const [mobileImageSrc, setMobileImageSrc] = useState("");
   const actionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setBrandImageSrc(logoSrc?.trim() ? logoSrc : "");
+    setMobileImageSrc("");
+  }, [logoSrc, mode, brandCode]);
 
   // Brand Name reactive state (drives auto-populate in add mode)
   const [brandNameInput, setBrandNameInput] = useState(brandName || "");
@@ -316,7 +378,6 @@ export function EditBrandPage({
   function handleSave() {
     setActionsOpen(false);
     setShowSuccessModal(true);
-    console.info("[EditBrand] Save", { mode, brandCode, brandName });
   }
 
   function toggleExclusion(code: string, checked: boolean) {
@@ -366,7 +427,7 @@ export function EditBrandPage({
             <button
               type="button"
               className="px-4 py-2 rounded-md border border-outline-variant/30 text-on-surface-variant font-semibold text-xs hover:bg-surface-container-high transition-colors flex items-center gap-2"
-              onClick={() => console.info("[EditBrand] History (placeholder)")}
+              onClick={() => setShowHistoryModal(true)}
             >
               <IconHistory className="h-4 w-4 shrink-0" />
               Show Change History
@@ -614,16 +675,17 @@ export function EditBrandPage({
                 <div className="col-span-12 md:col-span-4 space-y-4">
                   <ImageSlot
                     label="Brand Image"
-                    src={logoSrc || undefined}
+                    src={brandImageSrc || undefined}
                     alt={logoAlt || undefined}
-                    onRemove={() => console.info("[EditBrand] Remove brand image (placeholder)")}
-                    onReplace={() => console.info("[EditBrand] Replace brand image (placeholder)")}
+                    onFileSelected={setBrandImageSrc}
+                    onRemove={() => setBrandImageSrc("")}
                   />
                   <ImageSlot
                     label="Mobile Image"
-                    src={undefined}
-                    onRemove={() => console.info("[EditBrand] Remove mobile image (placeholder)")}
-                    onReplace={() => console.info("[EditBrand] Replace mobile image (placeholder)")}
+                    src={mobileImageSrc || undefined}
+                    alt={`${brandNameInput || brandName || "Brand"} — mobile`}
+                    onFileSelected={setMobileImageSrc}
+                    onRemove={() => setMobileImageSrc("")}
                   />
                 </div>
               </div>
@@ -864,7 +926,7 @@ export function EditBrandPage({
                       label="Meta Keywords"
                       placeholders={{
                         en: "Enter keywords separated by commas…",
-                        vn: "Nhập từ khóa, cách nhau bằng dấu phẩy...",
+                        vn: "Nhập từ khóa cách nhau bằng dấu phẩy...",
                         zh: "输入以逗号分隔的关键词...",
                         ja: "カンマ区切りでキーワードを入力...",
                       }}
@@ -944,6 +1006,69 @@ export function EditBrandPage({
           )}
         </section>
       </div>
+
+      {/* ── Change history (mock audit trail) ───────────────────────────── */}
+      {showHistoryModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 backdrop-blur-sm p-4"
+          onClick={() => setShowHistoryModal(false)}
+        >
+          <div
+            className="flex max-h-[min(85vh,720px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-outline-variant/15 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-bold text-on-surface">Change history</h3>
+                <p className="text-xs text-on-surface-variant mt-0.5">
+                  Mock data for UI review (date, actor, field, old, new).
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                onClick={() => setShowHistoryModal(false)}
+              >
+                <IconClose className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-4">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead>
+                  <tr className="border-b border-outline-variant/20 text-on-surface-variant uppercase tracking-wider">
+                    <th className="py-2 pr-3 font-bold">Date / time</th>
+                    <th className="py-2 pr-3 font-bold">Actor</th>
+                    <th className="py-2 pr-3 font-bold">Field</th>
+                    <th className="py-2 pr-3 font-bold">Old value</th>
+                    <th className="py-2 font-bold">New value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mockBrandHistory(codeValue, brandNameInput || brandName).map((row) => (
+                    <tr key={`${row.at}-${row.field}`} className="border-b border-outline-variant/10 align-top">
+                      <td className="py-2.5 pr-3 whitespace-nowrap text-on-surface-variant">{row.at}</td>
+                      <td className="py-2.5 pr-3 text-on-surface">{row.actor}</td>
+                      <td className="py-2.5 pr-3 font-medium text-on-surface">{row.field}</td>
+                      <td className="py-2.5 pr-3 text-on-surface-variant break-words max-w-[140px]">{row.old}</td>
+                      <td className="py-2.5 text-on-surface break-words max-w-[140px]">{row.new}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-outline-variant/10 px-6 py-3 flex justify-end">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-5 py-2 text-xs font-bold uppercase tracking-widest text-on-primary hover:bg-primary-container transition-colors"
+                onClick={() => setShowHistoryModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Success modal ────────────────────────────────────────────────── */}
       {showSuccessModal && (

@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
-import { IconAddCircle, IconChevronDown, IconDownload, IconFilterList } from "../../orders/icons";
+import {
+  IconAddCircle,
+  IconChevronDown,
+  IconDelete,
+  IconDownload,
+  IconFilterList,
+  IconWarning,
+} from "../../orders/icons";
 import { createPromotionColumns } from "../promotions-columns";
 import type { PromoListRow } from "../promotions-columns";
+import { exportPromoCodesToXlsx } from "../exportPromoCodesXlsx";
 
 type PromoType = "standard" | "shareable" | "account-bound";
 
@@ -13,38 +21,9 @@ type PromotionsPageProps = {
   onOpenExclusionList?: () => void;
 };
 
-function exportPromoCodesToCSV(rows: PromoListRow[]) {
-  const bom = "\uFEFF";
-  const headers = [
-    "Promo Type", "Promo Value", "Minimum Spend", "Code",
-    "Start Date / Time", "End Date / Time", "Redemption Limit", "Used", "% Used",
-  ];
-  const dataRows = rows.map((r) => {
-    const redemptionLimit = 500;
-    const used = Math.round((r.usedPct / 100) * redemptionLimit);
-    return [
-      r.promoType,
-      r.value,
-      r.minSpend,
-      r.code,
-      r.scheduleStart,
-      r.scheduleEnd.replace(/^to\s*/, ""),
-      String(redemptionLimit),
-      String(used),
-      `${r.usedPct}%`,
-    ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
-  });
-  const csv = bom + [headers.join(","), ...dataRows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "promo-codes-export.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
+const LS_KEY = "dcms.estore.promoCodesList.v1";
 
-const PROMO_ROWS: PromoListRow[] = [
+const INITIAL_PROMO_ROWS: PromoListRow[] = [
   {
     id: "1",
     promoType: "Flash Sale",
@@ -99,6 +78,49 @@ const PROMO_ROWS: PromoListRow[] = [
   },
 ];
 
+const ACTIVE_DOTS = new Set<PromoListRow["activeDot"]>(["live", "warning", "off"]);
+const STATUSES = new Set<PromoListRow["status"]>(["approved", "pending", "expired"]);
+
+function loadPromoRows(): PromoListRow[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return [...INITIAL_PROMO_ROWS];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [...INITIAL_PROMO_ROWS];
+    const out = parsed
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
+      .map((r) => {
+        const ad = r.activeDot as string;
+        const st = r.status as string;
+        return {
+          id: String(r.id ?? ""),
+          promoType: String(r.promoType ?? ""),
+          discount: String(r.discount ?? ""),
+          value: String(r.value ?? ""),
+          minSpend: String(r.minSpend ?? ""),
+          code: String(r.code ?? ""),
+          scheduleStart: String(r.scheduleStart ?? ""),
+          scheduleEnd: String(r.scheduleEnd ?? ""),
+          activeDot: ACTIVE_DOTS.has(ad as PromoListRow["activeDot"]) ? (ad as PromoListRow["activeDot"]) : "off",
+          status: STATUSES.has(st as PromoListRow["status"]) ? (st as PromoListRow["status"]) : "pending",
+          usedPct: typeof r.usedPct === "number" && !Number.isNaN(r.usedPct) ? r.usedPct : 0,
+        };
+      })
+      .filter((r) => r.id && r.code);
+    return out.length > 0 ? out : [...INITIAL_PROMO_ROWS];
+  } catch {
+    return [...INITIAL_PROMO_ROWS];
+  }
+}
+
+function persistPromoRows(rows: PromoListRow[]) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(rows));
+  } catch {
+    /* ignore */
+  }
+}
+
 const PROMO_TYPES: { value: PromoType; label: string; description: string }[] = [
   {
     value: "standard",
@@ -118,14 +140,36 @@ const PROMO_TYPES: { value: PromoType; label: string; description: string }[] = 
 ];
 
 export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpenExclusionList }: PromotionsPageProps) {
+  const [rows, setRows] = useState<PromoListRow[]>(() => loadPromoRows());
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
   const columns = useMemo(
-    () => createPromotionColumns(
-      (id) => onEditPromo?.(PROMO_ROWS.find((r) => r.id === id)!),
-      (id) => console.info("[Promotions] Delete", id),
-      (id) => onViewCodes?.(PROMO_ROWS.find((r) => r.id === id)!)
-    ),
-    [onEditPromo, onViewCodes]
+    () =>
+      createPromotionColumns(
+        (id) => {
+          const row = rows.find((r) => r.id === id);
+          if (row) onEditPromo?.(row);
+        },
+        (id) => setDeleteTargetId(id),
+        (id) => {
+          const row = rows.find((r) => r.id === id);
+          if (row) onViewCodes?.(row);
+        }
+      ),
+    [onEditPromo, onViewCodes, rows]
   );
+
+  const deleteTarget = rows.find((r) => r.id === deleteTargetId);
+
+  function confirmDeletePromo() {
+    if (!deleteTargetId) return;
+    setRows((prev) => {
+      const next = prev.filter((r) => r.id !== deleteTargetId);
+      persistPromoRows(next);
+      return next;
+    });
+    setDeleteTargetId(null);
+  }
 
   // ── Actions dropdown ──────────────────────────────────────────────────────
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -168,7 +212,6 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
           </p>
         </div>
 
-        {/* Actions dropdown */}
         <div className="relative" ref={actionsRef}>
           <button
             type="button"
@@ -193,7 +236,10 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                onClick={() => { setActionsOpen(false); exportPromoCodesToCSV(PROMO_ROWS); }}
+                onClick={() => {
+                  setActionsOpen(false);
+                  void exportPromoCodesToXlsx(rows);
+                }}
               >
                 <IconDownload className="h-4 w-4 shrink-0 text-secondary" />
                 Export to Excel
@@ -202,7 +248,10 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                onClick={() => { setActionsOpen(false); onOpenExclusionList?.(); }}
+                onClick={() => {
+                  setActionsOpen(false);
+                  onOpenExclusionList?.();
+                }}
               >
                 <IconFilterList className="h-4 w-4 shrink-0 text-on-surface-variant" />
                 Promotions Exclusion List
@@ -215,25 +264,20 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
       <div className="mx-auto w-full max-w-[1600px] flex-1 p-6">
         <DataTable
           columns={columns}
-          data={PROMO_ROWS}
+          data={rows}
           globalFilterPlaceholder="Search by promo type, code, or status…"
           columnLabels={{ schedule: "Schedule", activeDot: "Active", usedPct: "% Used" }}
         />
       </div>
 
-      {/* ── Type-selection modal ─────────────────────────────────────────── */}
       {typeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-[480px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
-            {/* Header */}
             <div className="border-b border-outline-variant/10 px-6 py-5">
               <h3 className="text-base font-bold text-on-surface">Add New Promotion Code</h3>
-              <p className="mt-1 text-xs text-on-surface-variant">
-                Select the type of promotion code to create.
-              </p>
+              <p className="mt-1 text-xs text-on-surface-variant">Select the type of promotion code to create.</p>
             </div>
 
-            {/* Radio options */}
             <div className="space-y-2 px-6 py-6">
               {PROMO_TYPES.map((pt) => (
                 <label
@@ -260,7 +304,6 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
               ))}
             </div>
 
-            {/* Footer */}
             <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
               <button
                 type="button"
@@ -275,6 +318,43 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
                 onClick={handleCreate}
               >
                 Create Promotional Code
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTargetId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[400px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="flex items-start gap-4 p-6">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-error-container">
+                <IconWarning className="h-5 w-5 text-error" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-on-surface">Delete promo code</h3>
+                <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
+                  Delete <strong className="text-on-surface">{deleteTarget?.code ?? deleteTargetId}</strong> (
+                  {deleteTarget?.promoType ?? "promotion"})? This cannot be undone. The list is stored in the browser for
+                  this demo.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                onClick={() => setDeleteTargetId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
+                onClick={confirmDeletePromo}
+              >
+                <IconDelete className="h-4 w-4 shrink-0" />
+                Delete
               </button>
             </div>
           </div>

@@ -5,12 +5,16 @@ import {
   IconCheckCircle,
   IconChevronDown,
   IconClose,
+  IconCloudUpload,
   IconDelete,
   IconDownload,
   IconEdit,
   IconSearch,
 } from "../../orders/icons";
 import type { AttributeListRow } from "../attributes-columns";
+import { exportSingleAttributeValuesXlsx } from "../exportAttributeTemplates";
+
+const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
 const labelBase =
@@ -213,6 +217,7 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
   // ── Actions dropdown ──────────────────────────────────────────────────────
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const imageFileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) setActionsOpen(false);
@@ -236,25 +241,14 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
     }
   }
 
-  // ── Export Values ─────────────────────────────────────────────────────────
-  function exportValues() {
+  async function exportValues() {
     const attrName = name || attribute?.name || "attribute";
     const attrCode = code || attribute?.code || "attribute";
-    const bom = "\uFEFF";
-    const headers = ["Attribute Name", "Attribute Code", "Value Name", "Value"];
-    const rows = values.map((v) =>
-      [attrName, attrCode, v.name, v.value]
-        .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-        .join(",")
+    await exportSingleAttributeValuesXlsx(
+      attrName,
+      attrCode,
+      values.map((v) => ({ name: v.name, value: v.value }))
     );
-    const csv = bom + [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${attrCode}-values-export.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -286,6 +280,10 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
 
   function saveValue() {
     if (!draftValueName.trim()) return;
+    if (valueType === "Image" && !draftValue.trim()) {
+      setToast("Add an image (upload) or paste a URL / filename for the value.");
+      return;
+    }
     if (editingValueId) {
       setValues((prev) =>
         prev.map((v) => v.id === editingValueId ? { ...v, name: draftValueName, value: draftValue } : v)
@@ -312,6 +310,21 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
       );
     }
     if (valueType === "Image") {
+      const isUrl = /^https?:\/\//i.test(v.value) || v.value.startsWith("data:image/");
+      if (isUrl) {
+        return (
+          <span className="inline-flex items-center gap-2">
+            <img
+              src={v.value}
+              alt=""
+              className="h-10 w-10 rounded border border-outline-variant/20 object-cover bg-surface-container-high"
+            />
+            <span className="max-w-[140px] truncate font-mono text-[10px] text-on-surface-variant" title={v.value}>
+              {v.value.startsWith("data:") ? "Uploaded image" : v.value}
+            </span>
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1.5 text-[10px] text-on-surface-variant">
           <span className="rounded bg-surface-container-high px-1.5 py-0.5 font-mono">{v.value}</span>
@@ -319,6 +332,25 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
       );
     }
     return <span className="font-mono text-[10px] text-on-surface-variant">{v.value}</span>;
+  }
+
+  function onImageFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setToast("Please choose an image file.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      setToast("Image must be 2 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setDraftValue(reader.result);
+    };
+    reader.readAsDataURL(file);
   }
 
   // ── Inline value input ────────────────────────────────────────────────────
@@ -344,13 +376,33 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
     }
     if (valueType === "Image") {
       return (
-        <input
-          type="text"
-          value={draftValue}
-          onChange={(e) => setDraftValue(e.target.value)}
-          placeholder="filename.jpg"
-          className={inputBase}
-        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input ref={imageFileRef} type="file" accept="image/*" className="hidden" onChange={onImageFilePick} />
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-primary hover:bg-primary/10"
+            onClick={() => imageFileRef.current?.click()}
+          >
+            <IconCloudUpload className="h-4 w-4 shrink-0" />
+            Upload image
+          </button>
+          <input
+            type="text"
+            value={draftValue.startsWith("data:image/") ? "" : draftValue}
+            onChange={(e) => setDraftValue(e.target.value)}
+            placeholder="Or paste image URL / filename"
+            className={`${inputBase} min-w-0 flex-1`}
+          />
+          {draftValue.startsWith("data:image/") && (
+            <button
+              type="button"
+              className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-error hover:underline"
+              onClick={() => setDraftValue("")}
+            >
+              Clear image
+            </button>
+          )}
+        </div>
       );
     }
     return (
@@ -405,7 +457,10 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGenFormsOpen(false); exportValues(); }}
+                  onClick={() => {
+                    setGenFormsOpen(false);
+                    void exportValues();
+                  }}
                 >
                   <IconDownload className="h-4 w-4 shrink-0 text-primary" />
                   Export Values

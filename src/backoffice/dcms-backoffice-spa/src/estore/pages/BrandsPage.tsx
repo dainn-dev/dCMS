@@ -1,42 +1,9 @@
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
-import { IconAddCircle, IconCheckCircle, IconShare } from "../../orders/icons";
+import { IconAddCircle, IconCheckCircle, IconDelete, IconShare, IconWarning } from "../../orders/icons";
 import { createBrandColumns } from "../brands-columns";
 import type { BrandListRow } from "../brands-columns";
-
-// ─── Export helper ────────────────────────────────────────────────────────────
-
-function exportBrandsToCSV(rows: BrandListRow[]) {
-  type ExportRow = {
-    "Brand Code": string;
-    "Brand Name": string;
-    Status: string;
-  };
-
-  const data: ExportRow[] = rows.map((r) => ({
-    "Brand Code": r.code,
-    "Brand Name": r.name,
-    Status: r.active ? "Active" : "Inactive",
-  }));
-
-  const headers = Object.keys(data[0]) as (keyof ExportRow)[];
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
-
-  const csv = [
-    headers.map(escape).join(","),
-    ...data.map((r) => headers.map((h) => escape(r[h])).join(",")),
-  ].join("\r\n");
-
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `brand-export-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
+import { exportBrandsToXlsx } from "../exportBrandsXlsx";
 
 // Re-export so EStoreApp.tsx import stays unchanged
 export type { BrandListRow } from "../brands-columns";
@@ -79,11 +46,34 @@ type BrandsPageProps = {
   onRowsChange?: (next: BrandListRow[]) => void;
 };
 
-export function BrandsPage({ onEditBrand, onCreateBrand, rows }: BrandsPageProps) {
-  const columns = useMemo(
-    () => createBrandColumns(onEditBrand, (code) => console.info("[Brands] Delete", code)),
-    [onEditBrand]
+export function BrandsPage({ onEditBrand, onCreateBrand, rows, onRowsChange }: BrandsPageProps) {
+  const tableRows = rows ?? BRAND_ROWS;
+
+  const [deleteTarget, setDeleteTarget] = useState<BrandListRow | null>(null);
+
+  const requestDelete = useCallback(
+    (code: string) => {
+      const row = tableRows.find((r) => r.code === code);
+      if (row) setDeleteTarget(row);
+    },
+    [tableRows]
   );
+
+  const columns = useMemo(
+    () => createBrandColumns(onEditBrand, requestDelete),
+    [onEditBrand, requestDelete]
+  );
+
+  function handleDeleteConfirm() {
+    if (!deleteTarget) return;
+    if (onRowsChange) {
+      onRowsChange(tableRows.filter((r) => r.code !== deleteTarget.code));
+      setToast({ message: "Brand removed.", visible: true });
+    } else {
+      setToast({ message: "Delete is not available in this view.", visible: true });
+    }
+    setDeleteTarget(null);
+  }
 
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({
     message: "",
@@ -114,9 +104,13 @@ export function BrandsPage({ onEditBrand, onCreateBrand, rows }: BrandsPageProps
           <button
             type="button"
             className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-variant"
-            onClick={() => {
-              exportBrandsToCSV(rows ?? BRAND_ROWS);
-              setToast({ message: "Brand export downloaded.", visible: true });
+            onClick={async () => {
+              try {
+                await exportBrandsToXlsx(tableRows);
+                setToast({ message: "Brand export downloaded (.xlsx).", visible: true });
+              } catch {
+                setToast({ message: "Export failed. Try again.", visible: true });
+              }
             }}
           >
             <IconShare className="h-4 w-4 shrink-0" />
@@ -136,10 +130,48 @@ export function BrandsPage({ onEditBrand, onCreateBrand, rows }: BrandsPageProps
       <div className="flex-1 p-6">
         <DataTable
           columns={columns}
-          data={rows ?? BRAND_ROWS}
+          data={tableRows}
           globalFilterPlaceholder="Search by code or brand name…"
         />
       </div>
+
+      {/* Delete confirmation */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[400px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="flex items-start gap-4 p-6">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-error-container">
+                <IconWarning className="h-5 w-5 text-error" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-on-surface">Delete brand</h3>
+                <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
+                  Remove <span className="font-semibold text-on-surface">{deleteTarget.name}</span> (
+                  {deleteTarget.code}) from the list? This demo does not call a server; the row disappears from the
+                  table.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
+                onClick={handleDeleteConfirm}
+              >
+                <IconDelete className="h-4 w-4 shrink-0" />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast notification */}
       <div

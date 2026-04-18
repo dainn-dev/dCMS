@@ -1,7 +1,9 @@
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type RowSelectionState,
   type SortingState,
+  type Updater,
   type VisibilityState,
   flexRender,
   getCoreRowModel,
@@ -28,6 +30,11 @@ interface DataTableProps<TData, TValue> {
   globalFilterPlaceholder?: string;
   /** Human-readable label overrides for the column visibility dropdown */
   columnLabels?: Record<string, string>;
+  /** Stable row id for selection (defaults to row index). */
+  getRowId?: (row: TData) => string;
+  /** Controlled row selection — pass together with onRowSelectionChange (e.g. bulk bar outside table). */
+  rowSelection?: RowSelectionState;
+  onRowSelectionChange?: (updater: Updater<RowSelectionState>) => void;
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -38,6 +45,9 @@ export function DataTable<TData, TValue>({
   defaultHiddenColumns = [],
   globalFilterPlaceholder = "Search…",
   columnLabels = {},
+  getRowId,
+  rowSelection: rowSelectionProp,
+  onRowSelectionChange: onRowSelectionChangeProp,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -45,8 +55,15 @@ export function DataTable<TData, TValue>({
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
     Object.fromEntries(defaultHiddenColumns.map((id) => [id, false]))
   );
-  const [rowSelection, setRowSelection] = useState({});
+  const [internalRowSelection, setInternalRowSelection] = useState<RowSelectionState>({});
   const [viewOptionsOpen, setViewOptionsOpen] = useState(false);
+
+  const selectionControlled =
+    rowSelectionProp !== undefined && onRowSelectionChangeProp !== undefined;
+  const rowSelection = selectionControlled ? rowSelectionProp : internalRowSelection;
+  const onRowSelectionChange = selectionControlled
+    ? onRowSelectionChangeProp
+    : setInternalRowSelection;
 
   const table = useReactTable({
     data,
@@ -56,7 +73,8 @@ export function DataTable<TData, TValue>({
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
+    onRowSelectionChange,
+    getRowId: getRowId ? (row) => getRowId(row) : undefined,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
