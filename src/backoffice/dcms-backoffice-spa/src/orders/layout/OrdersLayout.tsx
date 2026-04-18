@@ -17,6 +17,13 @@ const navItems: NavItem[] = [
   { id: "refund-cases", label: "Refund Cases", Icon: IconRefund },
 ];
 
+/** Sidebar + drill-down routes for `location.hash` sync. */
+export const ORDERS_HASH_PAGE_IDS: OrdersPageId[] = [
+  ...navItems.map((item) => item.id),
+  "order-detail",
+  "failed-order-detail",
+];
+
 type Props = {
   page: OrdersPageId;
   onPageChange: (id: OrdersPageId) => void;

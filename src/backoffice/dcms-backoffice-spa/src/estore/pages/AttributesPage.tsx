@@ -98,31 +98,24 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
     setDeleteTargetCode(null);
   }
 
-  // ── Generate Forms dropdown ───────────────────────────────────────────────
-  const [genFormsOpen, setGenFormsOpen] = useState(false);
-  const genFormsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (genFormsRef.current && !genFormsRef.current.contains(e.target as Node)) setGenFormsOpen(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   // ── Actions dropdown ──────────────────────────────────────────────────────
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) setActionsOpen(false);
+      const root = actionsRef.current;
+      if (!root) return;
+      const path = e.composedPath();
+      if (path.includes(root)) return;
+      setActionsOpen(false);
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
   }, []);
 
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Attributes">
-      <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
+      <header className="relative z-20 flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
             <span>eStore</span>
@@ -135,34 +128,6 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative" ref={genFormsRef}>
-            <button
-              type="button"
-              className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-variant"
-              onClick={() => setGenFormsOpen((o) => !o)}
-            >
-              Generate Forms
-              <IconChevronDown
-                className={`h-3.5 w-3.5 shrink-0 text-on-surface-variant transition-transform ${genFormsOpen ? "rotate-180" : ""}`}
-              />
-            </button>
-            {genFormsOpen && (
-              <div className="absolute left-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => {
-                    setGenFormsOpen(false);
-                    void downloadAttributeValuesImportTemplateXlsx();
-                  }}
-                >
-                  <IconDownload className="h-4 w-4 shrink-0 text-primary" />
-                  Import Template
-                </button>
-              </div>
-            )}
-          </div>
-
           <button
             type="button"
             className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-variant"
@@ -184,7 +149,21 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
               />
             </button>
             {actionsOpen && (
-              <div className="absolute left-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
+              <div
+                className="absolute left-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => {
+                    setActionsOpen(false);
+                    void downloadAttributeValuesImportTemplateXlsx();
+                  }}
+                >
+                  <IconDownload className="h-4 w-4 shrink-0 text-primary" />
+                  Import Template
+                </button>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"

@@ -179,7 +179,7 @@ export function AttributeImportPage({ onBack }: Props) {
               </p>
               <p>
                 Don&apos;t have a template? Use{" "}
-                <strong>Generate Forms → Import Template</strong>{" "}
+                <strong>Actions → Import Template</strong>{" "}
                 on the Attributes page to download the <strong>.xlsx</strong> template.
               </p>
             </div>

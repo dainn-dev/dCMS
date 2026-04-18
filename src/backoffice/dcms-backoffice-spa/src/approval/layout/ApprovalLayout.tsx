@@ -17,6 +17,8 @@ const navItems: NavItem[] = [
   { id: "promo-approval", label: "Promotion Approval", Icon: IconLocalOffer, pendingCount: 4 },
 ];
 
+export const APPROVAL_HASH_PAGE_IDS: ApprovalPageId[] = navItems.map((item) => item.id);
+
 type Props = {
   page: ApprovalPageId;
   onPageChange: (id: ApprovalPageId) => void;

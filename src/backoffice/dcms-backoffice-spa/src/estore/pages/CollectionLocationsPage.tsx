@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   IconAddCircle,
-  IconArrowBack,
   IconCheckCircle,
   IconClose,
   IconDelete,
@@ -18,7 +17,7 @@ type Props = {
   locations: CollectionLocation[];
   onChange: (next: CollectionLocation[]) => void;
   brands: BrandListRow[];
-  onBack: () => void;
+  onNavigateToFulfillmentOptions: () => void;
 };
 
 function seedId() {
@@ -27,7 +26,7 @@ function seedId() {
 
 const COUNTRIES = ["Singapore", "Malaysia", "Thailand", "Vietnam", "Indonesia", "Philippines"] as const;
 
-export function CollectionLocationsPage({ locations, onChange, brands, onBack }: Props) {
+export function CollectionLocationsPage({ locations, onChange, brands, onNavigateToFulfillmentOptions }: Props) {
   const [filter, setFilter] = useState("");
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -184,30 +183,31 @@ export function CollectionLocationsPage({ locations, onChange, brands, onBack }:
 
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
-      <div className="flex shrink-0 items-center justify-between border-b border-outline-variant/15 bg-surface px-6 py-4">
-        <div>
-          <button
-            type="button"
-            onClick={onBack}
-            className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-tighter text-primary hover:opacity-80"
-          >
-            <IconArrowBack className="h-3 w-3 shrink-0" />
-            Back to Fulfillment Options
-          </button>
-          <h2 className="text-2xl font-bold tracking-tight text-on-surface">Collection Location Manager</h2>
-          <p className="mt-0.5 text-sm text-on-surface-variant">
+      <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2 min-w-0">
+          <nav className="mb-1 flex flex-wrap gap-x-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+            <span>eStore</span>
+            <span className="text-on-surface-variant/50">/</span>
+            <button type="button" className="text-primary hover:underline" onClick={onNavigateToFulfillmentOptions}>
+              Fulfillment Options
+            </button>
+            <span className="text-on-surface-variant/50">/</span>
+            <span className="text-primary">Collection Location</span>
+          </nav>
+          <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Collection Location</h1>
+          <p className="text-sm text-on-surface-variant max-w-2xl">
             Manage collection points used by Store Collection fulfillment modes.
           </p>
         </div>
         <button
           type="button"
-          className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-xs font-bold text-on-primary shadow-lg shadow-primary/20 hover:opacity-90 transition-opacity"
+          className="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-xs font-bold text-on-primary shadow-lg shadow-primary/20 hover:opacity-90 transition-opacity"
           onClick={openAdd}
         >
           <IconAddCircle className="h-4 w-4 shrink-0" />
           Add Collection Location
         </button>
-      </div>
+      </header>
 
       <div className="flex-1 space-y-6 p-6 pb-24">
         <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">

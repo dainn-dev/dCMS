@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { eStoreHashForPage, parseEStorePageFromHash } from "./estoreHashRouting";
 import { EStoreLayout, type EStorePageId } from "./layout/EStoreLayout";
 import { LanguageProvider } from "./LanguageContext";
 import type { BrandListRow } from "./pages/BrandsPage";
@@ -68,11 +69,7 @@ type ProductFormState =
   | { mode: "edit"; data: ProductListRow }
   | { mode: "import" }
   | { mode: "image-import" }
-  | { mode: "inventory-import" }
-  | { mode: "category-assignment" }
-  | { mode: "product-config" };
-
-type FulfillmentSection = "allocation" | "config" | "locations";
+  | { mode: "inventory-import" };
 
 type FulfillmentFormState =
   | { mode: "idle" }
@@ -271,13 +268,12 @@ function safeJsonParse<T>(raw: string | null): T | null {
 }
 
 export function EStoreApp({ languages }: { languages?: import("./useUmbracoLanguages").UmbracoLanguage[] }) {
-  const [page, setPage] = useState<EStorePageId>("brands");
+  const [page, setPage] = useState<EStorePageId>(() => parseEStorePageFromHash() ?? "brands");
   const [brandForm, setBrandForm] = useState<BrandFormState>({ mode: "idle" });
   const [productForm, setProductForm] = useState<ProductFormState>({ mode: "idle" });
   const [attributeForm, setAttributeForm] = useState<AttributeFormState>({ mode: "idle" });
   const [promoForm, setPromoForm] = useState<PromoFormState>({ mode: "idle" });
   const [campaignForm, setCampaignForm] = useState<CampaignFormState>({ mode: "idle" });
-  const [fulfillmentSection, setFulfillmentSection] = useState<FulfillmentSection>("config");
   const [fulfillmentForm, setFulfillmentForm] = useState<FulfillmentFormState>({ mode: "idle" });
 
   const [brands, setBrands] = useState<BrandListRow[]>(DEFAULT_BRANDS);
@@ -439,18 +435,52 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
     },
   ]);
 
-  function handlePageChange(id: EStorePageId) {
+  function resetNestedFormsForPage(id: EStorePageId) {
     if (id !== "brands") setBrandForm({ mode: "idle" });
     if (id !== "products") setProductForm({ mode: "idle" });
     if (id !== "attributes") setAttributeForm({ mode: "idle" });
     if (id !== "promo-codes") setPromoForm({ mode: "idle" });
     if (id !== "campaigns") setCampaignForm({ mode: "idle" });
-    if (id !== "fulfillment-options") {
+    const inFulfillmentArea =
+      id === "fulfillment-options" ||
+      id === "fulfillment-delivery-allocation" ||
+      id === "fulfillment-collection-locations";
+    if (!inFulfillmentArea) {
       setFulfillmentForm({ mode: "idle" });
-      setFulfillmentSection("config");
     }
-    setPage(id);
   }
+
+  function handlePageChange(id: EStorePageId) {
+    resetNestedFormsForPage(id);
+    setPage(id);
+    const nextHash = eStoreHashForPage(id);
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+  }
+
+  useEffect(() => {
+    function onHashChange() {
+      const p = parseEStorePageFromHash();
+      if (!p) return;
+      resetNestedFormsForPage(p);
+      setPage(p);
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    const p = parseEStorePageFromHash();
+    if (!p) {
+      window.location.hash = eStoreHashForPage("brands");
+      return;
+    }
+    const preferred = eStoreHashForPage(p);
+    if (window.location.hash !== preferred) {
+      window.location.hash = preferred;
+    }
+  }, []);
 
   return (
     <LanguageProvider languages={languages}>
@@ -489,7 +519,7 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
         <BrandConfigPage
           savedFields={brandAdditionalFields}
           onSave={setBrandAdditionalFields}
-          onNavigateToBrands={() => setPage("brands")}
+          onNavigateToBrands={() => handlePageChange("brands")}
         />
       )}
       {page === "categories" && <CategoriesPage />}
@@ -498,15 +528,17 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
           rows={DEMO_PRODUCT_ROWS}
           bestSellerById={bestSellerFlags}
           onBestSellerChange={setBestSellerFlags}
-          onNavigateToProducts={() => setPage("products")}
+          onNavigateToProducts={() => handlePageChange("products")}
         />
       )}
+      {page === "product-category-assignment" && (
+        <CategoryAssignmentPage onNavigateToProducts={() => handlePageChange("products")} />
+      )}
+      {page === "product-configuration" && (
+        <ProductConfigPage onNavigateToProducts={() => handlePageChange("products")} />
+      )}
       {page === "products" &&
-        (productForm.mode === "product-config" ? (
-          <ProductConfigPage onBack={() => setProductForm({ mode: "idle" })} />
-        ) : productForm.mode === "category-assignment" ? (
-          <CategoryAssignmentPage onBack={() => setProductForm({ mode: "idle" })} />
-        ) : productForm.mode === "inventory-import" ? (
+        (productForm.mode === "inventory-import" ? (
           <ProductInventoryImportPage onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode === "image-import" ? (
           <ProductImageImportPage onBack={() => setProductForm({ mode: "idle" })} />
@@ -525,8 +557,6 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
             onImportProduct={() => setProductForm({ mode: "import" })}
             onImageImport={() => setProductForm({ mode: "image-import" })}
             onInventoryImport={() => setProductForm({ mode: "inventory-import" })}
-            onCategoryAssignment={() => setProductForm({ mode: "category-assignment" })}
-            onProductConfig={() => setProductForm({ mode: "product-config" })}
           />
         ))}
       {page === "campaigns" &&
@@ -583,6 +613,21 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
             onOpenExclusionList={() => setPromoForm({ mode: "exclusion-list" })}
           />
         ))}
+      {page === "fulfillment-delivery-allocation" && (
+        <DeliveryAllocationPage
+          stockLocations={stockLocations}
+          onChange={setStockLocations}
+          onNavigateToFulfillmentOptions={() => handlePageChange("fulfillment-options")}
+        />
+      )}
+      {page === "fulfillment-collection-locations" && (
+        <CollectionLocationsPage
+          locations={collectionLocations}
+          onChange={setCollectionLocations}
+          brands={brands}
+          onNavigateToFulfillmentOptions={() => handlePageChange("fulfillment-options")}
+        />
+      )}
       {page === "fulfillment-options" &&
         (fulfillmentForm.mode === "logistic-partners" ? (
           <LogisticPartnerManagementPage
@@ -633,23 +678,8 @@ export function EStoreApp({ languages }: { languages?: import("./useUmbracoLangu
             }}
             onBack={() => setFulfillmentForm({ mode: "idle" })}
           />
-        ) : fulfillmentSection === "locations" ? (
-          <CollectionLocationsPage
-            locations={collectionLocations}
-            onChange={setCollectionLocations}
-            brands={brands}
-            onBack={() => setFulfillmentSection("config")}
-          />
-        ) : fulfillmentSection === "allocation" ? (
-          <DeliveryAllocationPage
-            stockLocations={stockLocations}
-            onChange={setStockLocations}
-            onBack={() => setFulfillmentSection("config")}
-          />
         ) : (
           <FulfillmentOptionsPage
-            section={fulfillmentSection}
-            onSectionChange={setFulfillmentSection}
             groupings={fulfillmentGroupings}
             slots={fulfillmentSlots}
             stockLocations={stockLocations}

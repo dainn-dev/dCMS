@@ -690,16 +690,17 @@ export function EditBrandPage({
                 </div>
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end items-center gap-3 pt-8 mt-8 border-t border-outline-variant/20">
-                <button type="button" className={btnFooterGhost} onClick={onBack}>
-                  Cancel
-                </button>
-                <button type="button" className={btnFooterPrimary} onClick={handleSave}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Create Brand" : "Save Changes"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex justify-end items-center gap-3 pt-8 mt-8 border-t border-outline-variant/20">
+                  <button type="button" className={btnFooterGhost} onClick={onBack}>
+                    Cancel
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Save Changes
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -812,16 +813,17 @@ export function EditBrandPage({
                 </div>
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end items-center gap-3 pt-8 mt-8 border-t border-outline-variant/20">
-                <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditBrand] Contacts discard")}>
-                  Discard Changes
-                </button>
-                <button type="button" className={btnFooterPrimary} onClick={handleSave}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Save & Continue" : "Update Contacts"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex justify-end items-center gap-3 pt-8 mt-8 border-t border-outline-variant/20">
+                  <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditBrand] Contacts discard")}>
+                    Discard Changes
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Update Contacts
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -881,16 +883,17 @@ export function EditBrandPage({
                 </div>
               )}
 
-              {/* Footer */}
-              <div className="flex justify-end items-center gap-3 pt-8 mt-8 border-t border-outline-variant/20">
-                <button type="button" className={btnFooterGhost} onClick={() => setExcludedBrands([])}>
-                  Reset
-                </button>
-                <button type="button" className={btnFooterPrimary} onClick={handleSave}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Save & Continue" : "Update Recommendations"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex justify-end items-center gap-3 pt-8 mt-8 border-t border-outline-variant/20">
+                  <button type="button" className={btnFooterGhost} onClick={() => setExcludedBrands([])}>
+                    Reset
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Update Recommendations
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -992,16 +995,17 @@ export function EditBrandPage({
                 </div>
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end gap-3 items-center pt-8 mt-8 border-t border-outline-variant/20">
-                <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditBrand] SEO discard")}>
-                  Discard Changes
-                </button>
-                <button type="button" className={btnFooterPrimary} onClick={handleSave}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Save & Continue" : "Update SEO Settings"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex justify-end gap-3 items-center pt-8 mt-8 border-t border-outline-variant/20">
+                  <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditBrand] SEO discard")}>
+                    Discard Changes
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Update SEO Settings
+                  </button>
+                </div>
+              )}
             </>
           )}
         </section>

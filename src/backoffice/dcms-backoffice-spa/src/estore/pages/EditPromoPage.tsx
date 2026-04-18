@@ -16,7 +16,7 @@ const sectionCard = "rounded-xl border border-outline-variant/10 bg-surface-cont
 const sectionTitle = "mb-5 text-sm font-bold uppercase tracking-widest text-on-surface";
 const labelBase = "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider mb-1";
 const inputBase = "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-2 px-3 text-xs focus:ring-1 focus:ring-primary outline-none";
-const hintText = "mt-1 text-[10px] text-on-surface-variant";
+const hintText = "mt-1 text-xs text-on-surface-variant";
 
 // ── Mock data for pickers ─────────────────────────────────────────────────────
 const MOCK_BRANDS = ["Cronos Ltd.", "SoundWave Co.", "Apex Footwear", "NovaCam", "FurniCraft"];
@@ -60,7 +60,7 @@ function SearchablePicker({
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {selected.map((s) => (
-            <span key={s} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary">
+            <span key={s} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold uppercase text-primary">
               {s}
               <button type="button" onClick={() => toggle(s)} className="rounded p-0.5 hover:bg-primary/20 transition-colors">
                 <IconClose className="h-2.5 w-2.5" />
@@ -88,7 +88,7 @@ function SearchablePicker({
           </div>
           <div className="max-h-44 overflow-y-auto">
             {filtered.length === 0
-              ? <p className="px-3 py-3 text-center text-[10px] text-on-surface-variant">No results</p>
+              ? <p className="px-3 py-3 text-center text-xs text-on-surface-variant">No results</p>
               : filtered.map((opt) => (
                 <label key={opt} className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-surface-container transition-colors select-none">
                   <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={selected.includes(opt)} onChange={() => toggle(opt)} />
@@ -421,7 +421,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
               {/* ── Import Users ── */}
               <div className="mt-6 space-y-3">
                 <label className={labelBase}>Import Users <span className="text-error">*</span></label>
-                <p className="text-[10px] text-on-surface-variant -mt-1 mb-2 leading-relaxed">
+                <p className="text-xs text-on-surface-variant -mt-1 mb-2 leading-relaxed">
                   Upload an Excel / CSV file containing the email addresses of users who will receive a promo code.
                   Only one email address per cell.
                 </p>
@@ -437,12 +437,12 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                       {usersFile ? (
                         <>
                           <p className="truncate text-xs font-semibold text-on-surface max-w-[220px]">{usersFile.name}</p>
-                          <p className="text-[10px] text-on-surface-variant">{(usersFile.size / 1024).toFixed(1)} KB · Click to change</p>
+                          <p className="text-xs text-on-surface-variant">{(usersFile.size / 1024).toFixed(1)} KB · Click to change</p>
                         </>
                       ) : (
                         <>
                           <p className="text-xs font-semibold text-primary/80">Choose File</p>
-                          <p className="text-[10px] text-on-surface-variant">Accepts .xlsx, .xls, .csv</p>
+                          <p className="text-xs text-on-surface-variant">Accepts .xlsx, .xls, .csv</p>
                         </>
                       )}
                     </div>
@@ -473,7 +473,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                     <div className="mt-3 overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
                       {/* Summary bar */}
                       <div className="flex flex-wrap items-center gap-3 border-b border-outline-variant/10 bg-surface-container-low/60 px-4 py-3">
-                        <p className="text-[11px] font-bold text-on-surface">{userRows.length} emails parsed</p>
+                        <p className="text-xs font-bold text-on-surface">{userRows.length} emails parsed</p>
                         <span className="rounded-full bg-secondary-container/20 px-2.5 py-0.5 text-[9px] font-bold uppercase text-on-secondary-container">
                           {validCount} valid
                         </span>
@@ -482,7 +482,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                             {invalidCount} invalid
                           </span>
                         )}
-                        <p className="ml-auto text-[10px] text-on-surface-variant">
+                        <p className="ml-auto text-xs text-on-surface-variant">
                           Remove invalid rows before saving.
                         </p>
                       </div>
@@ -490,7 +490,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                       <div className="max-h-56 overflow-y-auto">
                         <table className="w-full border-collapse text-left">
                           <thead>
-                            <tr className="bg-surface-container-high text-[10px] font-bold uppercase tracking-widest text-primary">
+                            <tr className="bg-surface-container-high text-xs font-bold uppercase tracking-widest text-primary">
                               <th className="px-4 py-2">Email</th>
                               <th className="px-4 py-2">Status</th>
                               <th className="w-10 px-4 py-2 text-right">Remove</th>
@@ -502,7 +502,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                                 key={row.id}
                                 className={`text-xs transition-colors hover:bg-surface-container-low ${row.status === "error" ? "opacity-70" : ""}`}
                               >
-                                <td className="px-4 py-2.5 font-mono text-[11px] text-on-surface">{row.email}</td>
+                                <td className="px-4 py-2.5 font-mono text-xs text-on-surface">{row.email}</td>
                                 <td className="px-4 py-2.5">
                                   {row.status === "ready" ? (
                                     <span className="rounded-full bg-secondary-container/20 px-2 py-0.5 text-[9px] font-bold uppercase text-on-secondary-container">Ready</span>
@@ -735,7 +735,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                     />
                     <div>
                       <p className="text-xs font-bold text-on-surface capitalize">{m}</p>
-                      <p className="text-[10px] text-on-surface-variant">
+                      <p className="text-xs text-on-surface-variant">
                         {m === "inclusion"
                           ? "Include specified parameters for promotion"
                           : "Remove specified parameters from promotion"}
@@ -772,7 +772,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                     />
                     <div>
                       <p className="text-xs font-bold text-on-surface">{opt.label}</p>
-                      <p className="text-[10px] text-on-surface-variant">{opt.hint}</p>
+                      <p className="text-xs text-on-surface-variant">{opt.hint}</p>
                     </div>
                   </label>
                 ))}
@@ -798,7 +798,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                     />
                     <div>
                       <p className="text-xs font-bold text-on-surface">{opt.label}</p>
-                      <p className="text-[10px] text-on-surface-variant">{opt.hint}</p>
+                      <p className="text-xs text-on-surface-variant">{opt.hint}</p>
                     </div>
                   </label>
                 ))}
@@ -939,7 +939,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
               />
               <div>
                 <p className="text-xs font-bold text-on-surface">Show Description as Popup during Checkout</p>
-                <p className="mt-0.5 text-[10px] text-on-surface-variant leading-relaxed">
+                <p className="mt-0.5 text-xs text-on-surface-variant leading-relaxed">
                   The promo description will appear as a popup message when the customer applies this code at checkout.
                 </p>
               </div>

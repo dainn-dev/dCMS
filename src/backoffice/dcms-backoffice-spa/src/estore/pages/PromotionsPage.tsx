@@ -176,10 +176,14 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
   const actionsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) setActionsOpen(false);
+      const root = actionsRef.current;
+      if (!root) return;
+      const path = e.composedPath();
+      if (path.includes(root)) return;
+      setActionsOpen(false);
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
   }, []);
 
   // ── Type-selection modal ──────────────────────────────────────────────────
@@ -199,7 +203,7 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
 
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Promotion code">
-      <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
+      <header className="relative z-20 flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
             <span>eStore</span>
@@ -223,7 +227,10 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
             <IconChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${actionsOpen ? "rotate-180" : ""}`} />
           </button>
           {actionsOpen && (
-            <div className="absolute right-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
+            <div
+              className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
@@ -261,7 +268,7 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-[1600px] flex-1 p-6">
+      <div className="w-full flex-1 p-6">
         <DataTable
           columns={columns}
           data={rows}
@@ -298,7 +305,7 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
                   />
                   <div>
                     <p className="text-xs font-bold text-on-surface">{pt.label}</p>
-                    <p className="mt-0.5 text-[10px] text-on-surface-variant leading-relaxed">{pt.description}</p>
+                    <p className="mt-0.5 text-xs text-on-surface-variant leading-relaxed">{pt.description}</p>
                   </div>
                 </label>
               ))}

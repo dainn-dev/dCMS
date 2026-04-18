@@ -109,7 +109,7 @@ export function GroupedPromoCodesPage({ parentPromo, onBack, onEditChild }: Prop
               <h2 className="text-2xl font-bold tracking-tight text-on-surface">View Grouped Codes</h2>
               <p className="mt-0.5 text-sm text-on-surface-variant">
                 Parent: <code className="rounded bg-surface-container-high px-1.5 py-0.5 text-xs font-mono font-bold">{parentPromo.code}</code>
-                <span className="ml-2 rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant">{parentPromo.promoType}</span>
+                <span className="ml-2 rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">{parentPromo.promoType}</span>
               </p>
             </div>
           </div>
@@ -147,39 +147,42 @@ export function GroupedPromoCodesPage({ parentPromo, onBack, onEditChild }: Prop
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
-                <tr className="bg-surface-container-high text-[10px] font-bold uppercase tracking-widest text-primary">
-                  <th className="px-5 py-3">Code</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Start</th>
-                  <th className="px-4 py-3">End</th>
-                  <th className="px-4 py-3 text-right">Used / Limit</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                <tr className="bg-surface-container-high">
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase whitespace-nowrap text-primary">Code</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase whitespace-nowrap text-primary">Status</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase whitespace-nowrap text-primary">Start</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold uppercase whitespace-nowrap text-primary">End</th>
+                  <th className="px-4 py-3 text-right text-[11px] font-bold uppercase whitespace-nowrap text-primary">Used / Limit</th>
+                  <th className="px-4 py-3 text-right text-[11px] font-bold uppercase whitespace-nowrap text-primary">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className="text-xs hover:bg-surface-container-low transition-colors">
-                    <td className="px-5 py-3.5">
-                      <code className="rounded bg-surface-container-high px-2 py-1 font-mono text-[11px] font-bold text-on-surface-variant">
+                    <td className="px-4 py-3">
+                      <code className="rounded bg-surface-container-high px-2 py-1 font-mono text-xs font-bold text-on-surface-variant">
                         {row.code}
                       </code>
                     </td>
-                    <td className="px-4 py-3.5">
-                      <span className={`inline-block rounded-full px-3 py-0.5 text-[9px] font-extrabold uppercase tracking-widest ${statusPillClass(row.status)}`}>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${statusPillClass(row.status)}`}
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-60" />
                         {row.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-on-surface-variant">{row.startDate}</td>
-                    <td className="px-4 py-3.5 text-on-surface-variant">{row.endDate}</td>
-                    <td className="px-4 py-3.5 text-right font-mono text-on-surface">
+                    <td className="px-4 py-3 text-on-surface-variant">{row.startDate}</td>
+                    <td className="px-4 py-3 text-on-surface-variant">{row.endDate}</td>
+                    <td className="px-4 py-3 text-right font-mono text-on-surface">
                       {row.used} / {row.limit}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           type="button"
                           title="Edit"
-                          className="rounded p-2 text-on-surface-variant transition-all hover:bg-primary/10 hover:text-primary"
+                          className="rounded p-1.5 text-on-surface-variant transition-all hover:bg-white hover:text-primary"
                           onClick={() => handleEditChild(row)}
                         >
                           <IconEdit className="h-[18px] w-[18px]" />
@@ -187,7 +190,7 @@ export function GroupedPromoCodesPage({ parentPromo, onBack, onEditChild }: Prop
                         <button
                           type="button"
                           title="Delete"
-                          className="rounded p-2 text-on-surface-variant transition-all hover:bg-error-container hover:text-error"
+                          className="rounded p-1.5 text-on-surface-variant transition-all hover:bg-white hover:text-error"
                           onClick={() => confirmDelete(row.id)}
                         >
                           <IconDelete className="h-[18px] w-[18px]" />

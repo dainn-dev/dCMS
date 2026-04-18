@@ -16,6 +16,8 @@ const navItems: NavItem[] = [
   { id: "operational", label: "Operational", Icon: IconShipping },
 ];
 
+export const REPORTS_HASH_PAGE_IDS: ReportsPageId[] = navItems.map((item) => item.id);
+
 type Props = {
   page: ReportsPageId;
   onPageChange: (id: ReportsPageId) => void;

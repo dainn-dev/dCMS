@@ -1,13 +1,11 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import {
   IconAddCircle,
-  IconArrowBack,
   IconCheckCircle,
   IconDelete,
   IconEdit,
   IconInfo,
   IconSave,
-  IconTune,
   IconWarning,
 } from "../../orders/icons";
 
@@ -194,9 +192,9 @@ function emptyForm(): Omit<FieldRecord, "id"> {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-type Props = { onBack: () => void };
+type Props = { onNavigateToProducts: () => void };
 
-export function ProductConfigPage({ onBack }: Props) {
+export function ProductConfigPage({ onNavigateToProducts }: Props) {
   const [fields, setFields] = useState<FieldRecord[]>(() => loadStoredFields());
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -359,31 +357,27 @@ export function ProductConfigPage({ onBack }: Props) {
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
 
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4">
-        <div className="min-w-0">
-          <button
-            type="button"
-            onClick={onBack}
-            className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-tighter text-primary hover:opacity-80"
-          >
-            <IconArrowBack className="h-3 w-3 shrink-0" />
-            Back to Products
-          </button>
-          <div className="flex items-center gap-3">
-            <IconTune className="h-6 w-6 shrink-0 text-primary" />
-            <div>
-              <h2 className="text-2xl font-bold tracking-tight text-on-surface">Product Configuration</h2>
-              <p className="mt-0.5 text-sm text-on-surface-variant">
-                Manage additional fields displayed on the Add / Edit Product page.
-              </p>
-            </div>
-          </div>
+      <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2 min-w-0">
+          <nav className="mb-1 flex flex-wrap gap-x-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+            <span>eStore</span>
+            <span className="text-on-surface-variant/50">/</span>
+            <button type="button" className="text-primary hover:underline" onClick={onNavigateToProducts}>
+              Products
+            </button>
+            <span className="text-on-surface-variant/50">/</span>
+            <span className="text-primary">Product Configuration</span>
+          </nav>
+          <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Product Configuration</h1>
+          <p className="text-sm text-on-surface-variant max-w-2xl">
+            Manage additional fields displayed on the Add / Edit Product page.
+          </p>
         </div>
         <button type="button" className={`${btnPrimary} shrink-0`} onClick={saveConfiguration}>
           <IconSave className="h-4 w-4 shrink-0" />
           Save configuration
         </button>
-      </div>
+      </header>
 
       <div className="flex-1 space-y-6 p-6 pb-24">
 

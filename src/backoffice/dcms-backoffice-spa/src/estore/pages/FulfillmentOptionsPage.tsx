@@ -25,8 +25,6 @@ import type {
 const inputBase =
   "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-2 px-3 text-xs focus:ring-1 focus:ring-primary outline-none";
 
-type FulfillmentSection = "allocation" | "config" | "locations";
-
 const FIELD_TYPES: FulfillmentFieldType[] = [
   "Text Box",
   "WYSIWYG",
@@ -46,8 +44,6 @@ const FIELD_SECTIONS: FulfillmentFieldSection[] = [
 ];
 
 type Props = {
-  section: FulfillmentSection;
-  onSectionChange: (s: FulfillmentSection) => void;
   groupings: FulfillmentGrouping[];
   slots: FulfillmentSlot[];
   stockLocations: StockLocation[];
@@ -80,8 +76,6 @@ function csvEscape(val: string): string {
 }
 
 export function FulfillmentOptionsPage({
-  section,
-  onSectionChange,
   groupings,
   slots,
   stockLocations,
@@ -375,29 +369,6 @@ export function FulfillmentOptionsPage({
             Add New Grouping
           </button>
         </div>
-      </div>
-
-      {/* Section switcher */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-outline-variant/10 bg-surface-container-low px-6 py-3">
-        {([
-          { id: "allocation" as const, label: "Delivery Allocation Management" },
-          { id: "config" as const, label: "Fulfillment Options Configuration" },
-          { id: "locations" as const, label: "Collection Location Manager" },
-        ]).map((t) => {
-          const activeTab = section === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => onSectionChange(t.id)}
-              className={`rounded-full px-4 py-2 text-xs font-bold transition-colors ${
-                activeTab ? "bg-primary text-on-primary" : "bg-surface-container-high text-on-surface-variant hover:bg-surface-container"
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
       </div>
 
       {/* Config list body */}

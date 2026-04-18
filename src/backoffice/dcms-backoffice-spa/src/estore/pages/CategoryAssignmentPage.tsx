@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  IconArrowBack,
   IconAccountTree,
   IconCheckCircle,
   IconChevronDown,
@@ -164,9 +163,9 @@ function CategoryPicker({
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-type Props = { onBack: () => void };
+type Props = { onNavigateToProducts: () => void };
 
-export function CategoryAssignmentPage({ onBack }: Props) {
+export function CategoryAssignmentPage({ onNavigateToProducts }: Props) {
   // ── Step 1 ────────────────────────────────────────────────────────────────
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadDone, setUploadDone] = useState(false);
@@ -219,7 +218,16 @@ export function CategoryAssignmentPage({ onBack }: Props) {
     setToast(
       `${count} product${count !== 1 ? "s" : ""} assigned to "${cats}" successfully.`
     );
-    setTimeout(() => onBack(), 2200);
+  }
+
+  function resetWizard() {
+    setSelectedFile(null);
+    setUploadDone(false);
+    setRows([]);
+    setSelectedIds(new Set());
+    setTargetCategories([]);
+    setClearOther(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   const canAssign = selectedIds.size > 0 && targetCategories.length > 0;
@@ -229,27 +237,23 @@ export function CategoryAssignmentPage({ onBack }: Props) {
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
 
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4">
-        <div>
-          <button
-            type="button"
-            onClick={onBack}
-            className="mb-1 flex items-center gap-2 text-xs font-bold uppercase tracking-tighter text-primary hover:opacity-80"
-          >
-            <IconArrowBack className="h-3 w-3 shrink-0" />
-            Back to Products
-          </button>
-          <div className="flex items-center gap-3">
-            <IconAccountTree className="h-6 w-6 shrink-0 text-primary" />
-            <div>
-              <h2 className="text-2xl font-bold tracking-tight text-on-surface">Category Assignment</h2>
-              <p className="mt-0.5 text-sm text-on-surface-variant">
-                Bulk-assign products to categories by uploading a UPC / SKU list.
-              </p>
-            </div>
-          </div>
+      <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2 min-w-0">
+          <nav className="mb-1 flex flex-wrap gap-x-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+            <span>eStore</span>
+            <span className="text-on-surface-variant/50">/</span>
+            <button type="button" className="text-primary hover:underline" onClick={onNavigateToProducts}>
+              Products
+            </button>
+            <span className="text-on-surface-variant/50">/</span>
+            <span className="text-primary">Category Assignment</span>
+          </nav>
+          <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Category Assignment</h1>
+          <p className="text-sm text-on-surface-variant max-w-2xl">
+            Bulk-assign products to categories by uploading a UPC / SKU list.
+          </p>
         </div>
-      </div>
+      </header>
 
       {/* ── Body ────────────────────────────────────────────────────────── */}
       <div className="flex-1 space-y-6 p-6 pb-24">
@@ -460,7 +464,7 @@ export function CategoryAssignmentPage({ onBack }: Props) {
               </div>
 
               <div className="flex items-center gap-3">
-                <button type="button" className={btnGhost} onClick={onBack}>
+                <button type="button" className={btnGhost} onClick={resetWizard}>
                   Cancel
                 </button>
                 <button

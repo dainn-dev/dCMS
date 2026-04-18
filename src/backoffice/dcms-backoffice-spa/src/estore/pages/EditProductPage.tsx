@@ -1095,14 +1095,17 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                 </div>
               </div>
 
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
-                <button type="button" className={btnFooterGhost} onClick={onBack}>Cancel</button>
-                <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Save Product" : "Save Changes"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
+                  <button type="button" className={btnFooterGhost} onClick={onBack}>
+                    Cancel
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Save Changes
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -1320,14 +1323,17 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                 </div>
               </div>
 
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
-                <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditProduct] Discard")}>Discard Changes</button>
-                <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Save & Continue" : "Update Product Page"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
+                  <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditProduct] Discard")}>
+                    Discard Changes
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Update Product Page
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -1380,14 +1386,17 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                 </div>
               )}
 
-              {/* Footer */}
-              <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
-                <button type="button" className={btnFooterGhost} onClick={() => setRecommendedIds([])}>Reset</button>
-                <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
-                  <IconSave className="h-4 w-4 shrink-0" />
-                  {isAdd ? "Save & Continue" : "Update Recommendations"}
-                </button>
-              </div>
+              {!isAdd && (
+                <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
+                  <button type="button" className={btnFooterGhost} onClick={() => setRecommendedIds([])}>
+                    Reset
+                  </button>
+                  <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    Update Recommendations
+                  </button>
+                </div>
+              )}
             </>
           )}
         </section>

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  IconAccountTree,
   IconAddCircle,
   IconBox,
-  IconTune,
   IconChevronDown,
   IconChevronRight,
   IconClose,
@@ -15,7 +13,6 @@ import {
   IconImage,
   IconLastPage,
   IconChevronLeft,
-  IconChevronRight,
   IconLayers,
   IconOpenInNew,
   IconSearch,
@@ -154,8 +151,6 @@ type ProductsPageProps = {
   onImportProduct?: () => void;
   onImageImport?: () => void;
   onInventoryImport?: () => void;
-  onCategoryAssignment?: () => void;
-  onProductConfig?: () => void;
 };
 
 const FILTER_CATEGORIES = [
@@ -170,16 +165,21 @@ const QUICK_ACCESS_OPTIONS: { key: string; label: string; hint: string }[] = [
   { key: "estore-only",    label: "eStore Only",             hint: ""                          },
 ];
 
-export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onImageImport, onInventoryImport, onCategoryAssignment, onProductConfig }: ProductsPageProps) {
+export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onImageImport, onInventoryImport }: ProductsPageProps) {
   // ── Group Actions dropdown state ──────────────────────────────────────────
   const [groupOpen, setGroupOpen] = useState(false);
   const groupRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (groupRef.current && !groupRef.current.contains(e.target as Node)) setGroupOpen(false);
+      const root = groupRef.current;
+      if (!root) return;
+      // composedPath: robust if target is inside shadow DOM; capture phase runs before item onClick is lost
+      const path = e.composedPath();
+      if (path.includes(root)) return;
+      setGroupOpen(false);
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
   }, []);
 
   // Export modal state
@@ -299,7 +299,7 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
       className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low"
       aria-label="Product manager"
     >
-      <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
+      <header className="relative z-20 flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
           <nav className="mb-2 flex items-center gap-2 text-[10px] font-medium uppercase tracking-widest text-on-surface-variant">
             <span>Estore</span>
@@ -324,7 +324,10 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
               <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" />
             </button>
             {groupOpen && (
-              <div className="absolute right-0 top-full z-20 mt-1 w-60 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
+              <div
+                className="absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 {/* Import section */}
                 <div className="px-4 pt-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/60">Import</div>
                 <button
@@ -403,27 +406,6 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
                 >
                   <IconBox className="h-4 w-4 shrink-0 text-primary" />
                   Inventory Import Template
-                </button>
-
-                <div className="my-1 border-t border-outline-variant/20" />
-
-                {/* Management section */}
-                <div className="px-4 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/60">Manage</div>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); onCategoryAssignment?.(); }}
-                >
-                  <IconAccountTree className="h-4 w-4 shrink-0 text-primary" />
-                  Category Assignment
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); onProductConfig?.(); }}
-                >
-                  <IconTune className="h-4 w-4 shrink-0 text-primary" />
-                  Product Configuration
                 </button>
               </div>
             )}
