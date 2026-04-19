@@ -14,7 +14,7 @@
       "type": "propertyEditorUi",
       "alias": "Dainn.CustomFontPicker",
       "name": "Dainn Custom Font Picker",
-      "element": "/App_Plugins/DcmsV16/dcms-font-picker-property-editor.js",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-font-picker-property-editor.js",
       "elementName": "dcms-font-picker-property-editor",
       "meta": {
         "label": "Dainn Custom Font Picker",
@@ -25,9 +25,100 @@
     },
     {
       "type": "propertyEditorUi",
+      "alias": "Dainn.DesignTypography",
+      "name": "Dainn Design Typography",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-design-typography-property-editor.js",
+      "elementName": "dcms-design-typography-property-editor",
+      "meta": {
+        "label": "Dainn Design Typography",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.Fonts",
+      "name": "Dainn Fonts",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-fonts-property-editor.js",
+      "elementName": "dcms-fonts-property-editor",
+      "meta": {
+        "label": "Dainn Fonts",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.Styling",
+      "name": "Dainn Styling",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-styling-property-editor.js",
+      "elementName": "dcms-styling-property-editor",
+      "meta": {
+        "label": "Dainn Styling",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.StylingEditor",
+      "name": "Dainn Styling Editor",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-styling-editor-property-editor.js",
+      "elementName": "dcms-styling-editor-property-editor",
+      "meta": {
+        "label": "Dainn Styling Editor",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.ColorPicker",
+      "name": "Dainn Color Picker",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-color-scheme-picker-property-editor.js",
+      "elementName": "dcms-color-scheme-picker-property-editor",
+      "meta": {
+        "label": "Dainn Color Picker",
+        "icon": "icon-colorpicker",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.BaselineColors",
+      "name": "Dainn Baseline Colors",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-global-baseline-colors-property-editor.js",
+      "elementName": "dcms-global-baseline-colors-property-editor",
+      "meta": {
+        "label": "Dainn Baseline Colors",
+        "icon": "icon-colorpicker",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.DesignBaselineColors",
+      "name": "Dainn Design Baseline Colors",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-baseline-colors-property-editor.js",
+      "elementName": "dcms-baseline-colors-property-editor",
+      "meta": {
+        "label": "Dainn Design Baseline Colors",
+        "icon": "icon-colorpicker",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
       "alias": "Dainn.ColorPalette",
       "name": "Dainn Color Palette",
-      "element": "/App_Plugins/DcmsV16/dcms-color-palette-property-editor.js",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-color-palette-property-editor.js",
       "elementName": "dcms-color-palette-property-editor",
       "meta": {
         "label": "Dainn Color Palette",
@@ -40,7 +131,7 @@
       "type": "propertyEditorUi",
       "alias": "Dainn.CustomColorPicker",
       "name": "Dainn Custom Color Picker",
-      "element": "/App_Plugins/DcmsV16/dcms-color-picker-property-editor.js",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-color-picker-property-editor.js",
       "elementName": "dcms-color-picker-property-editor",
       "meta": {
         "label": "Dainn Custom Color Picker",
@@ -124,6 +215,217 @@
       "meta": {
         "label": "Access",
         "pathname": "dcms-access"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SeoContent",
+      "name": "Dainn SEO Content",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-seo-content-property-editor.js",
+      "elementName": "dcms-seo-content-property-editor",
+      "meta": {
+        "label": "Dainn SEO Content",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SelectWithDefaultValue",
+      "name": "Dainn Select With Default Value",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-select-with-default-value-property-editor.js",
+      "elementName": "dcms-select-with-default-value-property-editor",
+      "meta": {
+        "label": "Dainn Select With Default Value",
+        "icon": "icon-selectbox",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String",
+        "settings": {
+          "properties": [
+            {
+              "alias": "defaultValue",
+              "label": "Default Value",
+              "description": "The value selected by default when none is set.",
+              "propertyEditorUiAlias": "Umb.PropertyEditorUi.TextBox"
+            },
+            {
+              "alias": "items",
+              "label": "Items",
+              "description": "Options as JSON array of strings. Each entry: \"Label|value\" or just \"value\".",
+              "propertyEditorUiAlias": "Umb.PropertyEditorUi.MultipleTextString"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.BlockGridWidthSwitcher",
+      "name": "Dainn Block Grid Width Switcher",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-block-grid-width-switcher-property-editor.js",
+      "elementName": "dcms-block-grid-width-switcher-property-editor",
+      "meta": {
+        "label": "Dainn Block Grid Width Switcher",
+        "icon": "icon-width",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.CornerRadius",
+      "name": "Dainn Corner Radius",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-corner-radius-property-editor.js",
+      "elementName": "dcms-corner-radius-property-editor",
+      "meta": {
+        "label": "Dainn Corner Radius",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.DropShadow",
+      "name": "Dainn Drop Shadow",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-drop-shadow-property-editor.js",
+      "elementName": "dcms-drop-shadow-property-editor",
+      "meta": {
+        "label": "Dainn Drop Shadow",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.RedirectUrlManagement",
+      "name": "Dainn Redirect URL Management",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-redirect-url-management-property-editor.js",
+      "elementName": "dcms-redirect-url-management-property-editor",
+      "meta": {
+        "label": "Dainn Redirect URL Management",
+        "icon": "icon-link",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SeoTitle",
+      "name": "Dainn SEO Title",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-seo-title-property-editor.js",
+      "elementName": "dcms-seo-title-property-editor",
+      "meta": {
+        "label": "Dainn SEO Title",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String",
+        "settings": {
+          "properties": [
+            {
+              "alias": "maxChars",
+              "label": "Max Characters",
+              "description": "Maximum character limit (default: 70).",
+              "propertyEditorUiAlias": "Umb.PropertyEditorUi.Integer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SeoDescription",
+      "name": "Dainn SEO Description",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-seo-description-property-editor.js",
+      "elementName": "dcms-seo-description-property-editor",
+      "meta": {
+        "label": "Dainn SEO Description",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String",
+        "settings": {
+          "properties": [
+            {
+              "alias": "maxChars",
+              "label": "Max Characters",
+              "description": "Maximum character limit (default: 200).",
+              "propertyEditorUiAlias": "Umb.PropertyEditorUi.Integer"
+            },
+            {
+              "alias": "rows",
+              "label": "Textarea Rows",
+              "description": "Number of visible rows (default: 4).",
+              "propertyEditorUiAlias": "Umb.PropertyEditorUi.Integer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SeoHeaders",
+      "name": "Dainn SEO Headers",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-seo-headers-property-editor.js",
+      "elementName": "dcms-seo-headers-property-editor",
+      "meta": {
+        "label": "Dainn SEO Headers",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.Typography",
+      "name": "Dainn Typography",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-typography-property-editor.js",
+      "elementName": "dcms-typography-property-editor",
+      "meta": {
+        "label": "Dainn Typography",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SiteHeader",
+      "name": "Dainn Site Header",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-site-header-property-editor.js",
+      "elementName": "dcms-site-header-property-editor",
+      "meta": {
+        "label": "Dainn Site Header",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.SiteFooter",
+      "name": "Dainn Site Footer",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-site-footer-property-editor.js",
+      "elementName": "dcms-site-footer-property-editor",
+      "meta": {
+        "label": "Dainn Site Footer",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.BlogLayout",
+      "name": "Dainn Blog Layout",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-blog-layout-property-editor.js",
+      "elementName": "dcms-blog-layout-property-editor",
+      "meta": {
+        "label": "Dainn Blog Layout",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
       }
     },
     {
