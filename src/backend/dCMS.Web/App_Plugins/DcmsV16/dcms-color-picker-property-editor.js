@@ -2,15 +2,25 @@ import { LitElement, html, css } from "@umbraco-cms/backoffice/external/lit";
 import { UmbChangeEvent } from "@umbraco-cms/backoffice/event";
 import { UmbTextStyles } from "@umbraco-cms/backoffice/style";
 
-const ACP_JS = "/App_Plugins/UmbracoBlockGrid/ColorPicker/js/acolorpicker.min.js";
-const ACP_CSS = "/App_Plugins/UmbracoBlockGrid/ColorPicker/css/acolorpicker.min.css";
+const ACP_JS = "/App_Plugins/DcmsV16/color-picker/acolorpicker.min.js";
+const ACP_CSS = "/App_Plugins/DcmsV16/color-picker/acolorpicker.min.css";
 const LS_PALETTE = "dcms.colorPicker.palette.v1";
 
 const DEFAULT_PALETTE = ["#000000", "#5b5b5b", "#bcbcbc", "#f3f6f4", "#ffffff", "#2986cc", "#174a71"];
 const FALLBACK_DEFAULT = "#9f6c31ff";
+const PALETTE_CHANNEL = "dcms_color_palette";
 
 /** @type {Promise<void> | null} */
 let acpLoadPromise = null;
+/** @type {BroadcastChannel | null} */
+let _paletteChannel = null;
+
+function getPaletteChannel() {
+  if (!_paletteChannel && typeof BroadcastChannel !== "undefined") {
+    _paletteChannel = new BroadcastChannel(PALETTE_CHANNEL);
+  }
+  return _paletteChannel;
+}
 
 function loadPalette() {
   try {
@@ -26,6 +36,7 @@ function loadPalette() {
 function savePalette(/** @type {string[]} */ colors) {
   try {
     localStorage.setItem(LS_PALETTE, JSON.stringify(colors));
+    getPaletteChannel()?.postMessage({ type: "update", colors });
   } catch {
     /* ignore */
   }
@@ -87,17 +98,21 @@ export default class DcmsColorPickerPropertyEditor extends LitElement {
     super.connectedCallback();
     this.#applyDefaultIfEmpty();
     ensureAColorPicker()
-      .then(() => {
-        this._libReady = true;
-      })
-      .catch(() => {
-        this._libReady = false;
-      });
+      .then(() => { this._libReady = true; })
+      .catch(() => { this._libReady = false; });
+    this._onPaletteSync = (/** @type {MessageEvent} */ e) => {
+      if (e.data?.type === "update" && Array.isArray(e.data.colors)) {
+        this._palette = [...e.data.colors];
+        this._paletteCached = [...e.data.colors];
+      }
+    };
+    getPaletteChannel()?.addEventListener("message", this._onPaletteSync);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     document.removeEventListener("click", this._onDocClick, true);
+    getPaletteChannel()?.removeEventListener("message", this._onPaletteSync);
     this.#teardownPicker();
   }
 

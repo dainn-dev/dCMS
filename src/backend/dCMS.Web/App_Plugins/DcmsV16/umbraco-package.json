@@ -25,15 +25,38 @@
     },
     {
       "type": "propertyEditorUi",
+      "alias": "Dainn.ColorPalette",
+      "name": "Dainn Color Palette",
+      "element": "/App_Plugins/DcmsV16/dcms-color-palette-property-editor.js",
+      "elementName": "dcms-color-palette-property-editor",
+      "meta": {
+        "label": "Dainn Color Palette",
+        "icon": "icon-colorpicker",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
       "alias": "Dainn.CustomColorPicker",
       "name": "Dainn Custom Color Picker",
       "element": "/App_Plugins/DcmsV16/dcms-color-picker-property-editor.js",
       "elementName": "dcms-color-picker-property-editor",
       "meta": {
         "label": "Dainn Custom Color Picker",
-        "icon": "icon-autofill",
+        "icon": "icon-colorpicker",
         "group": "common",
-        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String",
+        "settings": {
+          "properties": [
+            {
+              "alias": "defaultColor",
+              "label": "Default Color",
+              "description": "Màu mặc định khi chưa có giá trị (hex 8 ký tự, ví dụ: #2986ccff). Để trống sẽ dùng màu hệ thống.",
+              "propertyEditorUiAlias": "Umb.PropertyEditorUi.TextBox"
+            }
+          ]
+        }
       }
     },
     {
