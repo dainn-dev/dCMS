@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
+import { MultiLangLexicalRichText } from "../components/MultiLangLexicalRichText";
 import {
   IconAdd,
   IconArrowBack,
@@ -13,15 +14,10 @@ import {
   IconEditNote,
   IconFactCheck,
   IconFolder,
-  IconFormatBold,
-  IconFormatItalic,
-  IconFormatListBulleted,
-  IconFormatUnderlined,
   IconImage,
   IconInfo,
   IconLayers,
   IconLightbulb,
-  IconLink,
   IconOpenInNew,
   IconOpenWith,
   IconRestartAlt,
@@ -1116,16 +1112,18 @@ export function EditProductPage({ mode, product, onBack }: Props) {
               <div>
                 <h3 className={sectionTitle}>Product Page Settings</h3>
                 <div className="grid grid-cols-1 gap-6">
-                  <div className="space-y-1.5">
-                    <label className={labelBase}>Title <span className="text-error">*</span></label>
-                    <input
-                      className={inputBase}
-                      type="text"
-                      defaultValue={isAdd ? "" : product?.name}
-                      placeholder="Title displayed on the product page"
-                    />
-                    <p className="text-[10px] text-on-surface-variant">This is the title customers use to identify the product on the storefront.</p>
-                  </div>
+                  <MultiLangInput
+                    label="Title"
+                    requiredMark
+                    defaultValues={{ en: isAdd ? "" : (product?.name ?? "") }}
+                    placeholders={{
+                      en: "Title displayed on the product page",
+                      vn: "Tiêu đề hiển thị trên trang sản phẩm",
+                      zh: "产品页面上显示的商品标题",
+                      ja: "商品ページに表示されるタイトル",
+                    }}
+                    hint="This is the title customers use to identify the product on the storefront."
+                  />
 
                   <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                     <SearchablePicker
@@ -1156,43 +1154,16 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                   </div>
 
                   {/* Overview */}
-                  <div className="space-y-1.5">
-                    <label className={labelBase}>Overview</label>
-                    <div className="overflow-hidden rounded-md border border-outline-variant/20 bg-surface">
-                      <div className="flex items-center gap-1 border-b border-outline-variant/20 bg-surface-container-low p-2">
-                        {[
-                          { Icon: IconFormatBold,          label: "Bold"      },
-                          { Icon: IconFormatItalic,        label: "Italic"    },
-                          { Icon: IconFormatUnderlined,    label: "Underline" },
-                        ].map(({ Icon, label }) => (
-                          <button key={label} type="button" aria-label={label} className="rounded p-1.5 hover:bg-surface-container-high">
-                            <Icon className="h-4 w-4" />
-                          </button>
-                        ))}
-                        <div className="mx-1 h-4 w-px bg-outline-variant/40" />
-                        {[
-                          { Icon: IconFormatListBulleted, label: "List"  },
-                          { Icon: IconLink,               label: "Link"  },
-                          { Icon: IconImage,              label: "Image" },
-                        ].map(({ Icon, label }) => (
-                          <button key={label} type="button" aria-label={label} className="rounded p-1.5 hover:bg-surface-container-high">
-                            <Icon className="h-4 w-4" />
-                          </button>
-                        ))}
-                      </div>
-                      <MultiLangTextarea
-                        label=""
-                        rows={6}
-                        placeholders={{
-                          en: "Enter product overview and description...",
-                          vn: "Nhập mô tả sản phẩm...",
-                          zh: "输入产品概述和描述...",
-                          ja: "製品の概要と説明を入力してください...",
-                        }}
-                        className="rounded-none border-0 focus:ring-0 min-h-[140px]"
-                      />
-                    </div>
-                  </div>
+                  <MultiLangLexicalRichText
+                    label="Overview"
+                    defaultValues={{ en: isAdd ? "" : "" }}
+                    placeholders={{
+                      en: "Enter product overview and description...",
+                      vn: "Nhập mô tả sản phẩm...",
+                      zh: "输入产品概述和描述...",
+                      ja: "製品の概要と説明を入力してください...",
+                    }}
+                  />
                 </div>
               </div>
 

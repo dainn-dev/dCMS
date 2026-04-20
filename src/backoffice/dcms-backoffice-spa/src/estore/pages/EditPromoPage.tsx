@@ -10,6 +10,7 @@ import {
   IconWarning,
 } from "../../orders/icons";
 import type { PromoListRow } from "../promotions-columns";
+import { MultiLangTextarea } from "../components/MultiLangField";
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
 const sectionCard = "rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm";
@@ -193,7 +194,6 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
   const [redemptionLimit, setRedemptionLimit] = useState("");
 
   // ── Others ────────────────────────────────────────────────────────────────
-  const [description, setDescription] = useState("");
   const [showPopup, setShowPopup] = useState(false);
 
   // ── Delete confirmation ───────────────────────────────────────────────────
@@ -918,16 +918,18 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
         <section className={sectionCard}>
           <h3 className={sectionTitle}>Others</h3>
           <div className="space-y-5">
-            {/* Description */}
-            <div>
-              <label className={labelBase}>Promo Description</label>
-              <textarea
-                className={`${inputBase} min-h-[100px] resize-y`}
-                placeholder="Describe the purpose of the promotion and how it is used…"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
+            <MultiLangTextarea
+              label="Promo Description"
+              rows={5}
+              defaultValues={{ en: "" }}
+              placeholders={{
+                en: "Describe the purpose of the promotion and how it is used…",
+                vn: "Mô tả mục đích khuyến mãi và cách sử dụng…",
+                zh: "描述促销目的和使用方式…",
+                ja: "プロモーションの目的と利用方法を説明してください…",
+              }}
+              className="min-h-[100px]"
+            />
 
             {/* Show as popup */}
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/20 bg-surface-container-low p-4 hover:border-primary/30 transition-colors select-none">

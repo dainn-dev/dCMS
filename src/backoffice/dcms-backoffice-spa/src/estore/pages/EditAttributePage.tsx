@@ -12,6 +12,7 @@ import {
   IconSearch,
 } from "../../orders/icons";
 import type { AttributeListRow } from "../attributes-columns";
+import { MultiLangInput } from "../components/MultiLangField";
 import { exportSingleAttributeValuesXlsx } from "../exportAttributeTemplates";
 
 const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
@@ -41,6 +42,17 @@ const MOCK_CATEGORIES = [
 const MOCK_BRANDS = [
   "Cronos Ltd.", "SoundWave Co.", "Apex Footwear", "NovaCam", "FurniCraft",
 ];
+
+/** Prefer `en`, then first non-empty locale (slug / export / toast). */
+function primaryLocaleName(values: Record<string, string>) {
+  const en = (values.en ?? "").trim();
+  if (en) return en;
+  for (const v of Object.values(values)) {
+    const t = (v ?? "").trim();
+    if (t) return t;
+  }
+  return "";
+}
 
 function buildInitialValues(row?: AttributeListRow): AttrValue[] {
   if (!row) return [];
@@ -184,7 +196,9 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
 
   // ── General state ─────────────────────────────────────────────────────────
   const [tab, setTab] = useState<"general" | "advanced">("general");
-  const [name, setName] = useState(attribute?.name ?? "");
+  const [nameLocales, setNameLocales] = useState<Record<string, string>>(() => ({
+    en: attribute?.name ?? "",
+  }));
   const [code, setCode] = useState(attribute?.code ?? "");
   const [searchFilterOnly, setSearchFilterOnly] = useState(attribute?.required ?? false);
   const [valueType, setValueType] = useState<ValueType>(
@@ -235,14 +249,15 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
   }, [toast]);
 
   // ── Auto-slug code from name ──────────────────────────────────────────────
-  function handleNameBlur() {
-    if (!code && name) {
-      setCode(name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
+  function handleNameBlur(values: Record<string, string>) {
+    const n = primaryLocaleName(values);
+    if (!code && n) {
+      setCode(n.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
     }
   }
 
   async function exportValues() {
-    const attrName = name || attribute?.name || "attribute";
+    const attrName = primaryLocaleName(nameLocales) || attribute?.name || "attribute";
     const attrCode = code || attribute?.code || "attribute";
     await exportSingleAttributeValuesXlsx(
       attrName,
@@ -254,7 +269,12 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
   // ── Save ──────────────────────────────────────────────────────────────────
   function handleSave() {
     setActionsOpen(false);
-    setToast(isAdd ? `Attribute "${name}" created successfully.` : `Attribute "${name}" updated successfully.`);
+    const labelName = primaryLocaleName(nameLocales);
+    setToast(
+      isAdd
+        ? `Attribute "${labelName}" created successfully.`
+        : `Attribute "${labelName}" updated successfully.`
+    );
     setTimeout(() => onBack(), 1800);
   }
 
@@ -520,20 +540,20 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
               <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-on-surface">Attribute Information</h3>
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 {/* Name */}
-                <div>
-                  <label className={labelBase}>Name <span className="text-error">*</span></label>
-                  <input
-                    type="text"
-                    className={inputBase}
-                    placeholder="e.g. Primary Color"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    onBlur={handleNameBlur}
-                  />
-                  <p className="mt-1 text-[10px] text-on-surface-variant">
-                    Displayed in the eStore.
-                  </p>
-                </div>
+                <MultiLangInput
+                  label="Name"
+                  requiredMark
+                  defaultValues={nameLocales}
+                  onValuesChange={setNameLocales}
+                  onBlur={handleNameBlur}
+                  placeholders={{
+                    en: "e.g. Primary Color",
+                    vn: "vd. Màu chính",
+                    zh: "例如：主色",
+                    ja: "例：プライマリカラー",
+                  }}
+                  hint="Displayed in the eStore."
+                />
 
                 {/* Code */}
                 <div>

@@ -14,10 +14,22 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ckeditor/ckeditor5-react": "^11.1.2",
+    "@lexical/html": "^0.43.0",
+    "@lexical/link": "^0.43.0",
+    "@lexical/list": "^0.43.0",
+    "@lexical/react": "^0.43.0",
+    "@lexical/rich-text": "^0.43.0",
     "@tanstack/react-table": "^8.21.3",
+    "ckeditor5": "^48.0.0",
     "exceljs": "^4.4.0",
+    "froala-editor": "^5.1.0",
+    "lexical": "^0.43.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-froala-wysiwyg": "^5.1.0",
+    "suneditor": "^2.47.8",
+    "suneditor-react": "^3.6.1"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",

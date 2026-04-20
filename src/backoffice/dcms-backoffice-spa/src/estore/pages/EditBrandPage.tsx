@@ -1,5 +1,6 @@
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
+import { MultiLangLexicalRichText } from "../components/MultiLangLexicalRichText";
 import {
   IconArrowBack,
   IconCalendarToday,
@@ -8,16 +9,11 @@ import {
   IconClose,
   IconDelete,
   IconFactCheck,
-  IconFormatBold,
-  IconFormatItalic,
-  IconFormatListBulleted,
-  IconFormatUnderlined,
   IconGroup,
   IconHistory,
   IconImage,
   IconInfo,
   IconLightbulb,
-  IconLink,
   IconLocationOn,
   IconMap,
   IconMoreHoriz,
@@ -628,47 +624,22 @@ export function EditBrandPage({
                   <h3 className={sectionTitle}>Marketing Content</h3>
                 </div>
 
-                {/* Description */}
+                {/* Description (Lexical rich text, HTML per locale) */}
                 <div className="col-span-12 md:col-span-8 space-y-1.5">
-                  <div className="border border-outline-variant/20 rounded-md overflow-hidden bg-surface">
-                    <div className="flex items-center gap-1 p-2 border-b border-outline-variant/20 bg-surface-container-low">
-                      {[
-                        { Icon: IconFormatBold,          label: "Bold"      },
-                        { Icon: IconFormatItalic,         label: "Italic"    },
-                        { Icon: IconFormatUnderlined,     label: "Underline" },
-                      ].map(({ Icon, label }) => (
-                        <button key={label} type="button" className="p-1.5 hover:bg-surface-container-high rounded" aria-label={label} onClick={() => console.info("[EditBrand] Toolbar", label)}>
-                          <Icon className="h-4 w-4" />
-                        </button>
-                      ))}
-                      <div className="w-px h-4 bg-outline-variant/40 mx-1" />
-                      {[
-                        { Icon: IconFormatListBulleted, label: "List"  },
-                        { Icon: IconLink,               label: "Link"  },
-                        { Icon: IconImage,              label: "Image" },
-                      ].map(({ Icon, label }) => (
-                        <button key={label} type="button" className="p-1.5 hover:bg-surface-container-high rounded" aria-label={label} onClick={() => console.info("[EditBrand] Toolbar", label)}>
-                          <Icon className="h-4 w-4" />
-                        </button>
-                      ))}
-                    </div>
-                    <MultiLangTextarea
-                      label="Description"
-                      rows={6}
-                      defaultValues={{
-                        en: isAdd
-                          ? ""
-                          : "Velvet Aura Luxury represents the pinnacle of olfactory craftsmanship. Established in 2024, our mission is to curate sensory experiences that transcend the ordinary.",
-                      }}
-                      placeholders={{
-                        en: "Enter brand description...",
-                        vn: "Nhập mô tả thương hiệu...",
-                        zh: "输入品牌描述...",
-                        ja: "ブランドの説明を入力してください...",
-                      }}
-                      className="rounded-none border-0 focus:ring-0 min-h-[160px]"
-                    />
-                  </div>
+                  <MultiLangLexicalRichText
+                    label="Description"
+                    defaultValues={{
+                      en: isAdd
+                        ? ""
+                        : "<p>Velvet Aura Luxury represents the pinnacle of olfactory craftsmanship. Established in 2024, our mission is to curate sensory experiences that transcend the ordinary.</p>",
+                    }}
+                    placeholders={{
+                      en: "Enter brand description...",
+                      vn: "Nhập mô tả thương hiệu...",
+                      zh: "输入品牌描述...",
+                      ja: "ブランドの説明を入力してください...",
+                    }}
+                  />
                 </div>
 
                 {/* Brand Image + Mobile Image */}

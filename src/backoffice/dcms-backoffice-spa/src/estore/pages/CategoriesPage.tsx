@@ -9,6 +9,7 @@ import {
 } from "react";
 import { exportCategoriesToXlsx } from "../exportCategoriesXlsx";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
+import { MultiLangLexicalRichText } from "../components/MultiLangLexicalRichText";
 import {
   IconAdd,
   IconCalendarToday,
@@ -20,15 +21,9 @@ import {
   IconDelete,
   IconDownload,
   IconEdit,
-  IconFormatBold,
-  IconFormatItalic,
-  IconFormatListBulleted,
-  IconFormatListNumbered,
-  IconFormatUnderlined,
   IconFolder,
   IconFolderOpen,
   IconInfo,
-  IconLink,
   IconOpenInNew,
   IconSave,
   IconSearch,
@@ -1303,43 +1298,16 @@ export function CategoriesPage() {
                       Enter additional details such as a category overview and description shown on
                       the category listing page.
                     </p>
-                    <div className="overflow-hidden rounded-lg border border-outline-variant/30">
-                      <div className="flex flex-wrap items-center gap-1 border-b border-outline-variant/20 bg-surface-container px-3 py-2">
-                        {[
-                          <IconFormatBold className="h-4 w-4" />,
-                          <IconFormatItalic className="h-4 w-4" />,
-                          <IconFormatUnderlined className="h-4 w-4" />,
-                        ].map((icon, i) => (
-                          <button key={i} type="button" className="rounded p-1 hover:bg-surface-container-lowest">
-                            {icon}
-                          </button>
-                        ))}
-                        <span className="mx-1 h-4 w-px bg-outline-variant/30" aria-hidden />
-                        {[
-                          <IconFormatListBulleted className="h-4 w-4" />,
-                          <IconFormatListNumbered className="h-4 w-4" />,
-                        ].map((icon, i) => (
-                          <button key={i} type="button" className="rounded p-1 hover:bg-surface-container-lowest">
-                            {icon}
-                          </button>
-                        ))}
-                        <span className="mx-1 h-4 w-px bg-outline-variant/30" aria-hidden />
-                        <button type="button" className="rounded p-1 hover:bg-surface-container-lowest">
-                          <IconLink className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <MultiLangTextarea
-                        label=""
-                        rows={5}
-                        placeholders={{
-                          en: "Enter category overview and description...",
-                          vn: "Nhập mô tả danh mục...",
-                          zh: "输入类别概述和描述...",
-                          ja: "カテゴリの概要と説明を入力してください...",
-                        }}
-                        className="min-h-[140px] rounded-none border-0 focus:ring-0"
-                      />
-                    </div>
+                    <MultiLangLexicalRichText
+                      label=""
+                      defaultValues={{ en: isAddMode ? "" : "" }}
+                      placeholders={{
+                        en: "Enter category overview and description...",
+                        vn: "Nhập mô tả danh mục...",
+                        zh: "输入类别概述和描述...",
+                        ja: "カテゴリの概要と説明を入力してください...",
+                      }}
+                    />
                   </div>
                 </div>
               )}
