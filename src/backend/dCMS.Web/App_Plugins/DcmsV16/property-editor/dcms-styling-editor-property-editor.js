@@ -253,7 +253,12 @@ export default class DcmsStylingEditorPropertyEditor extends LitElement {
 
   #commit() {
     const next = JSON.stringify(this._items);
-    if (next !== this.value) { this.value = next; this.dispatchEvent(new UmbChangeEvent()); }
+    if (next !== this.value) {
+      this.value = next;
+      this.dispatchEvent(new UmbChangeEvent());
+      try { localStorage.setItem("dcms.styling.v1", next); } catch { }
+      try { new BroadcastChannel("dcms_styling_v1").postMessage({ type: "update", schemes: this._items }); } catch { }
+    }
   }
 
   // ── Styles ───────────────────────────────────────────────────────────────

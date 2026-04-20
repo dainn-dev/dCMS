@@ -219,6 +219,32 @@
     },
     {
       "type": "propertyEditorUi",
+      "alias": "Dainn.DesignStyling",
+      "name": "Dainn Design Styling",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-design-styling-property-editor.js",
+      "elementName": "dcms-design-styling-property-editor",
+      "meta": {
+        "label": "Dainn Design Styling",
+        "icon": "icon-autofill",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
+      "alias": "Dainn.DesignBackgroundBlock",
+      "name": "Dainn Design Background Block",
+      "element": "/App_Plugins/DcmsV16/property-editor/dcms-design-background-block-property-editor.js",
+      "elementName": "dcms-design-background-block-property-editor",
+      "meta": {
+        "label": "Dainn Design Background Block",
+        "icon": "icon-colorpicker",
+        "group": "common",
+        "propertyEditorSchemaAlias": "Umbraco.Plain.String"
+      }
+    },
+    {
+      "type": "propertyEditorUi",
       "alias": "Dainn.SeoContent",
       "name": "Dainn SEO Content",
       "element": "/App_Plugins/DcmsV16/property-editor/dcms-seo-content-property-editor.js",
@@ -427,6 +453,275 @@
         "group": "common",
         "propertyEditorSchemaAlias": "Umbraco.Plain.String"
       }
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.HeadlineBlock",
+      "name": "dCMS Headline Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-headline-block-view.js",
+      "forContentTypeAlias": "headlineBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.RichTextBlock",
+      "name": "dCMS Rich Text Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-rich-text-block-view.js",
+      "forContentTypeAlias": "richTextBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ImageBlock",
+      "name": "dCMS Image Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-image-block-view.js",
+      "forContentTypeAlias": "imageBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.EmbedCode",
+      "name": "dCMS Embed Code Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-embed-code-block-view.js",
+      "forContentTypeAlias": "embedCode"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.FeatureBlock",
+      "name": "dCMS Feature Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-feature-block-view.js",
+      "forContentTypeAlias": "featureBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.FeaturesListBlock",
+      "name": "dCMS Features List Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-features-list-block-view.js",
+      "forContentTypeAlias": "featuresListBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.FeaturesWithDescriptionsBlock",
+      "name": "dCMS Features With Descriptions Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-features-with-descriptions-block-view.js",
+      "forContentTypeAlias": "featuresWithDescriptionsBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.HeaderBlock",
+      "name": "dCMS Header Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-header-block-view.js",
+      "forContentTypeAlias": "headerBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.FooterBlock",
+      "name": "dCMS Footer Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-footer-block-view.js",
+      "forContentTypeAlias": "footerBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.HeroBlock",
+      "name": "dCMS Hero Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-hero-block-view.js",
+      "forContentTypeAlias": "heroBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.Banner3Block",
+      "name": "dCMS Banner 3 Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-banner3-block-view.js",
+      "forContentTypeAlias": "banner3Block"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.LayoutSections",
+      "name": "dCMS Layout Sections Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-layout-sections-block-view.js",
+      "forContentTypeAlias": "layoutSections"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.AccordionBlock",
+      "name": "dCMS Accordion Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-accordion-block-view.js",
+      "forContentTypeAlias": "accordionBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.CarouselBlock",
+      "name": "dCMS Carousel Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-carousel-block-view.js",
+      "forContentTypeAlias": "carouselBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.CallToActionBlock",
+      "name": "dCMS Call To Action Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-call-to-action-block-view.js",
+      "forContentTypeAlias": "callToActionBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ButtonsGroupBlock",
+      "name": "dCMS Buttons Group Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-buttons-group-block-view.js",
+      "forContentTypeAlias": "buttonsGroupBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.IconButtonsBlock",
+      "name": "dCMS Icon Buttons Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-icon-buttons-block-view.js",
+      "forContentTypeAlias": "iconButtonsBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.CardBlock",
+      "name": "dCMS Card Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-card-block-view.js",
+      "forContentTypeAlias": "cardBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.CardWithNumber",
+      "name": "dCMS Card With Number Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-card-with-number-block-view.js",
+      "forContentTypeAlias": "cardWithNumber"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.TeamMemberBlock",
+      "name": "dCMS Team Member Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-team-member-block-view.js",
+      "forContentTypeAlias": "teamMemberBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.TeamMembersBlock",
+      "name": "dCMS Team Members Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-team-members-block-view.js",
+      "forContentTypeAlias": "teamMembersBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.PricingCardBlock",
+      "name": "dCMS Pricing Card Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-pricing-card-block-view.js",
+      "forContentTypeAlias": "pricingCardBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ServiceBlock",
+      "name": "dCMS Service Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-service-block-view.js",
+      "forContentTypeAlias": "serviceBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ClientReviewBlock",
+      "name": "dCMS Client Review Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-client-review-block-view.js",
+      "forContentTypeAlias": "clientReviewBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ClientReview2Block",
+      "name": "dCMS Client Review 2 Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-client-review2-block-view.js",
+      "forContentTypeAlias": "clientReview2Block"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ClientReview3Block",
+      "name": "dCMS Client Review 3 Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-client-review3-block-view.js",
+      "forContentTypeAlias": "clientReview3Block"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ClientsAndPartnersBlock",
+      "name": "dCMS Clients And Partners Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-clients-and-partners-block-view.js",
+      "forContentTypeAlias": "clientsAndPartnersBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.CaseStudy2CardBlock",
+      "name": "dCMS Case Study 2 Card Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-case-study2-card-block-view.js",
+      "forContentTypeAlias": "caseStudy2CardBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.BreadcrumbBlock",
+      "name": "dCMS Breadcrumb Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-breadcrumb-block-view.js",
+      "forContentTypeAlias": "breadcrumbBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.ContactUsFormBlock",
+      "name": "dCMS Contact Us Form Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-contact-us-form-block-view.js",
+      "forContentTypeAlias": "contactUsFormBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.RoadmapBlock",
+      "name": "dCMS Roadmap Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-roadmap-block-view.js",
+      "forContentTypeAlias": "roadmapBlock"
+    },
+    {
+      "type": "blockEditorCustomView",
+      "alias": "Dainn.BlockView.DesignBaselineColors",
+      "name": "dCMS Design Baseline Colors Block View",
+      "element": "/App_Plugins/DcmsV16/block-views/dcms-design-baseline-colors-block-view.js",
+      "forContentTypeAlias": "designBaselineColors"
+    },
+    {
+      "type": "collectionView",
+      "alias": "Dainn.CollectionView.DesignFolder",
+      "name": "dCMS Design Folder Collection View",
+      "element": "/App_Plugins/DcmsV16/design-folder/dcms-design-folder-collection-view.js",
+      "elementName": "dcms-design-folder-collection-view",
+      "meta": {
+        "label": "Design Grid",
+        "icon": "icon-grid",
+        "pathName": "design-folder-grid"
+      },
+      "conditions": [
+        {
+          "alias": "Umb.Condition.CollectionAlias",
+          "match": "Umb.Collection.Document"
+        },
+        {
+          "alias": "Umb.Condition.ContentTypeAlias",
+          "match": "designFolder"
+        }
+      ]
+    },
+    {
+      "type": "workspaceView",
+      "alias": "Dainn.WorkspaceView.FormsData",
+      "name": "Forms Data",
+      "element": "/App_Plugins/DcmsV16/forms-data/dcms-forms-data-content-app.js",
+      "elementName": "dcms-forms-data-content-app",
+      "weight": 200,
+      "meta": {
+        "label": "Forms Data",
+        "pathname": "forms-data",
+        "icon": "icon-inbox-full"
+      },
+      "conditions": [
+        {
+          "alias": "Umb.Condition.WorkspaceAlias",
+          "match": "Umb.Workspace.Document"
+        },
+        {
+          "alias": "Umb.Condition.ContentTypeAlias",
+          "match": "formsData"
+        }
+      ]
     },
     {
       "type": "dashboard",
