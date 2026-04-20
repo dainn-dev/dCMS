@@ -3,15 +3,15 @@ import { useLanguages } from "../LanguageContext";
 import type { UmbracoLanguage } from "../useUmbracoLanguages";
 
 // ── Style tokens ──────────────────────────────────────────────────────────────
-const labelBase =
+export const labelBase =
   "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider";
-const inputBase =
+export const inputBase =
   "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-2 px-3 text-xs focus:ring-1 focus:ring-primary outline-none";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** "en-US" → "en", "zh-CN" → "zh", "vi-VN" → "vi" */
-function langKey(isoCode: string): string {
+export function langKey(isoCode: string): string {
   return isoCode.split("-")[0].toLowerCase();
 }
 
@@ -22,7 +22,7 @@ function langPill(isoCode: string): string {
 
 // ── Internal: pill switcher anchored to top-right of sibling input/textarea ──
 
-function LangSwitcher({
+export function LangSwitcher({
   languages,
   activeIso,
   values,
@@ -65,7 +65,10 @@ function LangSwitcher({
 
 // ── Shared hook: loads languages once and exposes active iso + values state ───
 
-function useLangField(defaultValues?: Record<string, string>) {
+export function useLangField(
+  defaultValues?: Record<string, string>,
+  onValuesChange?: (values: Record<string, string>) => void
+) {
   const { languages, loading } = useLanguages();
 
   // While loading, treat as empty so switcher stays hidden
@@ -86,7 +89,11 @@ function useLangField(defaultValues?: Record<string, string>) {
   );
 
   const setValue = (isoCode: string, text: string) => {
-    setValues((prev) => ({ ...prev, [langKey(isoCode)]: text }));
+    setValues((prev) => {
+      const next = { ...prev, [langKey(isoCode)]: text };
+      onValuesChange?.(next);
+      return next;
+    });
   };
 
   const currentValue = values[langKey(resolvedIso)] ?? "";
@@ -98,19 +105,28 @@ function useLangField(defaultValues?: Record<string, string>) {
 
 export function MultiLangInput({
   label,
+  requiredMark,
   defaultValues,
+  onValuesChange,
+  onBlur,
   placeholders,
   hint,
   inputClassName,
 }: {
   label: string;
+  /** Renders a red asterisk after the label (e.g. required fields). */
+  requiredMark?: boolean;
   defaultValues?: Record<string, string>;
+  /** Called whenever any locale value changes (e.g. mirror state for save/export). */
+  onValuesChange?: (values: Record<string, string>) => void;
+  /** Called when the active locale input loses focus; receives all locale values. */
+  onBlur?: (values: Record<string, string>) => void;
   placeholders?: Record<string, string>;
   hint?: string;
   inputClassName?: string;
 }) {
   const { languages, resolvedIso, setActiveIso, values, currentValue, setValue } =
-    useLangField(defaultValues);
+    useLangField(defaultValues, onValuesChange);
 
   const placeholder =
     placeholders?.[langKey(resolvedIso)] ??
@@ -119,7 +135,17 @@ export function MultiLangInput({
 
   return (
     <div className="space-y-1.5">
-      {label && <label className={labelBase}>{label}</label>}
+      {label ? (
+        <label className={labelBase}>
+          {label}
+          {requiredMark ? (
+            <>
+              {" "}
+              <span className="text-error">*</span>
+            </>
+          ) : null}
+        </label>
+      ) : null}
       <div className="relative">
         <LangSwitcher
           languages={languages}
@@ -132,6 +158,9 @@ export function MultiLangInput({
           className={`${inputBase} ${languages.length > 0 ? "rounded-tr-none" : ""} ${inputClassName ?? ""}`}
           value={currentValue}
           onChange={(e) => setValue(resolvedIso, e.target.value)}
+          onBlur={(e) =>
+            onBlur?.({ ...values, [langKey(resolvedIso)]: e.currentTarget.value })
+          }
           placeholder={placeholder}
         />
       </div>

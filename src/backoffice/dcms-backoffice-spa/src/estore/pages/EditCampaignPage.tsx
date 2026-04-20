@@ -12,6 +12,7 @@ import {
   type CampaignListRow,
   type CampaignWorkflowState,
 } from "../campaigns-columns";
+import { MultiLangInput } from "../components/MultiLangField";
 import { CampaignActionButtons } from "./campaign-sections/CampaignActionButtons";
 import {
   buildSeedChangeHistory,
@@ -46,6 +47,17 @@ const MOCK_PID2 = ["Line 01", "Line 02", "Limited", "Standard"];
 const MOCK_PRODUCTS = ["Vantage Series 5 Watch (WT-550-B)", "Echo-Noise Headphones (AU-102-S)", "SwiftRun Pro Z (FT-99-R)"];
 const MOCK_MEMBERSHIP_TYPES = ["Standard", "Premium", "Corporate"];
 const MOCK_MEMBERSHIP_TIERS = ["Bronze", "Silver", "Gold", "Platinum"];
+
+/** Prefer `en`, then first non-empty locale (labels / history header). */
+function primaryLocaleName(values: Record<string, string>) {
+  const en = (values.en ?? "").trim();
+  if (en) return en;
+  for (const v of Object.values(values)) {
+    const t = (v ?? "").trim();
+    if (t) return t;
+  }
+  return "";
+}
 
 const CAMPAIGN_KIND_LABELS: Record<CampaignKind, string> = {
   "pwp-item": "Purchase with Purchase - Item",
@@ -190,7 +202,9 @@ export function EditCampaignPage({ mode, campaign, onBack }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<CampaignChangeHistoryEntry[]>([]);
   const [code, setCode] = useState(campaign?.code ?? "");
-  const [name, setName] = useState(campaign?.name ?? "");
+  const [nameLocales, setNameLocales] = useState<Record<string, string>>(() => ({
+    en: campaign?.name ?? "",
+  }));
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [activeDays, setActiveDays] = useState<typeof DAYS[number][]>([]);
@@ -433,12 +447,19 @@ export function EditCampaignPage({ mode, campaign, onBack }: Props) {
               </label>
               <input type="text" className={inputBase} placeholder="e.g. PWP_SPRING26" value={code} onChange={(e) => setCode(e.target.value)} />
             </div>
-            <div>
-              <label className={labelBase}>
-                Name <span className="text-error">*</span>
-              </label>
-              <input type="text" className={inputBase} placeholder="Campaign display name" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
+            <MultiLangInput
+              label="Name"
+              requiredMark
+              defaultValues={nameLocales}
+              onValuesChange={setNameLocales}
+              placeholders={{
+                en: "Campaign display name",
+                vn: "Tên hiển thị chiến dịch",
+                zh: "活动显示名称",
+                ja: "キャンペーン表示名",
+              }}
+              hint="Shown to customers on the storefront where this campaign applies."
+            />
             <div>
               <label className={labelBase}>
                 Start date <span className="text-error">*</span>
@@ -705,7 +726,7 @@ export function EditCampaignPage({ mode, campaign, onBack }: Props) {
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
         campaignCode={(campaign?.code ?? code) || "—"}
-        campaignName={(campaign?.name ?? name) || undefined}
+        campaignName={primaryLocaleName(nameLocales) || campaign?.name || undefined}
         entries={historyEntries}
       />
 
