@@ -15,4 +15,8 @@
     <ProjectReference Include="..\dCMS.Inventory.Core\dCMS.Inventory.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.*" />
+  </ItemGroup>
+
 </Project>

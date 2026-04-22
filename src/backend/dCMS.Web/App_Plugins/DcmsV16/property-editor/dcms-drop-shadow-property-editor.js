@@ -4,7 +4,7 @@ import { UmbTextStyles } from "@umbraco-cms/backoffice/style";
 
 const ACP_JS  = "/App_Plugins/DcmsV16/color-picker/acolorpicker.min.js";
 const ACP_CSS = "/App_Plugins/DcmsV16/color-picker/acolorpicker.min.css";
-const IMG     = "/App_Plugins/UmbracoBlockGrid/GlobalDesign/img/";
+const IMG     = "/App_Plugins/DcmsV16/img/";
 
 const SECTIONS = [
   {

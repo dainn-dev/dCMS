@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { eStoreHashForPage, parseEStorePageFromHash } from "./estoreHashRouting";
 import { EStoreLayout, type EStorePageId, type EStoreSidebarScope } from "./layout/EStoreLayout";
 import { LanguageProvider } from "./LanguageContext";
@@ -8,6 +8,7 @@ import { CategoriesPage } from "./pages/CategoriesPage";
 import { EditBrandPage } from "./pages/EditBrandPage";
 import { EditProductPage } from "./pages/EditProductPage";
 import { ProductImageImportPage } from "./pages/ProductImageImportPage";
+import { createBrand, deleteBrand, fetchBrands, updateBrand } from "./api/brandsApi";
 import { ProductImportPage } from "./pages/ProductImportPage";
 import { ProductInventoryImportPage } from "./pages/ProductInventoryImportPage";
 import { CategoryAssignmentPage } from "./pages/CategoryAssignmentPage";
@@ -306,9 +307,15 @@ function initialPageForScope(sidebarScope: EStoreSidebarScope): EStorePageId {
 export function EStoreApp({
   languages,
   sidebarScope = "estore",
+  tenantId,
+  authToken,
 }: {
   languages?: import("./useUmbracoLanguages").UmbracoLanguage[];
   sidebarScope?: EStoreSidebarScope;
+  /** Umbraco tenant ID for Catalog API calls. Falls back to demo data when absent. */
+  tenantId?: string;
+  /** Bearer token from Umbraco auth context. */
+  authToken?: string;
 }) {
   const [page, setPage] = useState<EStorePageId>(() => initialPageForScope(sidebarScope));
   const [brandForm, setBrandForm] = useState<BrandFormState>({ mode: "idle" });
@@ -335,7 +342,27 @@ export function EStoreApp({
     { alias: "guest", name: "Guest", description: "", isTenantRole: false, memberCount: 3 },
   ]);
 
+  // ── Brands: API-backed when tenantId provided, fallback to DEFAULT_BRANDS ──
   const [brands, setBrands] = useState<BrandListRow[]>(DEFAULT_BRANDS);
+  const [brandsLoading, setBrandsLoading] = useState(false);
+  const [brandsError, setBrandsError] = useState<string | null>(null);
+  const brandsLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    if (brandsLoadedRef.current) return;
+    brandsLoadedRef.current = true;
+    setBrandsLoading(true);
+    fetchBrands(tenantId, {}, authToken)
+      .then(({ rows }) => {
+        setBrands(rows);
+        setBrandsError(null);
+      })
+      .catch((err: unknown) => {
+        setBrandsError(err instanceof Error ? err.message : "Failed to load brands");
+      })
+      .finally(() => setBrandsLoading(false));
+  }, [tenantId, authToken]);
 
   const [brandAdditionalFields, setBrandAdditionalFields] = useState<BrandAdditionalField[]>(
     () =>
@@ -576,7 +603,33 @@ export function EStoreApp({
             active={brandForm.mode === "edit" ? brandForm.data.active : undefined}
             logoSrc={brandForm.mode === "edit" ? brandForm.data.imageSrc : undefined}
             logoAlt={brandForm.mode === "edit" ? brandForm.data.imageAlt : undefined}
+            additionalFields={brandAdditionalFields}
             onBack={() => setBrandForm({ mode: "idle" })}
+            onSave={async (row, additionalInfo) => {
+              if (tenantId) {
+                try {
+                  const saved = brandForm.mode === "add"
+                    ? await createBrand(tenantId, row.code, { name: row.name, active: row.active, imageUrl: row.imageSrc, imageAlt: row.imageAlt, additionalInfo }, authToken)
+                    : await updateBrand(tenantId, row.code, { name: row.name, active: row.active, imageUrl: row.imageSrc, imageAlt: row.imageAlt, additionalInfo }, authToken);
+                  setBrands((prev) => {
+                    const exists = prev.some((b) => b.code === saved.code);
+                    return exists ? prev.map((b) => (b.code === saved.code ? saved : b)) : [saved, ...prev];
+                  });
+                } catch {
+                  // API error — still update local state optimistically so UI isn't broken
+                  setBrands((prev) => {
+                    const exists = prev.some((b) => b.code === row.code);
+                    return exists ? prev.map((b) => (b.code === row.code ? row : b)) : [row, ...prev];
+                  });
+                }
+              } else {
+                // No tenantId — in-memory only (dev / demo mode), additionalInfo not persisted
+                setBrands((prev) => {
+                  const exists = prev.some((b) => b.code === row.code);
+                  return exists ? prev.map((b) => (b.code === row.code ? row : b)) : [row, ...prev];
+                });
+              }
+            }}
           />
         ) : (
           <BrandsPage
@@ -594,7 +647,22 @@ export function EStoreApp({
               })
             }
             rows={brands}
-            onRowsChange={setBrands}
+            loading={brandsLoading}
+            loadError={brandsError}
+            onRowsChange={async (next) => {
+              // Called on delete — determine which row was removed
+              if (tenantId) {
+                const removed = brands.find((b) => !next.some((n) => n.code === b.code));
+                if (removed) {
+                  try {
+                    await deleteBrand(tenantId, removed.code, authToken);
+                  } catch {
+                    // ignore — row removed locally regardless
+                  }
+                }
+              }
+              setBrands(next);
+            }}
           />
         ))}
       {page === "brand-configuration" && (
@@ -604,7 +672,7 @@ export function EStoreApp({
           onNavigateToBrands={() => handlePageChange("brands")}
         />
       )}
-      {page === "categories" && <CategoriesPage />}
+      {page === "categories" && <CategoriesPage tenantId={tenantId} authToken={authToken} />}
       {page === "product-best-sellers" && (
         <BestSellerSettingsPage
           rows={DEMO_PRODUCT_ROWS}
@@ -663,12 +731,16 @@ export function EStoreApp({
             mode={attributeForm.mode === "add" ? "add" : "edit"}
             attribute={attributeForm.mode === "edit" ? attributeForm.data : undefined}
             onBack={() => setAttributeForm({ mode: "idle" })}
+            tenantId={tenantId}
+            authToken={authToken}
           />
         ) : (
           <AttributesPage
             onCreateAttribute={() => setAttributeForm({ mode: "add" })}
             onEditAttribute={(row) => setAttributeForm({ mode: "edit", data: row })}
             onImportValues={() => setAttributeForm({ mode: "attr-import" })}
+            tenantId={tenantId}
+            authToken={authToken}
           />
         ))}
       {page === "promo-codes" &&

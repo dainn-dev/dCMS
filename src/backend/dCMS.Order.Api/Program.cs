@@ -3,6 +3,7 @@ using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Order.Api.Routes;
 using dCMS.Order.Infrastructure;
+using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -34,7 +35,21 @@ builder.Services.Configure<IdempotencyOptions>(o =>
 
 builder.Services.AddHealthChecks();
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "dCMS Order API", Version = "v1", Description = "Order placement, tracking and management endpoints." });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT" });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }] = [],
+    });
+});
+
 var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Order API v1"); c.RoutePrefix = "swagger"; });
 
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);

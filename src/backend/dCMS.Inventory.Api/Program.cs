@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
+using Microsoft.OpenApi.Models;
 using dCMS.Core.Pricing;
 using dCMS.Inventory.Api.Internal;
 using dCMS.Inventory.Api.Middleware;
@@ -80,7 +81,21 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
 });
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "dCMS Inventory API", Version = "v1", Description = "Stock levels, warehouse management and inventory sync endpoints." });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT" });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }] = [],
+    });
+});
+
 var app = builder.Build();
+
+app.UseSwagger();
+app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Inventory API v1"); c.RoutePrefix = "swagger"; });
 
 app.UseExceptionHandler(errApp => errApp.Run(async context =>
 {

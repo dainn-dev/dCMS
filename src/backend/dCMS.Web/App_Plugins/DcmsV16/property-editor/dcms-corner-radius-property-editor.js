@@ -2,7 +2,7 @@ import { LitElement, html, css } from "@umbraco-cms/backoffice/external/lit";
 import { UmbChangeEvent } from "@umbraco-cms/backoffice/event";
 import { UmbTextStyles } from "@umbraco-cms/backoffice/style";
 
-const IMG = "/App_Plugins/UmbracoBlockGrid/GlobalDesign/img/";
+const IMG = "/App_Plugins/DcmsV16/img/";
 
 const SECTIONS = [
   {

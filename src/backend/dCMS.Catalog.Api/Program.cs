@@ -1,6 +1,8 @@
 using System.Threading.RateLimiting;
 using dCMS.Catalog.Api;
 using dCMS.AspNetCore.Auth;
+using dCMS.Catalog.Api.Attributes;
+using dCMS.Catalog.Api.Brands;
 using dCMS.Catalog.Api.Categories;
 using dCMS.Catalog.Api.VariantAxes;
 using dCMS.Catalog.Api.Middleware;
@@ -28,6 +30,7 @@ using dCMS.Infrastructure.Search;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -68,6 +71,7 @@ builder.Services.Configure<ProductImageS3Options>(builder.Configuration.GetSecti
 builder.Services.AddSingleton<ProductImageS3Signer>();
 builder.Services.Configure<CatalogNotificationOptions>(builder.Configuration.GetSection(CatalogNotificationOptions.SectionName));
 builder.Services.AddSingleton<IProductNotificationSink, ProductNotificationSink>();
+builder.Services.AddSingleton<IBrandPersistence>(_ => new SqlBrandPersistence(catalogCs));
 builder.Services.AddScoped<ProductService>();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
@@ -128,6 +132,26 @@ builder.Services.Configure<IdempotencyOptions>(o => o.PathSubstrings = ["/produc
 builder.Services.AddHostedService<CatalogDbMigrationHostedService>();
 builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "catalog");
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "dCMS Catalog API",
+        Version = "v1",
+        Description = "Brand, Product, Category, Variant, Notification and Public Storefront endpoints.",
+    });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT",
+        Description = "dCMS JWT (issued by dcms-gateway or directly by Auth service).",
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }] = [],
+    });
+});
+
 var app = builder.Build();
 
 app.UseExceptionHandler(errApp => errApp.Run(async context =>
@@ -142,6 +166,13 @@ app.UseExceptionHandler(errApp => errApp.Run(async context =>
     });
 }));
 
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Catalog API v1");
+    c.RoutePrefix = "swagger";
+});
+
 app.UseCorrelationId();
 app.UseForwardedHeaders();
 app.UseCors("api");
@@ -151,6 +182,8 @@ app.UseMiddleware<AuditMiddleware>();
 app.UseRateLimiter();
 app.UseMiddleware<IdempotencyMiddleware>();
 
+app.MapBrandRoutes(builder.Configuration);
+app.MapAttributeRoutes(builder.Configuration);
 app.MapProductRoutes(builder.Configuration);
 app.MapStoreCatalogSettingsRoutes(builder.Configuration);
 app.MapNotificationRoutes(builder.Configuration);

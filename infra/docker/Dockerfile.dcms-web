@@ -2,14 +2,37 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
+# ── Install Node.js (for SPA build) ──────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Restore .NET deps ─────────────────────────────────────────────────────────
 COPY src/backend/dCMS.Web/dCMS.Web.csproj dCMS.Web/
 RUN dotnet restore dCMS.Web/dCMS.Web.csproj
 
+# ── Copy SPA source + install npm deps ───────────────────────────────────────
+COPY src/backoffice/dcms-backoffice-spa/package*.json /spa/
+RUN cd /spa && npm install --prefer-offline --no-audit --no-fund
+
+COPY src/backoffice/dcms-backoffice-spa/ /spa/
+
+# ── Copy backend source + build ───────────────────────────────────────────────
 COPY src/backend/dCMS.Web/ ./dCMS.Web/
 
 WORKDIR /src/dCMS.Web
-RUN dotnet publish dCMS.Web.csproj -c Release -o /app --no-restore
 
+# Override SpaDir to point to where we copied the SPA
+RUN dotnet publish dCMS.Web.csproj -c Release -o /app --no-restore \
+    /p:SpaDir=/spa
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

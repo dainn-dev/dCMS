@@ -1,4 +1,10 @@
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import type { BrandListRow } from "../brands-columns";
+import type {
+  BrandAdditionalField,
+  BrandAdditionalFieldOption,
+  BrandFieldControlType,
+} from "./BrandConfigPage";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import { MultiLangLexicalRichText } from "../components/MultiLangLexicalRichText";
 import {
@@ -19,6 +25,7 @@ import {
   IconMoreHoriz,
   IconSave,
   IconSearch,
+  IconTune,
   IconVisibility,
 } from "../../orders/icons";
 
@@ -38,7 +45,7 @@ const btnFooterPrimary =
   "px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2";
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type EditTab = "general" | "contacts" | "seo" | "recommendations";
+type EditTab = "general" | "contacts" | "seo" | "recommendations" | "other";
 
 type Props = {
   mode: "add" | "edit";
@@ -47,7 +54,11 @@ type Props = {
   active?: boolean;
   logoSrc?: string;
   logoAlt?: string;
+  /** Additional fields configured in BrandConfigPage — drives the "Other" tab. */
+  additionalFields?: BrandAdditionalField[];
   onBack: () => void;
+  /** row = core brand data; additionalInfo = JSON-serialised additional values from "Other" tab. */
+  onSave?: (row: BrandListRow, additionalInfo: string) => void;
 };
 
 // ── Mock category list (mirrors CategoriesPage INITIAL_TREE) ─────────────
@@ -302,7 +313,9 @@ export function EditBrandPage({
   active = true,
   logoSrc = "",
   logoAlt = "",
+  additionalFields = [],
   onBack,
+  onSave,
 }: Props) {
   const isAdd = mode === "add";
 
@@ -315,10 +328,28 @@ export function EditBrandPage({
   const [mobileImageSrc, setMobileImageSrc] = useState("");
   const actionsRef = useRef<HTMLDivElement>(null);
 
+  // Additional-info field values (keyed by field.id)
+  const [additionalValues, setAdditionalValues] = useState<Record<string, string | string[]>>(() =>
+    Object.fromEntries(
+      additionalFields.map((f) => [
+        f.id,
+        f.controlType === "Multiple Select" ? [] : "",
+      ])
+    )
+  );
+
+  function setAdditionalValue(id: string, val: string | string[]) {
+    setAdditionalValues((prev) => ({ ...prev, [id]: val }));
+  }
+
+  // Active status state (controlled so Save can read it)
+  const [isActive, setIsActive] = useState(active);
+
   useEffect(() => {
     setBrandImageSrc(logoSrc?.trim() ? logoSrc : "");
     setMobileImageSrc("");
-  }, [logoSrc, mode, brandCode]);
+    setIsActive(active);
+  }, [logoSrc, mode, brandCode, active]);
 
   // Brand Name reactive state (drives auto-populate in add mode)
   const [brandNameInput, setBrandNameInput] = useState(brandName || "");
@@ -372,6 +403,27 @@ export function EditBrandPage({
   }, []);
 
   function handleSave() {
+    const code = isAdd ? autoCode || `BRD-${Date.now()}` : brandCode;
+    const savedRow: BrandListRow = {
+      code,
+      name: brandNameInput || brandName,
+      imageSrc: brandImageSrc,
+      imageAlt: logoAlt || brandNameInput || brandName,
+      active: isActive,
+    };
+    // Serialise additional values — filter out empty/default so JSON is clean
+    let additionalInfoStr = "{}";
+    try {
+      const cleaned: Record<string, unknown> = {};
+      for (const [id, val] of Object.entries(additionalValues)) {
+        const isEmpty = val === "" || (Array.isArray(val) && val.length === 0);
+        if (!isEmpty) cleaned[id] = val;
+      }
+      additionalInfoStr = JSON.stringify(cleaned);
+    } catch {
+      additionalInfoStr = "{}";
+    }
+    onSave?.(savedRow, additionalInfoStr);
     setActionsOpen(false);
     setShowSuccessModal(true);
   }
@@ -404,7 +456,7 @@ export function EditBrandPage({
               <>
                 <span>Edit Brand:</span>
                 <span className="text-primary-container">{brandName}</span>
-                {active ? (
+                {isActive ? (
                   <span className="bg-secondary-container/20 text-on-secondary-container text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-widest">
                     Active
                   </span>
@@ -467,6 +519,7 @@ export function EditBrandPage({
               { id: "contacts" as const,         label: "Contacts",                 Icon: IconGroup       },
               { id: "recommendations" as const,  label: "Product Recommendations",  Icon: IconMoreHoriz   },
               { id: "seo" as const,              label: "SEO Configuration",        Icon: IconFactCheck   },
+              { id: "other" as const,            label: "Other",                    Icon: IconTune        },
             ] satisfies { id: EditTab; label: string; Icon: typeof IconInfo }[]
           ).map(({ id, label, Icon }) => {
             const isActive = tab === id;
@@ -586,7 +639,29 @@ export function EditBrandPage({
                   />
                 </div>
 
-                <div className="col-span-12 md:col-span-6 space-y-1.5">
+                <div className="col-span-12 md:col-span-3 space-y-1.5">
+                  <label className={labelBase}>Status</label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isActive}
+                    onClick={() => setIsActive((v) => !v)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 ${
+                      isActive ? "bg-primary" : "bg-outline-variant/40"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        isActive ? "translate-x-6" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                  <p className="text-[10px] text-on-surface-variant mt-1">
+                    {isActive ? "Active — visible in storefront" : "Inactive — hidden from storefront"}
+                  </p>
+                </div>
+
+                <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>Categories</label>
                   <CategoryPicker
                     selected={selectedCategories}
@@ -979,6 +1054,17 @@ export function EditBrandPage({
               )}
             </>
           )}
+
+          {/* ── OTHER (Additional Info) ─────────────────────────────────── */}
+          {tab === "other" && (
+            <OtherTab
+              fields={additionalFields}
+              values={additionalValues}
+              onChange={setAdditionalValue}
+              isAdd={isAdd}
+              onSave={handleSave}
+            />
+          )}
         </section>
       </div>
 
@@ -1084,6 +1170,254 @@ export function EditBrandPage({
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── OtherTab ───────────────────────────────────────────────────────────────────
+
+const SECTION_ORDER = [
+  "General Information",
+  "Contacts",
+  "Product Recommendations",
+  "SEO Configuration",
+] as const;
+
+function OtherTab({
+  fields,
+  values,
+  onChange,
+  isAdd,
+  onSave,
+}: {
+  fields: BrandAdditionalField[];
+  values: Record<string, string | string[]>;
+  onChange: (id: string, val: string | string[]) => void;
+  isAdd: boolean;
+  onSave: () => void;
+}) {
+  const enabledFields = fields.filter((f) => f.enabled);
+
+  if (enabledFields.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
+        <IconTune className="h-10 w-10 text-outline-variant" />
+        <div>
+          <p className="text-sm font-bold text-on-surface">No additional fields configured</p>
+          <p className="mt-1 text-xs text-on-surface-variant max-w-xs">
+            Go to <span className="font-semibold text-primary">Brand Configuration</span> to define
+            custom fields that will appear here.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Group enabled fields by section in defined order
+  const groups = SECTION_ORDER.map((section) => ({
+    section,
+    rows: enabledFields.filter((f) => f.section === section),
+  })).filter((g) => g.rows.length > 0);
+
+  // Ungrouped fallback (custom sections)
+  const knownSections = new Set(SECTION_ORDER as readonly string[]);
+  const ungrouped = enabledFields.filter((f) => !knownSections.has(f.section));
+  if (ungrouped.length > 0) {
+    groups.push({ section: "Other" as (typeof SECTION_ORDER)[number], rows: ungrouped });
+  }
+
+  return (
+    <>
+      <div className="mb-2">
+        <h3 className="text-sm font-bold uppercase tracking-widest text-primary border-b border-outline-variant/20 pb-2">
+          Additional Information
+        </h3>
+        <p className="mt-2 text-sm text-on-surface-variant">
+          Custom fields defined in{" "}
+          <span className="font-semibold text-on-surface">Brand Configuration</span>.
+          Enabled fields are shown below, grouped by section.
+        </p>
+      </div>
+
+      <div className="space-y-8">
+        {groups.map(({ section, rows }) => (
+          <div key={section}>
+            <h4 className="mb-4 text-xs font-bold uppercase tracking-widest text-on-surface-variant border-b border-outline-variant/10 pb-1.5">
+              {section}
+            </h4>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              {rows.map((field) => (
+                <AdditionalFieldInput
+                  key={field.id}
+                  field={field}
+                  value={values[field.id] ?? (field.controlType === "Multiple Select" ? [] : "")}
+                  onChange={(val) => onChange(field.id, val)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!isAdd && (
+        <div className="flex justify-end gap-3 items-center pt-8 mt-8 border-t border-outline-variant/20">
+          <button
+            type="button"
+            className="text-on-surface-variant font-bold text-xs uppercase tracking-widest px-6 py-2 hover:bg-surface-container-high rounded-md transition-colors"
+            onClick={() => {/* reset handled by parent re-init */}}
+          >
+            Discard Changes
+          </button>
+          <button
+            type="button"
+            className="px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2"
+            onClick={onSave}
+          >
+            <IconSave className="h-4 w-4 shrink-0" />
+            Save Additional Info
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── AdditionalFieldInput ───────────────────────────────────────────────────────
+
+const inputBase2 =
+  "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-2 px-3 text-xs focus:ring-1 focus:ring-primary outline-none";
+const labelBase2 =
+  "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider mb-1";
+
+function AdditionalFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: BrandAdditionalField;
+  value: string | string[];
+  onChange: (val: string | string[]) => void;
+}) {
+  const strVal = typeof value === "string" ? value : "";
+  const arrVal = Array.isArray(value) ? value : [];
+  const requiredMark = field.required ? (
+    <span className="text-error ml-0.5">*</span>
+  ) : null;
+
+  function renderControl() {
+    switch (field.controlType as BrandFieldControlType) {
+      case "Text Box":
+        return (
+          <input
+            className={inputBase2}
+            type="text"
+            value={strVal}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.columnLabel}
+            required={field.required}
+          />
+        );
+
+      case "WYSIWYG (Text Area)":
+        return (
+          <textarea
+            className={`${inputBase2} resize-y min-h-[96px]`}
+            value={strVal}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.columnLabel}
+            required={field.required}
+          />
+        );
+
+      case "Checkbox":
+        return (
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-primary"
+              checked={strVal === "true"}
+              onChange={(e) => onChange(e.target.checked ? "true" : "")}
+            />
+            <span className="text-xs text-on-surface">{field.columnLabel}</span>
+          </label>
+        );
+
+      case "Date Picker":
+        return (
+          <div className="relative">
+            <input
+              className={`${inputBase2} pr-9`}
+              type="date"
+              value={strVal}
+              onChange={(e) => onChange(e.target.value)}
+              required={field.required}
+            />
+            <IconCalendarToday className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-on-surface-variant" />
+          </div>
+        );
+
+      case "Dropdown List":
+        return (
+          <div className="relative">
+            <select
+              className={`${inputBase2} appearance-none pr-8`}
+              value={strVal}
+              onChange={(e) => onChange(e.target.value)}
+              required={field.required}
+            >
+              <option value="">— Select —</option>
+              {field.options.map((opt: BrandAdditionalFieldOption) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.name}
+                </option>
+              ))}
+            </select>
+            <IconChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 text-on-surface-variant" />
+          </div>
+        );
+
+      case "Multiple Select":
+        return (
+          <div className="space-y-1.5">
+            {field.options.map((opt: BrandAdditionalFieldOption) => (
+              <label key={opt.value} className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary"
+                  checked={arrVal.includes(opt.value)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...arrVal, opt.value]
+                      : arrVal.filter((v) => v !== opt.value);
+                    onChange(next);
+                  }}
+                />
+                <span className="text-xs text-on-surface">{opt.name}</span>
+              </label>
+            ))}
+            {field.options.length === 0 && (
+              <p className="text-xs italic text-on-surface-variant">No options defined.</p>
+            )}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      {field.controlType !== "Checkbox" && (
+        <label className={labelBase2}>
+          {field.columnLabel}
+          {requiredMark}
+        </label>
+      )}
+      {renderControl()}
+      {field.required && strVal === "" && arrVal.length === 0 && (
+        <p className="text-[10px] text-error">Required field</p>
       )}
     </div>
   );

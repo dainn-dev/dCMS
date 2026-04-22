@@ -14,4 +14,8 @@
     <ProjectReference Include="..\dCMS.Order.Infrastructure\dCMS.Order.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.*" />
+  </ItemGroup>
+
 </Project>

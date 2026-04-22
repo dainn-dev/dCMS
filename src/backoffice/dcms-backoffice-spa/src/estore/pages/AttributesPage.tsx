@@ -17,11 +17,14 @@ import {
   downloadAttributeValuesImportTemplateXlsx,
   exportAttributesSchemaXlsx,
 } from "../exportAttributeTemplates";
+import { fetchAttributes, deleteAttribute } from "../api/attributesApi";
 
 type AttributesPageProps = {
   onCreateAttribute?: () => void;
   onEditAttribute?: (row: AttributeListRow) => void;
   onImportValues?: () => void;
+  tenantId?: string;
+  authToken?: string;
 };
 
 const LS_KEY = "dcms.estore.attributesList.v1";
@@ -70,9 +73,27 @@ function persistAttributeRows(rows: AttributeListRow[]) {
   }
 }
 
-export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportValues }: AttributesPageProps) {
+export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportValues, tenantId, authToken }: AttributesPageProps) {
   const [rows, setRows] = useState<AttributeListRow[]>(() => loadAttributeRows());
   const [deleteTargetCode, setDeleteTargetCode] = useState<string | null>(null);
+  const [apiLoading, setApiLoading] = useState(false);
+
+  // Fetch from API on mount when tenantId provided
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    setApiLoading(true);
+    fetchAttributes(tenantId, authToken)
+      .then((apiRows) => {
+        if (!cancelled) {
+          setRows(apiRows.map((r, i) => ({ ...r, seq: String(i + 1).padStart(2, "0") })));
+        }
+      })
+      .catch((err) => { if (!cancelled) console.error("[AttributesPage] fetch failed", err); })
+      .finally(() => { if (!cancelled) setApiLoading(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, authToken]);
 
   const columns = useMemo(
     () =>
@@ -88,11 +109,21 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
 
   const deleteTarget = rows.find((r) => r.code === deleteTargetCode);
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTargetCode) return;
+    const target = rows.find(r => r.code === deleteTargetCode);
+    if (tenantId && target?.id) {
+      try {
+        await deleteAttribute(tenantId, target.id, authToken);
+      } catch (err) {
+        console.error("[AttributesPage] delete failed", err);
+        setDeleteTargetCode(null);
+        return;
+      }
+    }
     setRows((prev) => {
       const next = prev.filter((r) => r.code !== deleteTargetCode);
-      persistAttributeRows(next);
+      if (!tenantId) persistAttributeRows(next); // only persist to localStorage when offline
       return next;
     });
     setDeleteTargetCode(null);
@@ -114,7 +145,12 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
   }, []);
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Attributes">
+    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low relative" aria-label="Attributes">
+      {apiLoading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       <header className="relative z-20 flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">

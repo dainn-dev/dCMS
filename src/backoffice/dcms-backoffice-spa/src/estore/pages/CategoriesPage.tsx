@@ -33,6 +33,15 @@ import {
   IconUnfoldMore,
   IconWarning,
 } from "../../orders/icons";
+import {
+  fetchCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  reclassifyCategory,
+  sortCategories,
+  type CategoryPayload,
+} from "../api/categoriesApi";
 
 const labelBase =
   "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider";
@@ -45,7 +54,7 @@ const btnFooterGhost =
 const btnFooterPrimary =
   "px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2";
 
-type CatNode = {
+export type CatNode = {
   id: string;
   name: string;
   active?: boolean;
@@ -53,6 +62,8 @@ type CatNode = {
   publishUntil?: string;  // ISO date string — past date = expired
   sortOrder?: number;
   children?: CatNode[];
+  /** Full DTO from API — available when loaded from backend. */
+  _dto?: Record<string, unknown>;
 };
 type PageMode =
   | { kind: "edit"; nodeId: string }
@@ -476,8 +487,15 @@ function CategoryTreePicker({
 
 // ─── CategoriesPage ──────────────────────────────────────────────────────────
 
-export function CategoriesPage() {
+export function CategoriesPage({
+  tenantId,
+  authToken,
+}: {
+  tenantId?: string;
+  authToken?: string;
+}) {
   const [treeData, setTreeData] = useState<CatNode[]>(INITIAL_TREE);
+  const [apiLoading, setApiLoading] = useState(false);
   const expandableIds = useMemo(() => collectExpandableIds(treeData), [treeData]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["c1"]));
   const [mode, setMode] = useState<PageMode>({ kind: "edit", nodeId: "c1" });
@@ -490,6 +508,24 @@ export function CategoriesPage() {
     message: "",
     visible: false,
   });
+
+  // ── Load from API on mount (if tenantId provided) ─────────────────────────
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    setApiLoading(true);
+    fetchCategories(tenantId, authToken)
+      .then((tree) => { if (!cancelled) { setTreeData(tree); setApiLoading(false); } })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("[CategoriesPage] fetch failed", err);
+          setApiLoading(false);
+          showToast("Failed to load categories from server. Showing demo data.");
+        }
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, authToken]);
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [sortModalOpen, setSortModalOpen] = useState(false);
@@ -540,40 +576,76 @@ export function CategoriesPage() {
       ? "Top Level"
       : (findNodeName(treeData, formParentId) ?? "Unknown");
 
-  const handleSaveCategory = useCallback(() => {
-    if (isAddMode) {
-      showToast("Category created successfully.");
-      setShowSuccessModal(true);
-      return;
-    }
+  const handleSaveCategory = useCallback(async () => {
+    const nodeNumericId = mode.kind === "edit" ? parseInt(mode.nodeId, 10) : NaN;
+    const parentNumericId = formParentId ? parseInt(formParentId, 10) : null;
 
-    if (isReclassifying && mode.kind === "edit") {
-      const { tree: treeWithout, removed } = removeNode(treeData, mode.nodeId);
-      if (removed) {
-        const newTree = insertNode(treeWithout, removed, formParentId);
-        setTreeData(newTree);
-        setOriginalParentId(formParentId);
-        // Expand new parent so the moved node is visible
-        if (formParentId) {
-          setExpanded((prev) => new Set([...prev, formParentId]));
+    if (isReclassifying && mode.kind === "edit" && tenantId) {
+      // ── Reclassify via API ──────────────────────────────────────────────
+      try {
+        await reclassifyCategory(tenantId, nodeNumericId, parentNumericId, authToken);
+        // Optimistic local tree mutation
+        const { tree: treeWithout, removed } = removeNode(treeData, mode.nodeId);
+        if (removed) {
+          setTreeData(insertNode(treeWithout, removed, formParentId));
+          setOriginalParentId(formParentId);
+          if (formParentId) setExpanded((prev) => new Set([...prev, formParentId]));
         }
         showToast(
           formParentId === null
-            ? `"${removed.name}" reclassified as a top-level category.`
-            : `"${removed.name}" moved under "${reclassifyToLabel}".`
+            ? `"${findNodeName(treeData, mode.nodeId)}" reclassified as a top-level category.`
+            : `"${findNodeName(treeData, mode.nodeId)}" moved under "${reclassifyToLabel}".`
         );
+      } catch (err) {
+        showToast(`Reclassify failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
+      return;
+    }
+
+    if (isAddMode) {
+      if (tenantId) {
+        // ── Create via API ────────────────────────────────────────────────
+        const slug = `cat-${Date.now()}`;
+        const payload: CategoryPayload = {
+          name: "New Category",
+          slug,
+          parentId: formParentId ? parseInt(formParentId, 10) : null,
+        };
+        try {
+          const newNode = await createCategory(tenantId, payload, authToken);
+          setTreeData((prev) => insertNode(prev, newNode, formParentId));
+          showToast("Category created successfully.");
+          setShowSuccessModal(true);
+        } catch (err) {
+          showToast(`Create failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        }
+      } else {
+        showToast("Category created successfully.");
+        setShowSuccessModal(true);
+      }
+      return;
+    }
+
+    if (tenantId && !isNaN(nodeNumericId)) {
+      // ── Update via API ────────────────────────────────────────────────
+      const existing = findNodeRef(treeData, mode.nodeId);
+      const payload: CategoryPayload = {
+        name: existing?.name ?? "Category",
+        slug: `cat-${nodeNumericId}`,
+        parentId: parentNumericId,
+      };
+      try {
+        await updateCategory(tenantId, nodeNumericId, payload, authToken);
+        showToast("Category saved.");
+      } catch (err) {
+        showToast(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
       }
     } else {
       showToast("Category saved.");
     }
   }, [
-    isAddMode,
-    isReclassifying,
-    mode,
-    treeData,
-    formParentId,
-    reclassifyToLabel,
-    showToast,
+    isAddMode, isReclassifying, mode, treeData, formParentId,
+    reclassifyToLabel, showToast, tenantId, authToken,
   ]);
 
   const expandAll = useCallback(() => setExpanded(new Set(expandableIds)), [expandableIds]);
@@ -771,9 +843,21 @@ export function CategoriesPage() {
     return [{ id: null as string | null, name: "Top level (roots)" }, ...withKids];
   }, [treeData]);
 
-  function handleDeleteConfirm() {
+  async function handleDeleteConfirm() {
     if (!deleteTarget) return;
     const removedId = deleteTarget.id;
+    const numericId = parseInt(removedId, 10);
+
+    if (tenantId && !isNaN(numericId)) {
+      try {
+        await deleteCategory(tenantId, numericId, authToken);
+      } catch (err) {
+        showToast(`Delete failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        setDeleteTarget(null);
+        return;
+      }
+    }
+
     const { tree } = removeNode(treeData, removedId);
     setTreeData(tree);
     setDeleteTarget(null);
@@ -797,7 +881,7 @@ export function CategoriesPage() {
     });
   }
 
-  function applySortOrder() {
+  async function applySortOrder() {
     const kids = getOrderingContext(treeData, sortParentId);
     const map = new Map(kids.map((c) => [c.id, c]));
     const ordered = sortDraftIds
@@ -807,6 +891,19 @@ export function CategoriesPage() {
         return { ...node, sortOrder: i + 1 };
       })
       .filter(Boolean) as CatNode[];
+
+    if (tenantId) {
+      try {
+        const parentNumericId = sortParentId ? parseInt(sortParentId, 10) : null;
+        const items = ordered.map((n) => ({ id: parseInt(n.id, 10), sortOrder: n.sortOrder ?? 0 }));
+        await sortCategories(tenantId, parentNumericId, items, authToken);
+      } catch (err) {
+        showToast(`Sort failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        setSortModalOpen(false);
+        return;
+      }
+    }
+
     setTreeData(applySiblingOrder(treeData, sortParentId, ordered));
     setSortModalOpen(false);
     showToast("Category order updated.");
@@ -827,6 +924,15 @@ export function CategoriesPage() {
       className="-m-6 flex h-[calc(100dvh-6rem)] flex-col bg-surface-container-low overflow-hidden"
       aria-label="Category management"
     >
+      {/* API loading overlay */}
+      {apiLoading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-xs font-medium text-on-surface-variant">Loading categories…</p>
+          </div>
+        </div>
+      )}
       {/* Page header */}
       <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">

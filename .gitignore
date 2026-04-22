@@ -55,3 +55,5 @@ src/backoffice/dcms-backoffice-spa/node_modules/
 design/
 scripts/
 UmbracoBlockGrid/
+src/backend/dCMS.Gateway/bin/
+src/backend/dCMS.Gateway/obj/

@@ -47,10 +47,71 @@ public interface ICatalogPersistence
     Task<IReadOnlyList<CatalogCategoryRow>> ListCategoriesByTenantAsync(string tenantId,
         CancellationToken cancellationToken = default);
 
+    // ── Category write methods (DAI-586) ────────────────────────────────────
+
+    Task<CatalogCategoryRow?> GetCategoryByIdAsync(int id, string tenantId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>True if a category in this tenant already uses <paramref name="slug"/> (excludes <paramref name="excludeId"/>).</summary>
+    Task<bool> CategorySlugExistsAsync(string tenantId, string slug, int? excludeId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Insert category row and return new auto-generated Id.</summary>
+    Task<int> CreateCategoryAsync(CatalogCategoryRow row, CancellationToken cancellationToken = default);
+
+    /// <summary>Update all fields except Id, TenantId, Path, Depth (those are managed by reclassify). Returns false if not found.</summary>
+    Task<bool> UpdateCategoryAsync(CatalogCategoryRow row, CancellationToken cancellationToken = default);
+
+    /// <summary>Hard-delete category and all descendants. Returns false if not found.</summary>
+    Task<bool> DeleteCategoryAsync(int id, string tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Move category to a new parent, recomputing Path + Depth for node and all descendants.</summary>
+    Task<bool> ReclassifyCategoryAsync(int id, string tenantId, int? newParentId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Reorder siblings: update SortOrder for each item in <paramref name="order"/>.</summary>
+    Task ReorderSiblingsAsync(string tenantId, int? parentId,
+        IReadOnlyList<(int Id, int SortOrder)> order,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Variant axes for a store: tenant attributes + values, filtered by <c>StoreCatalogAttributeValues</c> when the store has any allowlist rows (DAI-284).
     /// </summary>
     Task<IReadOnlyList<CatalogVariantAxisDefinition>> ListVariantAxesForStoreAsync(string tenantId, string storeId,
+        CancellationToken cancellationToken = default);
+
+    // ── Attribute management methods (DAI-592) ────────────────────────────────
+
+    Task<IReadOnlyList<CatalogAttributeRow>> ListAttributesAsync(string tenantId, int page, int pageSize,
+        CancellationToken cancellationToken = default);
+
+    Task<int> CountAttributesAsync(string tenantId, CancellationToken cancellationToken = default);
+
+    Task<CatalogAttributeRow?> GetAttributeByIdAsync(int id, string tenantId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>True if another attribute in this tenant already uses <paramref name="code"/> (excludes <paramref name="excludeId"/>).</summary>
+    Task<bool> AttributeCodeExistsAsync(string tenantId, string code, int? excludeId,
+        CancellationToken cancellationToken = default);
+
+    Task<int> CreateAttributeAsync(CatalogAttributeRow row, CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateAttributeAsync(CatalogAttributeRow row, CancellationToken cancellationToken = default);
+
+    /// <summary>Hard-delete attribute. Values cascade via FK. Returns false if not found.</summary>
+    Task<bool> DeleteAttributeAsync(int id, string tenantId, CancellationToken cancellationToken = default);
+
+    // ── Attribute value methods ───────────────────────────────────────────────
+
+    Task<IReadOnlyList<CatalogAttributeValueRow>> ListAttributeValuesAsync(int attributeId, string tenantId,
+        CancellationToken cancellationToken = default);
+
+    Task<int> CreateAttributeValueAsync(CatalogAttributeValueRow row, CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateAttributeValueAsync(CatalogAttributeValueRow row, string tenantId,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> DeleteAttributeValueAsync(int valueId, int attributeId, string tenantId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ApprovalCommentRow>> ListApprovalCommentsForProductAsync(string productId, string tenantId, string storeId,

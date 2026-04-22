@@ -339,12 +339,22 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             .ConfigureAwait(false);
     }
 
+    private const string CategoryColumns = """
+        "Id","TenantId","ParentId","Path","Depth","Name","Slug","SortOrder",
+        "Active","PublishFrom","PublishUntil",
+        "ImageMenuUrl","ImagePageUrl","ImageThumbUrl",
+        "ShowInNav","ShowInBrands","CustomNavUrl","NavSortPriority","BreakNavColumn",
+        "DefaultSort","NoRecommendations",
+        "MetaTitleJson","MetaKeywordsJson","MetaDescJson",
+        "RestrictAccess","AccessApp","AccessMemberType","AccessMemberTier"
+        """;
+
     public async Task<IReadOnlyList<CatalogCategoryRow>> ListCategoriesByTenantAsync(string tenantId,
         CancellationToken cancellationToken = default)
     {
         await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            SELECT "Id", "ParentId", "Name", "Slug", "Path", "Depth", "SortOrder"
+        var sql = $"""
+            SELECT {CategoryColumns}
             FROM "Categories"
             WHERE "TenantId" = @TenantId
             ORDER BY "Path", "SortOrder", "Id"
@@ -352,8 +362,230 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         var rows = await connection.QueryAsync<CategoryRow>(
             new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: cancellationToken))
             .ConfigureAwait(false);
-        return rows.Select(r => new CatalogCategoryRow(r.Id, r.ParentId, r.Name, r.Slug, r.Path, r.Depth, r.SortOrder))
-            .ToList();
+        return rows.Select(r => r.ToModel()).ToList();
+    }
+
+    public async Task<CatalogCategoryRow?> GetCategoryByIdAsync(int id, string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        var sql = $"""
+            SELECT {CategoryColumns}
+            FROM "Categories"
+            WHERE "Id" = @Id AND "TenantId" = @TenantId
+            """;
+        var row = await connection.QuerySingleOrDefaultAsync<CategoryRow>(
+            new CommandDefinition(sql, new { Id = id, TenantId = tenantId }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return row?.ToModel();
+    }
+
+    public async Task<bool> CategorySlugExistsAsync(string tenantId, string slug, int? excludeId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        var sql = excludeId.HasValue
+            ? """SELECT CASE WHEN EXISTS(SELECT 1 FROM "Categories" WHERE "TenantId"=@TenantId AND "Slug"=@Slug AND "Id"<>@ExcludeId) THEN 1 ELSE 0 END"""
+            : """SELECT CASE WHEN EXISTS(SELECT 1 FROM "Categories" WHERE "TenantId"=@TenantId AND "Slug"=@Slug) THEN 1 ELSE 0 END""";
+        return await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(sql, new { TenantId = tenantId, Slug = slug, ExcludeId = excludeId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false) == 1;
+    }
+
+    public async Task<int> CreateCategoryAsync(CatalogCategoryRow row, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+
+        // Compute path + depth from parent
+        string path;
+        int depth;
+        if (row.ParentId.HasValue)
+        {
+            var parent = await GetCategoryByIdAsync(row.ParentId.Value, row.TenantId, cancellationToken)
+                .ConfigureAwait(false);
+            if (parent is null) throw new ArgumentException($"Parent category {row.ParentId} not found.");
+            path  = parent.Path.TrimEnd('/') + "/";
+            depth = parent.Depth + 1;
+        }
+        else
+        {
+            path  = "/";
+            depth = 0;
+        }
+
+        const string sql = """
+            INSERT INTO "Categories"
+            ("TenantId","ParentId","Path","Depth","Name","Slug","SortOrder",
+             "Active","PublishFrom","PublishUntil",
+             "ImageMenuUrl","ImagePageUrl","ImageThumbUrl",
+             "ShowInNav","ShowInBrands","CustomNavUrl","NavSortPriority","BreakNavColumn",
+             "DefaultSort","NoRecommendations",
+             "MetaTitleJson","MetaKeywordsJson","MetaDescJson",
+             "RestrictAccess","AccessApp","AccessMemberType","AccessMemberTier")
+            VALUES
+            (@TenantId,@ParentId,@Path,@Depth,@Name,@Slug,@SortOrder,
+             @Active,@PublishFrom,@PublishUntil,
+             @ImageMenuUrl,@ImagePageUrl,@ImageThumbUrl,
+             @ShowInNav,@ShowInBrands,@CustomNavUrl,@NavSortPriority,@BreakNavColumn,
+             @DefaultSort,@NoRecommendations,
+             @MetaTitleJson,@MetaKeywordsJson,@MetaDescJson,
+             @RestrictAccess,@AccessApp,@AccessMemberType,@AccessMemberTier)
+            RETURNING "Id"
+            """;
+
+        return await connection.ExecuteScalarAsync<int>(new CommandDefinition(sql, new
+        {
+            row.TenantId, row.ParentId, Path = path, Depth = depth,
+            row.Name, row.Slug, row.SortOrder,
+            row.Active, PublishFrom = row.PublishFrom?.UtcDateTime, PublishUntil = row.PublishUntil?.UtcDateTime,
+            row.ImageMenuUrl, row.ImagePageUrl, row.ImageThumbUrl,
+            row.ShowInNav, row.ShowInBrands, row.CustomNavUrl, row.NavSortPriority, row.BreakNavColumn,
+            row.DefaultSort, row.NoRecommendations,
+            row.MetaTitleJson, row.MetaKeywordsJson, row.MetaDescJson,
+            row.RestrictAccess, row.AccessApp, row.AccessMemberType, row.AccessMemberTier,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateCategoryAsync(CatalogCategoryRow row, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            UPDATE "Categories" SET
+                "Name"             = @Name,
+                "Slug"             = @Slug,
+                "SortOrder"        = @SortOrder,
+                "Active"           = @Active,
+                "PublishFrom"      = @PublishFrom,
+                "PublishUntil"     = @PublishUntil,
+                "ImageMenuUrl"     = @ImageMenuUrl,
+                "ImagePageUrl"     = @ImagePageUrl,
+                "ImageThumbUrl"    = @ImageThumbUrl,
+                "ShowInNav"        = @ShowInNav,
+                "ShowInBrands"     = @ShowInBrands,
+                "CustomNavUrl"     = @CustomNavUrl,
+                "NavSortPriority"  = @NavSortPriority,
+                "BreakNavColumn"   = @BreakNavColumn,
+                "DefaultSort"      = @DefaultSort,
+                "NoRecommendations"= @NoRecommendations,
+                "MetaTitleJson"    = @MetaTitleJson,
+                "MetaKeywordsJson" = @MetaKeywordsJson,
+                "MetaDescJson"     = @MetaDescJson,
+                "RestrictAccess"   = @RestrictAccess,
+                "AccessApp"        = @AccessApp,
+                "AccessMemberType" = @AccessMemberType,
+                "AccessMemberTier" = @AccessMemberTier
+            WHERE "Id" = @Id AND "TenantId" = @TenantId
+            """;
+        var affected = await connection.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            row.Id, row.TenantId, row.Name, row.Slug, row.SortOrder,
+            row.Active, PublishFrom = row.PublishFrom?.UtcDateTime, PublishUntil = row.PublishUntil?.UtcDateTime,
+            row.ImageMenuUrl, row.ImagePageUrl, row.ImageThumbUrl,
+            row.ShowInNav, row.ShowInBrands, row.CustomNavUrl, row.NavSortPriority, row.BreakNavColumn,
+            row.DefaultSort, row.NoRecommendations,
+            row.MetaTitleJson, row.MetaKeywordsJson, row.MetaDescJson,
+            row.RestrictAccess, row.AccessApp, row.AccessMemberType, row.AccessMemberTier,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    public async Task<bool> DeleteCategoryAsync(int id, string tenantId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        // Delete node and all descendants using recursive CTE
+        const string sql = """
+            WITH RECURSIVE subtree AS (
+                SELECT "Id" FROM "Categories" WHERE "Id" = @Id AND "TenantId" = @TenantId
+                UNION ALL
+                SELECT c."Id" FROM "Categories" c
+                INNER JOIN subtree s ON c."ParentId" = s."Id" AND c."TenantId" = @TenantId
+            )
+            DELETE FROM "Categories" WHERE "Id" IN (SELECT "Id" FROM subtree)
+            """;
+        var affected = await connection.ExecuteAsync(
+            new CommandDefinition(sql, new { Id = id, TenantId = tenantId }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    public async Task<bool> ReclassifyCategoryAsync(int id, string tenantId, int? newParentId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        // Determine new path/depth from new parent
+        string newParentPath = "/";
+        int    newParentDepth = -1;
+        if (newParentId.HasValue)
+        {
+            var parent = await GetCategoryByIdAsync(newParentId.Value, tenantId, cancellationToken)
+                .ConfigureAwait(false);
+            if (parent is null) throw new ArgumentException($"Target parent category {newParentId} not found.");
+            newParentPath  = parent.Path.TrimEnd('/') + "/";
+            newParentDepth = parent.Depth;
+        }
+
+        // Get current node
+        var node = await GetCategoryByIdAsync(id, tenantId, cancellationToken).ConfigureAwait(false);
+        if (node is null) return false;
+
+        var oldPath  = node.Path;
+        var newPath  = newParentPath;
+        var depthDiff = (newParentDepth + 1) - node.Depth;
+
+        await using var tx = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        // Update parent + path/depth for node
+        await connection.ExecuteAsync(new CommandDefinition("""
+            UPDATE "Categories"
+            SET "ParentId" = @NewParentId,
+                "Path"     = @NewPath,
+                "Depth"    = @NewDepth
+            WHERE "Id" = @Id AND "TenantId" = @TenantId
+            """, new { NewParentId = newParentId, NewPath = newPath, NewDepth = node.Depth + depthDiff, Id = id, TenantId = tenantId },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        // Recompute Path + Depth for all descendants
+        // Descendants have Path starting with oldPath + id + "/"
+        var descendantPathPrefix = oldPath.TrimEnd('/') + $"/{id}/"; // not used — use recursive CTE
+        await connection.ExecuteAsync(new CommandDefinition("""
+            WITH RECURSIVE subtree AS (
+                SELECT "Id","Path","Depth" FROM "Categories"
+                WHERE "ParentId" = @RootId AND "TenantId" = @TenantId
+                UNION ALL
+                SELECT c."Id", c."Path", c."Depth" FROM "Categories" c
+                INNER JOIN subtree s ON c."ParentId" = s."Id" AND c."TenantId" = @TenantId
+            )
+            UPDATE "Categories" c SET
+                "Depth" = c."Depth" + @DepthDiff,
+                "Path"  = @NewPath || c."Id"::text || '/'
+            FROM subtree WHERE c."Id" = subtree."Id"
+            """, new { RootId = id, TenantId = tenantId, DepthDiff = depthDiff, NewPath = newPath + id + "/" },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    public async Task ReorderSiblingsAsync(string tenantId, int? parentId,
+        IReadOnlyList<(int Id, int SortOrder)> order,
+        CancellationToken cancellationToken = default)
+    {
+        if (order.Count == 0) return;
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var tx = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (var (catId, sortOrder) in order)
+        {
+            await connection.ExecuteAsync(new CommandDefinition("""
+                UPDATE "Categories" SET "SortOrder" = @SortOrder
+                WHERE "Id" = @Id AND "TenantId" = @TenantId
+                """, new { Id = catId, TenantId = tenantId, SortOrder = sortOrder },
+                tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+        await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<CatalogVariantAxisDefinition>> ListVariantAxesForStoreAsync(string tenantId,
@@ -593,13 +825,45 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
 
     private sealed class CategoryRow
     {
-        public int Id { get; init; }
-        public int? ParentId { get; init; }
-        public string Name { get; init; } = null!;
-        public string Slug { get; init; } = null!;
-        public string Path { get; init; } = null!;
-        public int Depth { get; init; }
-        public int SortOrder { get; init; }
+        public int      Id               { get; init; }
+        public string   TenantId         { get; init; } = null!;
+        public int?     ParentId         { get; init; }
+        public string   Path             { get; init; } = null!;
+        public int      Depth            { get; init; }
+        public string   Name             { get; init; } = null!;
+        public string   Slug             { get; init; } = null!;
+        public int      SortOrder        { get; init; }
+        public bool     Active           { get; init; }
+        public DateTime? PublishFrom     { get; init; }
+        public DateTime? PublishUntil    { get; init; }
+        public string   ImageMenuUrl     { get; init; } = "";
+        public string   ImagePageUrl     { get; init; } = "";
+        public string   ImageThumbUrl    { get; init; } = "";
+        public bool     ShowInNav        { get; init; }
+        public bool     ShowInBrands     { get; init; }
+        public string   CustomNavUrl     { get; init; } = "";
+        public int      NavSortPriority  { get; init; }
+        public bool     BreakNavColumn   { get; init; }
+        public string   DefaultSort      { get; init; } = "bestseller";
+        public bool     NoRecommendations{ get; init; }
+        public string   MetaTitleJson    { get; init; } = "{}";
+        public string   MetaKeywordsJson { get; init; } = "{}";
+        public string   MetaDescJson     { get; init; } = "{}";
+        public bool     RestrictAccess   { get; init; }
+        public string   AccessApp        { get; init; } = "";
+        public string   AccessMemberType { get; init; } = "";
+        public string   AccessMemberTier { get; init; } = "";
+
+        public CatalogCategoryRow ToModel() => new(
+            Id, TenantId, ParentId, Path, Depth, Name, Slug, SortOrder,
+            Active,
+            PublishFrom.HasValue  ? new DateTimeOffset(PublishFrom.Value,  TimeSpan.Zero) : null,
+            PublishUntil.HasValue ? new DateTimeOffset(PublishUntil.Value, TimeSpan.Zero) : null,
+            ImageMenuUrl, ImagePageUrl, ImageThumbUrl,
+            ShowInNav, ShowInBrands, CustomNavUrl, NavSortPriority, BreakNavColumn,
+            DefaultSort, NoRecommendations,
+            MetaTitleJson, MetaKeywordsJson, MetaDescJson,
+            RestrictAccess, AccessApp, AccessMemberType, AccessMemberTier);
     }
 
     private sealed class ProductRow
@@ -615,5 +879,199 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         public int SalesCount30d { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public DateTimeOffset UpdatedAt { get; init; }
+    }
+
+    // ── Attribute management (DAI-592) ────────────────────────────────────────
+
+    private const string AttrCols = """
+        "Id","TenantId","Name","Code","Type","Required","Description","SortOrder","CreatedAt","UpdatedAt"
+        """;
+
+    private sealed class AttrRow
+    {
+        public int      Id          { get; init; }
+        public string   TenantId    { get; init; } = null!;
+        public string   Name        { get; init; } = null!;
+        public string   Code        { get; init; } = "";
+        public string   Type        { get; init; } = "TEXT";
+        public bool     Required    { get; init; }
+        public string   Description { get; init; } = "";
+        public int      SortOrder   { get; init; }
+        public DateTime CreatedAt   { get; init; }
+        public DateTime UpdatedAt   { get; init; }
+
+        public CatalogAttributeRow ToModel() => new(Id, TenantId, Name, Code, Type, Required, Description, SortOrder,
+            new DateTimeOffset(CreatedAt, TimeSpan.Zero), new DateTimeOffset(UpdatedAt, TimeSpan.Zero));
+    }
+
+    private sealed class AttrValueRow
+    {
+        public int      Id          { get; init; }
+        public int      AttributeId { get; init; }
+        public string   Name        { get; init; } = null!;
+        public string   Code        { get; init; } = "";
+        public string   ColorHex    { get; init; } = "";
+        public string   ImageUrl    { get; init; } = "";
+        public int      SortOrder   { get; init; }
+        public DateTime CreatedAt   { get; init; }
+
+        public CatalogAttributeValueRow ToModel() => new(Id, AttributeId, Name, Code, ColorHex, ImageUrl, SortOrder,
+            new DateTimeOffset(CreatedAt, TimeSpan.Zero));
+    }
+
+    public async Task<IReadOnlyList<CatalogAttributeRow>> ListAttributesAsync(
+        string tenantId, int page, int pageSize, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var sql = $"""
+            SELECT {AttrCols} FROM "CatalogAttributes"
+            WHERE "TenantId" = @TenantId
+            ORDER BY "SortOrder","Name"
+            LIMIT @PageSize OFFSET @Offset
+            """;
+        var rows = await conn.QueryAsync<AttrRow>(
+            new CommandDefinition(sql, new { TenantId = tenantId, PageSize = pageSize, Offset = Math.Max(0, page - 1) * pageSize },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return rows.Select(r => r.ToModel()).ToList();
+    }
+
+    public async Task<int> CountAttributesAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        return await conn.ExecuteScalarAsync<int>(
+            new CommandDefinition("""SELECT COUNT(*)::INT FROM "CatalogAttributes" WHERE "TenantId"=@TenantId""",
+                new { TenantId = tenantId }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<CatalogAttributeRow?> GetAttributeByIdAsync(int id, string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var row = await conn.QuerySingleOrDefaultAsync<AttrRow>(
+            new CommandDefinition($"""SELECT {AttrCols} FROM "CatalogAttributes" WHERE "Id"=@Id AND "TenantId"=@TenantId""",
+                new { Id = id, TenantId = tenantId }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return row?.ToModel();
+    }
+
+    public async Task<bool> AttributeCodeExistsAsync(string tenantId, string code, int? excludeId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var sql = excludeId.HasValue
+            ? """SELECT CASE WHEN EXISTS(SELECT 1 FROM "CatalogAttributes" WHERE "TenantId"=@TenantId AND "Code"=@Code AND "Id"<>@Excl) THEN 1 ELSE 0 END"""
+            : """SELECT CASE WHEN EXISTS(SELECT 1 FROM "CatalogAttributes" WHERE "TenantId"=@TenantId AND "Code"=@Code) THEN 1 ELSE 0 END""";
+        return await conn.ExecuteScalarAsync<int>(
+            new CommandDefinition(sql, new { TenantId = tenantId, Code = code, Excl = excludeId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false) == 1;
+    }
+
+    public async Task<int> CreateAttributeAsync(CatalogAttributeRow row, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            INSERT INTO "CatalogAttributes"("TenantId","Name","Code","Type","Required","Description","SortOrder","CreatedAt","UpdatedAt")
+            VALUES(@TenantId,@Name,@Code,@Type,@Required,@Description,@SortOrder,@CreatedAt,@UpdatedAt)
+            RETURNING "Id"
+            """;
+        var now = DateTimeOffset.UtcNow;
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, new
+        {
+            row.TenantId, row.Name, row.Code, row.Type, row.Required, row.Description, row.SortOrder,
+            CreatedAt = now.UtcDateTime, UpdatedAt = now.UtcDateTime,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateAttributeAsync(CatalogAttributeRow row, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            UPDATE "CatalogAttributes"
+            SET "Name"=@Name,"Code"=@Code,"Type"=@Type,"Required"=@Required,
+                "Description"=@Description,"SortOrder"=@SortOrder,"UpdatedAt"=@UpdatedAt
+            WHERE "Id"=@Id AND "TenantId"=@TenantId
+            """;
+        var affected = await conn.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            row.Id, row.TenantId, row.Name, row.Code, row.Type, row.Required,
+            row.Description, row.SortOrder, UpdatedAt = DateTimeOffset.UtcNow.UtcDateTime,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    public async Task<bool> DeleteAttributeAsync(int id, string tenantId, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var affected = await conn.ExecuteAsync(
+            new CommandDefinition("""DELETE FROM "CatalogAttributes" WHERE "Id"=@Id AND "TenantId"=@TenantId""",
+                new { Id = id, TenantId = tenantId }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    public async Task<IReadOnlyList<CatalogAttributeValueRow>> ListAttributeValuesAsync(
+        int attributeId, string tenantId, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT v."Id",v."AttributeId",v."Name",v."Code",v."ColorHex",v."ImageUrl",v."SortOrder",v."CreatedAt"
+            FROM "CatalogAttributeValues" v
+            INNER JOIN "CatalogAttributes" a ON a."Id"=v."AttributeId"
+            WHERE v."AttributeId"=@AttributeId AND a."TenantId"=@TenantId
+            ORDER BY v."SortOrder",v."Name"
+            """;
+        var rows = await conn.QueryAsync<AttrValueRow>(
+            new CommandDefinition(sql, new { AttributeId = attributeId, TenantId = tenantId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return rows.Select(r => r.ToModel()).ToList();
+    }
+
+    public async Task<int> CreateAttributeValueAsync(CatalogAttributeValueRow row,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            INSERT INTO "CatalogAttributeValues"("AttributeId","Name","Code","ColorHex","ImageUrl","SortOrder","CreatedAt")
+            VALUES(@AttributeId,@Name,@Code,@ColorHex,@ImageUrl,@SortOrder,@CreatedAt)
+            RETURNING "Id"
+            """;
+        return await conn.ExecuteScalarAsync<int>(new CommandDefinition(sql, new
+        {
+            row.AttributeId, row.Name, row.Code, row.ColorHex, row.ImageUrl, row.SortOrder,
+            CreatedAt = DateTimeOffset.UtcNow.UtcDateTime,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UpdateAttributeValueAsync(CatalogAttributeValueRow row, string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        // Verify ownership via join
+        const string sql = """
+            UPDATE "CatalogAttributeValues" v
+            SET "Name"=@Name,"Code"=@Code,"ColorHex"=@ColorHex,"ImageUrl"=@ImageUrl,"SortOrder"=@SortOrder
+            FROM "CatalogAttributes" a
+            WHERE v."Id"=@Id AND v."AttributeId"=@AttributeId
+              AND a."Id"=v."AttributeId" AND a."TenantId"=@TenantId
+            """;
+        var affected = await conn.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            row.Id, row.AttributeId, row.Name, row.Code, row.ColorHex, row.ImageUrl, row.SortOrder, TenantId = tenantId,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    public async Task<bool> DeleteAttributeValueAsync(int valueId, int attributeId, string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            DELETE FROM "CatalogAttributeValues" v
+            USING "CatalogAttributes" a
+            WHERE v."Id"=@ValueId AND v."AttributeId"=@AttributeId
+              AND a."Id"=v."AttributeId" AND a."TenantId"=@TenantId
+            """;
+        var affected = await conn.ExecuteAsync(
+            new CommandDefinition(sql, new { ValueId = valueId, AttributeId = attributeId, TenantId = tenantId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return affected > 0;
     }
 }

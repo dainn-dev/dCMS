@@ -46,6 +46,22 @@ public sealed class CatalogApiFixture : IAsyncLifetime
                     .ConfigureAwait(false);
                 await conn.ExecuteAsync(axesScript).ConfigureAwait(false);
 
+                var brandsScript = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", "016_CreateBrands.sql"))
+                    .ConfigureAwait(false);
+                await conn.ExecuteAsync(brandsScript).ConfigureAwait(false);
+
+                var addBrandAdditionalInfo = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", "017_AddBrandAdditionalInfo.sql"))
+                    .ConfigureAwait(false);
+                await conn.ExecuteAsync(addBrandAdditionalInfo).ConfigureAwait(false);
+
+                var extendCategoriesScript = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", "018_ExtendCategories.sql"))
+                    .ConfigureAwait(false);
+                await conn.ExecuteAsync(extendCategoriesScript).ConfigureAwait(false);
+
+                var extendAttrScript = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", "019_ExtendCatalogAttributes.sql"))
+                    .ConfigureAwait(false);
+                await conn.ExecuteAsync(extendAttrScript).ConfigureAwait(false);
+
                 var colorAttrId = await conn.QuerySingleAsync<int>(
                     """
                     INSERT INTO "CatalogAttributes" ("TenantId", "Name", "SortOrder")

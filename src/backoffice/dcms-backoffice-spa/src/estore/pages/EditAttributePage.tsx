@@ -14,6 +14,7 @@ import {
 import type { AttributeListRow } from "../attributes-columns";
 import { MultiLangInput } from "../components/MultiLangField";
 import { exportSingleAttributeValuesXlsx } from "../exportAttributeTemplates";
+import { createAttribute, updateAttribute } from "../api/attributesApi";
 
 const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
 
@@ -189,9 +190,11 @@ type Props = {
   mode: "add" | "edit";
   attribute?: AttributeListRow;
   onBack: () => void;
+  tenantId?: string;
+  authToken?: string;
 };
 
-export function EditAttributePage({ mode, attribute, onBack }: Props) {
+export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken }: Props) {
   const isAdd = mode === "add";
 
   // ── General state ─────────────────────────────────────────────────────────
@@ -267,14 +270,32 @@ export function EditAttributePage({ mode, attribute, onBack }: Props) {
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  function handleSave() {
+  async function handleSave() {
     setActionsOpen(false);
-    const labelName = primaryLocaleName(nameLocales);
-    setToast(
-      isAdd
-        ? `Attribute "${labelName}" created successfully.`
-        : `Attribute "${labelName}" updated successfully.`
-    );
+    const labelName = primaryLocaleName(nameLocales) || "Attribute";
+    const apiType = valueType === "Color" ? "COLOR" : valueType === "Image" ? "IMAGE" : "TEXT";
+    const payload = {
+      name: labelName,
+      code: code || labelName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+      type: apiType as "TEXT" | "COLOR" | "IMAGE" | "SELECT" | "BOOLEAN",
+      required: searchFilterOnly,
+      sortOrder: 0,
+    };
+
+    if (tenantId) {
+      try {
+        if (isAdd) {
+          await createAttribute(tenantId, payload, authToken);
+        } else if (attribute?.id) {
+          await updateAttribute(tenantId, attribute.id, payload, authToken);
+        }
+      } catch (err) {
+        setToast(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+        return;
+      }
+    }
+
+    setToast(isAdd ? `Attribute "${labelName}" created successfully.` : `Attribute "${labelName}" updated successfully.`);
     setTimeout(() => onBack(), 1800);
   }
 

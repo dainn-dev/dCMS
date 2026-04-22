@@ -112,4 +112,12 @@ public static class DcmsJwtAuthExtensions
             builder.AddEndpointFilter<TenantStoreHeaderAccessEndpointFilter>();
         return builder;
     }
+
+    /// <summary>Applies tenant-only route match (no store scope) when auth is enabled. Used for Brand API and similar tenant-level endpoints.</summary>
+    public static RouteGroupBuilder WithTenantAccess(this RouteGroupBuilder group, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            group.AddEndpointFilter<TenantOnlyAccessEndpointFilter>();
+        return group;
+    }
 }
