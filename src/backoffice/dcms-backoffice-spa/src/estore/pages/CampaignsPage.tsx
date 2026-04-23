@@ -3,6 +3,7 @@ import { DataTable } from "../../orders/components/DataTable";
 import { IconAddCircle, IconBolt, IconFilterList, IconRestartAlt } from "../../orders/icons";
 import { createCampaignColumns } from "../campaigns-columns";
 import type { CampaignChannel, CampaignListRow, CampaignStatus } from "../campaigns-columns";
+import { fetchCampaigns } from "../api/campaignsApi";
 
 const ALL_STATUSES: CampaignStatus[] = ["draft", "scheduled", "active", "paused", "ended"];
 const ALL_CHANNELS: CampaignChannel[] = ["Email", "SMS", "Push", "Web"];
@@ -94,12 +95,28 @@ export type CampaignsPageProps = {
   onCreateCampaign?: () => void;
   onEditCampaign?: (row: CampaignListRow) => void;
   onViewCampaign?: (row: CampaignListRow) => void;
+  tenantId?: string;
+  authToken?: string;
 };
 
-export function CampaignsPage({ onCreateCampaign, onEditCampaign, onViewCampaign }: CampaignsPageProps) {
+export function CampaignsPage({ onCreateCampaign, onEditCampaign, onViewCampaign, tenantId, authToken }: CampaignsPageProps) {
+  const [allRows, setAllRows] = useState<CampaignListRow[]>(DEMO_CAMPAIGNS);
+  const [apiLoading, setApiLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | CampaignStatus>("all");
   const [filterChannel, setFilterChannel] = useState<"all" | CampaignChannel>("all");
   const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    setApiLoading(true);
+    fetchCampaigns(tenantId, {}, authToken)
+      .then((rows) => { if (!cancelled) setAllRows(rows); })
+      .catch((err) => { if (!cancelled) console.error("[CampaignsPage] fetch failed", err); })
+      .finally(() => { if (!cancelled) setApiLoading(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, authToken]);
 
   useEffect(() => {
     if (!toast) return;
@@ -108,36 +125,41 @@ export function CampaignsPage({ onCreateCampaign, onEditCampaign, onViewCampaign
   }, [toast]);
 
   const filteredRows = useMemo(() => {
-    return DEMO_CAMPAIGNS.filter((r) => {
+    return allRows.filter((r) => {
       if (filterStatus !== "all" && r.status !== filterStatus) return false;
       if (filterChannel !== "all" && r.channel !== filterChannel) return false;
       return true;
     });
-  }, [filterStatus, filterChannel]);
+  }, [allRows, filterStatus, filterChannel]);
 
   const columns = useMemo(
     () =>
       createCampaignColumns(
         (id) => {
-          const c = DEMO_CAMPAIGNS.find((x) => x.id === id);
+          const c = allRows.find((x) => x.id === id);
           if (c && onViewCampaign) onViewCampaign(c);
           else if (c) setToast(`Opening campaign: ${c.name}`);
           else setToast("Campaign not found");
         },
         (id) => {
-          const c = DEMO_CAMPAIGNS.find((x) => x.id === id);
+          const c = allRows.find((x) => x.id === id);
           if (c && onEditCampaign) onEditCampaign(c);
           else if (c) setToast(`Edit campaign (demo): ${c.code}`);
           else setToast("Campaign not found");
         }
       ),
-    [onEditCampaign, onViewCampaign]
+    [onEditCampaign, onViewCampaign, allRows]
   );
 
   const filterActive = filterStatus !== "all" || filterChannel !== "all";
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Campaign management">
+    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low relative" aria-label="Campaign management">
+      {apiLoading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-start md:justify-between">
         <div>
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -217,7 +239,7 @@ export function CampaignsPage({ onCreateCampaign, onEditCampaign, onViewCampaign
               Clear filters
             </button>
             <p className="ml-auto text-xs text-on-surface-variant">
-              Showing <strong className="text-on-surface">{filteredRows.length}</strong> / {DEMO_CAMPAIGNS.length} campaigns
+              Showing <strong className="text-on-surface">{filteredRows.length}</strong> / {allRows.length} campaigns
             </p>
           </div>
         </section>

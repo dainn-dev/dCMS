@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  createCampaign, updateCampaign,
+  submitCampaign, approveCampaign, rejectCampaign,
+  activateCampaign, pauseCampaign, archiveCampaign,
+  fetchCampaignHistory,
+} from "../api/campaignsApi";
+import {
   IconArrowBack,
   IconCheckCircle,
   IconChevronDown,
@@ -192,9 +198,11 @@ type Props = {
   mode: "add" | "edit";
   campaign?: CampaignListRow;
   onBack: () => void;
+  tenantId?: string;
+  authToken?: string;
 };
 
-export function EditCampaignPage({ mode, campaign, onBack }: Props) {
+export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }: Props) {
   const isAdd = mode === "add";
 
   const [campaignKind, setCampaignKind] = useState<CampaignKind>(() => campaign?.editorKind ?? "pwp-item");
@@ -300,70 +308,89 @@ export function EditCampaignPage({ mode, campaign, onBack }: Props) {
 
   const typeLocked = workflow === "approved" || workflow === "active";
 
-  function handleSaveAndApprove() {
+  // ── API helpers ───────────────────────────────────────────────────────────────
+  const campaignId = (campaign as (typeof campaign & { id?: string }) | undefined)?.id;
+
+  async function apiSave() {
+    if (!tenantId) return;
+    const payload = {
+      code: code || "CAMPAIGN",
+      nameJson: JSON.stringify({ en: Object.values(nameLocales)[0] ?? code }),
+      editorKind: campaignKind,
+      qualifiersJson: JSON.stringify({
+        inclusion: { brands: incBrands, categories: incCategories, pid1: incPid1, pid2: incPid2, products: incProducts, cartAllQualifiers, minSpend, minSpendNet },
+        exclusion: { brands: excBrands, categories: excCategories, pid1: excPid1, pid2: excPid2, products: excProducts, membershipTypes: excMembershipTypes, membershipTiers: excMembershipTiers },
+      }),
+      mechanicsJson: JSON.stringify(
+        campaignKind === "pwp-item" ? itemMechanics :
+        campaignKind === "pwp-discount" ? discountMechanics :
+        campaignKind === "mix-match" ? mixMatchMechanics :
+        campaignKind === "product-discount" ? productDiscountMechanics :
+        afterSalesMechanics
+      ),
+      promotionDetailsJson: JSON.stringify({ orderDetailMessage, promotionDetails, showPromoOnProductPage, promotionMessagePriority, campaignPriority, blockOtherPromos, blockSamePriority }),
+    };
+    if (isAdd) {
+      await createCampaign(tenantId, payload, authToken);
+    } else if (campaignId) {
+      await updateCampaign(tenantId, campaignId, payload, authToken);
+    }
+  }
+
+  async function doTransition(fn: () => Promise<void>, nextState: CampaignWorkflowState, msg: string) {
+    if (tenantId && campaignId) {
+      try { await fn(); } catch (err) {
+        setToast(`API error: ${err instanceof Error ? err.message : "Unknown"}`);
+        return;
+      }
+    }
+    const prev = WORKFLOW_LABEL[workflow];
+    setWorkflow(nextState);
+    appendHistory({ at: new Date().toISOString(), user: "You", field: "Workflow", oldValue: prev, newValue: WORKFLOW_LABEL[nextState] });
+    setToast(msg);
+  }
+
+  async function handleSaveAndApprove() {
+    try { await apiSave(); } catch { /* ignore */ }
     const next: CampaignWorkflowState = applyOnEStore ? "active" : "approved";
-    const prev = WORKFLOW_LABEL[workflow];
-    setWorkflow(next);
-    appendHistory({
-      at: new Date().toISOString(),
-      user: "admin@dainn.dev (demo)",
-      field: "Workflow",
-      oldValue: prev,
-      newValue: WORKFLOW_LABEL[next],
-    });
-    setToast(applyOnEStore ? "Approved and activated on eStore (demo)." : "Approved — not live until eStore flag is on (demo).");
+    await doTransition(
+      () => approveCampaign(tenantId!, campaignId!, undefined, authToken),
+      next,
+      applyOnEStore ? "Approved and activated." : "Approved — pending eStore activation."
+    );
   }
 
-  function handleSaveAndSendForApproval() {
-    const prev = WORKFLOW_LABEL[workflow];
-    setWorkflow("pending_approval");
-    appendHistory({
-      at: new Date().toISOString(),
-      user: "You (demo)",
-      field: "Workflow",
-      oldValue: prev,
-      newValue: WORKFLOW_LABEL.pending_approval,
-    });
-    setToast("Saved and sent for approval (demo).");
+  async function handleSaveAndSendForApproval() {
+    try { await apiSave(); } catch { /* ignore */ }
+    await doTransition(
+      () => submitCampaign(tenantId!, campaignId!, undefined, authToken),
+      "pending_approval",
+      "Sent for approval."
+    );
   }
 
-  function handleSaveAndArchive() {
-    const prev = WORKFLOW_LABEL[workflow];
-    setWorkflow("archived");
-    appendHistory({
-      at: new Date().toISOString(),
-      user: "You (demo)",
-      field: "Workflow",
-      oldValue: prev,
-      newValue: WORKFLOW_LABEL.archived,
-    });
-    setToast("Campaign archived (demo).");
+  async function handleSaveAndArchive() {
+    await doTransition(
+      () => archiveCampaign(tenantId!, campaignId!, undefined, authToken),
+      "archived",
+      "Campaign archived."
+    );
   }
 
-  function handleDeactivate() {
-    const prev = WORKFLOW_LABEL[workflow];
-    setWorkflow("deactivated");
-    appendHistory({
-      at: new Date().toISOString(),
-      user: "You (demo)",
-      field: "Workflow",
-      oldValue: prev,
-      newValue: WORKFLOW_LABEL.deactivated,
-    });
-    setToast("Campaign deactivated on eStore (demo).");
+  async function handleDeactivate() {
+    await doTransition(
+      () => pauseCampaign(tenantId!, campaignId!, undefined, authToken),
+      "deactivated",
+      "Campaign deactivated."
+    );
   }
 
-  function handleReject() {
-    const prev = WORKFLOW_LABEL[workflow];
-    setWorkflow("rejected");
-    appendHistory({
-      at: new Date().toISOString(),
-      user: "admin@dainn.dev (demo)",
-      field: "Workflow",
-      oldValue: prev,
-      newValue: WORKFLOW_LABEL.rejected,
-    });
-    setToast("Campaign rejected — not activated (demo).");
+  async function handleReject() {
+    await doTransition(
+      () => rejectCampaign(tenantId!, campaignId!, undefined, authToken),
+      "rejected",
+      "Campaign rejected."
+    );
   }
 
   return (

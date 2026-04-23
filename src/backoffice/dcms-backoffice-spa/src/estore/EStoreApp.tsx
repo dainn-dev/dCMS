@@ -715,12 +715,16 @@ export function EStoreApp({
             mode={campaignForm.mode === "add" ? "add" : "edit"}
             campaign={campaignForm.mode === "edit" ? campaignForm.data : undefined}
             onBack={() => setCampaignForm({ mode: "idle" })}
+            tenantId={tenantId}
+            authToken={authToken}
           />
         ) : (
           <CampaignsPage
             onCreateCampaign={() => setCampaignForm({ mode: "add" })}
             onEditCampaign={(row) => setCampaignForm({ mode: "edit", data: row })}
             onViewCampaign={(row) => setCampaignForm({ mode: "edit", data: row })}
+            tenantId={tenantId}
+            authToken={authToken}
           />
         ))}
       {page === "attributes" &&

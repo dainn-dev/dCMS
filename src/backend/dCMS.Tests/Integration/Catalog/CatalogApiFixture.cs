@@ -62,6 +62,10 @@ public sealed class CatalogApiFixture : IAsyncLifetime
                     .ConfigureAwait(false);
                 await conn.ExecuteAsync(extendAttrScript).ConfigureAwait(false);
 
+                var campaignsScript = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", "020_CreateCampaigns.sql"))
+                    .ConfigureAwait(false);
+                await conn.ExecuteAsync(campaignsScript).ConfigureAwait(false);
+
                 var colorAttrId = await conn.QuerySingleAsync<int>(
                     """
                     INSERT INTO "CatalogAttributes" ("TenantId", "Name", "SortOrder")
