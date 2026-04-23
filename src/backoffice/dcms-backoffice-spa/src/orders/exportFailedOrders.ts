@@ -21,8 +21,9 @@ const HEADERS = [
   "Store",
   "Store Auto ID",
   "Failure Error Code",
-  "Failure At",
+  "Failed At",
   "Failure Reason",
+  "Retry Count",
 ] as const;
 
 function cell(value: string | null | undefined): string {
@@ -53,6 +54,7 @@ function rowToCsv(o: FailedOrder): string {
     cell(o.failureErrorCode),
     cell(o.failureAt),
     cell(o.failureReason),
+    cell(String(o.failureRetryCount)),
   ].join(",");
 }
 

@@ -9,6 +9,11 @@ type MountOptions = {
   languages?: UmbracoLanguage[];
   /** <c>access</c> = Umbraco Access section: sidebar only Users / Roles / Tenants. */
   sidebarScope?: EStoreSidebarScope;
+  /** From <c>GET /umbraco/dcms/api/estore/context</c> (or host) for store-scoped Catalog API. */
+  tenantId?: string;
+  storeId?: string;
+  /** Bearer for gateway → catalog when Auth is enabled. */
+  authToken?: string;
 };
 
 const roots = new WeakMap<HTMLElement, Root>();
@@ -19,7 +24,13 @@ export function mount(host: HTMLElement, options?: MountOptions) {
   roots.set(host, root);
   root.render(
     <React.StrictMode>
-      <EStoreApp languages={options?.languages} sidebarScope={options?.sidebarScope ?? "estore"} />
+      <EStoreApp
+        languages={options?.languages}
+        sidebarScope={options?.sidebarScope ?? "estore"}
+        tenantId={options?.tenantId}
+        storeId={options?.storeId}
+        authToken={options?.authToken}
+      />
     </React.StrictMode>
   );
 }

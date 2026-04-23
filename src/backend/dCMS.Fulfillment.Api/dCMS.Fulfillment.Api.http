@@ -1,0 +1,87 @@
+# dCMS.Fulfillment.Api — manual smoke / REST Client (VS / Rider / VS Code REST Client)
+# Local: launchSettings "http" profile → http://localhost:5287
+# Docker: host port 5006 (infra/docker-compose.yml)
+# Gateway (eStore / backoffice): http://localhost:5100/gateway/v1/fulfillment/...  (path → /api/v1/... upstream)
+# When Auth:Enabled, set @token to a JWT with catalog:read / catalog:write and tenant_id claim = @tenantId.
+
+@FulfillmentApi_HostAddress = http://localhost:5287
+@Gateway_HostAddress = http://localhost:5100
+@tenantId = t1
+@groupingId = ffg_REPLACE_ME
+@slotId = ffs_REPLACE_ME
+@locationId = ffc_REPLACE_ME
+@partnerId = ffl_REPLACE_ME
+@token =
+
+### Health (anonymous)
+
+GET {{FulfillmentApi_HostAddress}}/health
+Accept: application/json
+
+###
+
+### List groupings (tenant)
+
+GET {{FulfillmentApi_HostAddress}}/api/v1/tenants/{{tenantId}}/fulfillment/groupings?pageSize=50
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Create grouping (tenant) — Auth off in Development uses no Bearer
+
+POST {{FulfillmentApi_HostAddress}}/api/v1/tenants/{{tenantId}}/fulfillment/groupings
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "groupName": "Standard Delivery",
+  "code": "STD_DELIVERY",
+  "startDate": "2026-01-01",
+  "endDate": "2026-12-31",
+  "priority": 10,
+  "active": true,
+  "tenantEnabled": false,
+  "maxPerTenant": null,
+  "deliveryMode": "Local Delivery",
+  "limitSelectedDistributionCenter": false,
+  "stockLocation": ""
+}
+
+###
+
+### List slots for grouping
+
+GET {{FulfillmentApi_HostAddress}}/api/v1/tenants/{{tenantId}}/fulfillment/groupings/{{groupingId}}/slots
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+### Get / put tenant JSON settings (predefinedFields, dynamicFields, stockLocations)
+
+GET {{FulfillmentApi_HostAddress}}/api/v1/tenants/{{tenantId}}/fulfillment/settings
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+PUT {{FulfillmentApi_HostAddress}}/api/v1/tenants/{{tenantId}}/fulfillment/settings
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "predefinedFields": [],
+  "dynamicFields": [],
+  "stockLocations": []
+}
+
+###
+
+### Via Gateway — same path after /gateway/v1/fulfillment
+
+GET {{Gateway_HostAddress}}/gateway/v1/fulfillment/tenants/{{tenantId}}/fulfillment/groupings?pageSize=50
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###

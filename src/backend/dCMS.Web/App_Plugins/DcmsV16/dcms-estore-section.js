@@ -38,6 +38,27 @@ async function fetchUmbracoLanguages() {
   }
 }
 
+/**
+ * Optional tenant/store for Catalog API (DAI-616). Configure under Dcms:Estore in appsettings.
+ * @returns {Promise<{ tenantId?: string, storeId?: string }>}
+ */
+async function fetchEstoreContext() {
+  try {
+    const res = await fetch("/umbraco/dcms/api/estore/context", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return {};
+    const json = await res.json();
+    const out = {};
+    if (json.tenantId) out.tenantId = String(json.tenantId);
+    if (json.storeId) out.storeId = String(json.storeId);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
@@ -60,8 +81,7 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
     this.#host = this.querySelector("[data-react-root]");
     if (!this.#host) return;
 
-    // Fetch languages from our custom backoffice API (cookie auth, no Bearer token needed).
-    const languages = await fetchUmbracoLanguages();
+    const [languages, estoreContext] = await Promise.all([fetchUmbracoLanguages(), fetchEstoreContext()]);
 
     try {
       // Fetch CSS text and inject a <style> tag directly inside THIS element,
@@ -85,7 +105,7 @@ export default class DcmsEStoreSectionElement extends UmbElementMixin(HTMLElemen
 
       this.#spa = await import(/* @vite-ignore */ SPA_JS);
       // Pass pre-fetched languages so React doesn't need to call the Management API itself.
-      this.#spa?.mount?.(this.#host, { languages });
+      this.#spa?.mount?.(this.#host, { languages, ...estoreContext });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (this.#host) {

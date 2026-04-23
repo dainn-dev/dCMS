@@ -241,6 +241,48 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ListOrders_multi_status_returns_union_and_deduplicates()
+    {
+        var o1 = Guid.NewGuid().ToString();
+        var o2 = Guid.NewGuid().ToString();
+
+        await _orderService!.CreateOrderAsync(new CreateOrderCommand(
+            o1, "t1", "s1", "cust-x", $"idem-{Guid.NewGuid():N}",
+            [new CreateOrderLine("l1", "p", "v", "wh", 1, new OrderDomain.Money(1m, "USD"), "N", "{}")],
+            new OrderDomain.ShippingAddress("1", null, "C", "R", "1", "VN"),
+            DateTimeOffset.UtcNow));
+
+        await _orderService.CreateOrderAsync(new CreateOrderCommand(
+            o2, "t1", "s1", "cust-x", $"idem-{Guid.NewGuid():N}",
+            [new CreateOrderLine("l2", "p", "v", "wh", 1, new OrderDomain.Money(2m, "USD"), "N", "{}")],
+            new OrderDomain.ShippingAddress("2", null, "C", "R", "2", "VN"),
+            DateTimeOffset.UtcNow));
+
+        // default status is PaymentPending; query should return both even with duplicates + whitespace
+        var page = await _orderService.ListOrdersAsync(
+            new OrderListQuery("t1", "s1", null, "payment_pending, payment_pending", null, 50));
+        var ids = page.Items.Select(i => i.Order.Id).ToHashSet();
+        Assert.Contains(o1, ids);
+        Assert.Contains(o2, ids);
+    }
+
+    [Fact]
+    public async Task ListOrders_multi_status_invalid_part_throws_with_part_name()
+    {
+        var ex = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _orderService!.ListOrdersAsync(new OrderListQuery("t1", "s1", null, "payment_failed,not-a-status", null, 10)));
+        Assert.Contains("not-a-status", ex.Message);
+    }
+
+    [Fact]
+    public async Task ListOrders_multi_status_more_than_10_throws()
+    {
+        var many = string.Join(',', Enumerable.Repeat("payment_pending", 11));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await _orderService!.ListOrdersAsync(new OrderListQuery("t1", "s1", null, many, null, 10)));
+    }
+
+    [Fact]
     public async Task CancelOrder_payment_pending_updates_row_outbox_and_publishes_customer_cancellation()
     {
         _busMock.Invocations.Clear();

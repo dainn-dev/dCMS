@@ -211,6 +211,23 @@ export function createFailedOrderColumns(
       ),
     },
 
+    // ── Failure Reason (optional, hidden by default) ─────────────────────────
+    {
+      accessorKey: "failureReason",
+      header: "Failure Reason",
+      enableHiding: true,
+      cell: ({ row }) => {
+        const raw = String(row.getValue("failureReason") ?? "");
+        const text = raw.trim();
+        const short = text.length > 60 ? `${text.slice(0, 60)}…` : text || "—";
+        return (
+          <span className="text-xs text-on-surface-variant" title={text || undefined}>
+            {short}
+          </span>
+        );
+      },
+    },
+
     // ── Actions ─────────────────────────────────────────────────────────────
     {
       id: "actions",
@@ -248,4 +265,5 @@ export const FAILED_ORDER_COLUMN_LABELS: Record<string, string> = {
   processedBy: "Processed By",
   tags: "Tags",
   paymentMethod: "Payment Method",
+  failureReason: "Failure Reason",
 };

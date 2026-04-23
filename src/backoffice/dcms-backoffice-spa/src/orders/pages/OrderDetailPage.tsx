@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   IconArrowBack,
   IconBolt,
@@ -14,6 +14,7 @@ import {
   IconShipping,
   IconVisibility,
 } from "../icons";
+import { cancelOrder, deliverOrder, getOrderDetail, mapApiStatusToUiLabel, shipOrder } from "../api/ordersApi";
 
 type OrderMode = "view" | "action";
 
@@ -21,6 +22,9 @@ type Props = {
   orderId: string;
   mode: OrderMode;
   onBack: () => void;
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
 };
 
 const ORDER_STATUSES = [
@@ -60,8 +64,19 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
 // Statuses that lock an order from further editing
 const LOCKED_STATUSES: OrderStatus[] = ["Picked Up", "Returned", "Delivered"];
 
-export function OrderDetailPage({ orderId, mode, onBack }: Props) {
+export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, authToken }: Props) {
   const isAction = mode === "action";
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [detail, setDetail] = useState<Awaited<ReturnType<typeof getOrderDetail>> | null>(null);
+
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionToast, setActionToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [shipModalOpen, setShipModalOpen] = useState(false);
+  const [shipCarrier, setShipCarrier] = useState("");
+  const [shipTracking, setShipTracking] = useState("");
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
 
   // Group Actions dropdown
   const [groupActionsOpen, setGroupActionsOpen] = useState(false);
@@ -131,6 +146,132 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
 
   const isLocked = LOCKED_STATUSES.includes(orderStatus);
 
+  useEffect(() => {
+    if (!actionToast) return;
+    const t = setTimeout(() => setActionToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [actionToast]);
+
+  useEffect(() => {
+    // Fetch on mount / orderId change
+    // NOTE: We keep UI structure but hydrate key fields from API.
+    // When tenant/store missing, we skip fetch (demo mode).
+    if (!tenantId || !storeId) return;
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    setNotFound(false);
+    getOrderDetail(tenantId, storeId, orderId, authToken)
+      .then((dto) => {
+        if (cancelled) return;
+        setDetail(dto);
+        setOrderStatus(mapApiStatusToUiLabel(dto.status) as OrderStatus);
+
+        // Hydrate customer (Order API does not return full profile yet)
+        const ship = dto.shippingAddress;
+        const addrLines = [ship?.line1, ship?.line2, ship?.city, ship?.region, ship?.postalCode, ship?.countryCode]
+          .filter((x): x is string => Boolean((x ?? "").trim()))
+          .map((x) => String(x));
+        setCustomer((prev) => ({
+          ...prev,
+          name: String(dto.customerId ?? prev.name),
+          email: String(dto.customerId ?? prev.email),
+          address: addrLines.join("\n") || prev.address,
+        }));
+
+        // Hydrate shipment placeholders
+        const s = dto.shipment;
+        if (!s) {
+          setDelivery((prev) => ({
+            ...prev,
+            shippingStatus: "Shipment not yet created",
+            logisticPartner: "—",
+            trackingNumber: "—",
+          }));
+        } else {
+          setDelivery((prev) => ({
+            ...prev,
+            shippingStatus: s.status ?? "—",
+            logisticPartner: s.carrier ?? "—",
+            trackingNumber: s.trackingNumber ?? "—",
+          }));
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : "Failed to load order";
+        setLoadError(msg);
+        if (/not found/i.test(msg) || /404/.test(msg)) setNotFound(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, storeId, authToken, orderId]);
+
+  async function refetch() {
+    if (!tenantId || !storeId) return;
+    try {
+      const dto = await getOrderDetail(tenantId, storeId, orderId, authToken);
+      setDetail(dto);
+      setOrderStatus(mapApiStatusToUiLabel(dto.status) as OrderStatus);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function runCancel() {
+    if (!tenantId || !storeId) return;
+    setActionBusy(true);
+    try {
+      await cancelOrder(tenantId, storeId, orderId, null, authToken);
+      setActionToast({ kind: "success", message: `Order ${orderId} cancelled` });
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Cancel failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runDeliver() {
+    if (!tenantId || !storeId) return;
+    setActionBusy(true);
+    try {
+      await deliverOrder(tenantId, storeId, orderId, authToken);
+      setActionToast({ kind: "success", message: `Order ${orderId} delivered` });
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Deliver failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runShip() {
+    if (!tenantId || !storeId) return;
+    if (!shipCarrier.trim() || !shipTracking.trim()) {
+      setActionToast({ kind: "error", message: "Carrier and tracking number are required." });
+      return;
+    }
+    setActionBusy(true);
+    try {
+      await shipOrder(tenantId, storeId, orderId, { carrier: shipCarrier.trim(), trackingNumber: shipTracking.trim() }, authToken);
+      setActionToast({ kind: "success", message: `Order ${orderId} shipped` });
+      setShipModalOpen(false);
+      setShipCarrier("");
+      setShipTracking("");
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Ship failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   function handleGroupStatusChange(status: OrderStatus) {
     setOrderStatus(status);
     setGroupActionsOpen(false);
@@ -185,6 +326,28 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
 
   return (
     <div className="space-y-6 max-w-7xl">
+      {!tenantId || !storeId ? (
+        <div className="rounded-xl border border-error/25 bg-error/5 px-5 py-4 text-sm text-error">
+          Missing tenantId / storeId for Orders API. Configure `Dcms:Estore` or pass context from host.
+        </div>
+      ) : null}
+
+      {loadError && (
+        <div className="rounded-xl border border-error/25 bg-error/5 px-5 py-4 text-sm text-error">{loadError}</div>
+      )}
+
+      {loading && (
+        <div className="rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-5 py-4 text-sm text-on-surface-variant">
+          Loading order…
+        </div>
+      )}
+
+      {notFound && !loading && (
+        <div className="rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-5 py-10 text-center text-sm text-on-surface-variant">
+          Order <span className="font-mono font-bold text-on-surface">{orderId}</span> not found.
+        </div>
+      )}
+
       {/* Page header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -224,6 +387,37 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
         </div>
 
         <div className="flex gap-2 shrink-0 flex-wrap">
+          {isAction && (
+            <>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-error text-on-error hover:opacity-90 disabled:opacity-40"
+                disabled={actionBusy || !tenantId || !storeId}
+                onClick={() => setCancelConfirmOpen(true)}
+              >
+                <IconCancel className="h-4 w-4" />
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-surface-container-high text-on-surface hover:bg-surface-container disabled:opacity-40"
+                disabled={actionBusy || !tenantId || !storeId}
+                onClick={() => setShipModalOpen(true)}
+              >
+                <IconShipping className="h-4 w-4" />
+                Ship
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-40"
+                disabled={actionBusy || !tenantId || !storeId}
+                onClick={() => void runDeliver()}
+              >
+                <IconCheckCircle className="h-4 w-4" />
+                Deliver
+              </button>
+            </>
+          )}
           {/* Actions dropdown */}
           <div className="relative">
             <button
@@ -355,9 +549,18 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
           </div>
           <div className="space-y-3">
             <InfoRow label="Order No" value={<span className="font-bold">{orderId}</span>} />
-            <InfoRow label="Order Date" value="Oct 24, 2023, 14:32" />
+            <InfoRow label="Order Date" value={detail?.createdAt ? String(detail.createdAt) : "—"} />
             <InfoRow label="DO Number" value="DO-7729-X" />
             <InfoRow label="Delivery Orders" value="1" />
+            <InfoRow label="Customer ID" value={<span className="font-mono">{detail?.customerId ?? "—"}</span>} />
+            <InfoRow
+              label="Total"
+              value={
+                detail?.total
+                  ? new Intl.NumberFormat(undefined, { style: "currency", currency: detail.total.currency }).format(detail.total.amount)
+                  : "—"
+              }
+            />
             <InfoRow
               label="Order Type"
               value={
@@ -1096,6 +1299,97 @@ export function OrderDetailPage({ orderId, mode, onBack }: Props) {
               Note: Having two different payment methods from different payment gateways is not allowed. Only Payment Gateway + Voucher/Points combinations are supported.
             </p>
           </div>
+        </div>
+      )}
+
+      {cancelConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-4">
+            <h2 className="text-sm font-bold text-on-surface">Cancel order</h2>
+            <p className="text-xs text-on-surface-variant">
+              Cancel order <span className="font-mono font-semibold text-on-surface">#{orderId}</span>?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-colors"
+                onClick={() => setCancelConfirmOpen(false)}
+                disabled={actionBusy}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-bold bg-error text-on-error rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40"
+                onClick={() => {
+                  setCancelConfirmOpen(false);
+                  void runCancel();
+                }}
+                disabled={actionBusy}
+              >
+                Cancel order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shipModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-4">
+            <h2 className="text-sm font-bold text-on-surface">Ship order</h2>
+            <p className="text-xs text-on-surface-variant">
+              Add carrier and tracking number for <span className="font-mono font-semibold text-on-surface">#{orderId}</span>.
+            </p>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">Carrier</label>
+                <input
+                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={shipCarrier}
+                  onChange={(e) => setShipCarrier(e.target.value)}
+                  placeholder="e.g. DHL"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                  Tracking number
+                </label>
+                <input
+                  className="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={shipTracking}
+                  onChange={(e) => setShipTracking(e.target.value)}
+                  placeholder="e.g. TRK-123"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-colors"
+                onClick={() => setShipModalOpen(false)}
+                disabled={actionBusy}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-bold bg-primary text-white rounded-lg hover:bg-primary-container transition-colors disabled:opacity-40"
+                onClick={() => void runShip()}
+                disabled={actionBusy}
+              >
+                Ship
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {actionToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-outline-variant/20 bg-white px-6 py-3 shadow-2xl">
+          <p className={`text-sm font-semibold ${actionToast.kind === "error" ? "text-error" : "text-on-surface"}`}>
+            {actionToast.message}
+          </p>
         </div>
       )}
     </div>

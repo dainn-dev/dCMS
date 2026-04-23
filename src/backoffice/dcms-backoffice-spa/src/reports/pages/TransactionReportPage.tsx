@@ -57,6 +57,10 @@ type EcommerceRow = {
   date: string;
 };
 
+function filterSummaryByBrand(rows: SummaryRow[], brand: string): SummaryRow[] {
+  return brand === "all" ? rows : rows;
+}
+
 const MOCK_SUMMARY: SummaryRow[] = [
   { id: "s1", paymentMethod: "Visa", transactionCount: 842, totalAmount: "128,940.50" },
   { id: "s2", paymentMethod: "Mastercard", transactionCount: 310, totalAmount: "44,120.00" },
@@ -288,7 +292,7 @@ export function TransactionReportPage() {
     await new Promise((r) => setTimeout(r, 500));
 
     setSummaryRows(filterSummaryByBrand([...MOCK_SUMMARY], brandScope));
-    setDetailsRows(filterDetails([...MOCK_DETAILS], memberQuery, brandScope));
+    setDetailsRows(filterDetails([...MOCK_DETAILS], memberQuery, brandScope, storeScope));
     let eco = [...MOCK_ECOMMERCE];
     eco = filterEcommerce(eco, paymentMethodFilter);
     setEcommerceRows(eco);

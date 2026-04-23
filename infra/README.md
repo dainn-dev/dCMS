@@ -8,10 +8,10 @@ From **repository root**, build and start the services that exist in this repo t
 
 ```bash
 docker compose -f infra/docker-compose.yml build
-docker compose -f infra/docker-compose.yml up -d postgres sqlserver rabbitmq redis elasticsearch catalog-api inventory-api order-api payment-api catalog-worker umbraco-web
+docker compose -f infra/docker-compose.yml up -d postgres sqlserver rabbitmq redis elasticsearch catalog-api inventory-api order-api payment-api promotions-api fulfillment-api gateway catalog-worker umbraco-web
 ```
 
-**Included:** PostgreSQL (**four** databases: `dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`), **SQL Server 2022** (Umbraco CMS database `Umbraco` only; host port **14333**), RabbitMQ (AMQP + management UI), Redis, Elasticsearch, **Catalog.Api**, **Inventory.Api**, **Order.Api** (M5: `dCMS.Order.Api` + DbUp migrations in `dCMS.Order.Infrastructure` on startup; MassTransit/RabbitMQ) and **Payment.Api** (minimal placeholder with `GET /health` until Payment service is implemented), **Catalog.Worker** (RabbitMQ / MassTransit consumers + outbox relays), **Umbraco** (`dCMS.Web`, **Microsoft SQL Server** + volume `umbraco_data` for `/app/umbraco/Data`).
+**Included:** PostgreSQL (**four** databases: `dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`), **SQL Server 2022** (Umbraco CMS database `Umbraco` only; host port **14333**), RabbitMQ (AMQP + management UI), Redis, Elasticsearch, **Catalog.Api**, **Inventory.Api**, **Order.Api** (M5: `dCMS.Order.Api` + DbUp migrations in `dCMS.Order.Infrastructure` on startup; MassTransit/RabbitMQ), **Payment.Api** (minimal placeholder with `GET /health` until Payment service is implemented), **Promotions.Api** (campaigns on `dcms_catalog`), **Fulfillment.Api** (eStore fulfillment config on `dcms_catalog`; DAI-612), **dCMS.Gateway** (YARP — `/gateway/v1/catalog|orders|inventory|promotions|fulfillment/...`), **Catalog.Worker** (RabbitMQ / MassTransit consumers + outbox relays), **Umbraco** (`dCMS.Web`, **Microsoft SQL Server** + volume `umbraco_data` for `/app/umbraco/Data`).
 
 **Note:** Application APIs use **PostgreSQL** only; **SQL Server** is used **only** for the Umbraco CMS database in Docker Compose.
 
@@ -30,6 +30,9 @@ docker compose -f infra/docker-compose.yml up -d postgres sqlserver rabbitmq red
 | Inventory.Api  | [http://localhost:5002/health](http://localhost:5002/health) |
 | Order.Api (M5 — DbUp + RabbitMQ) | [http://localhost:5003/health](http://localhost:5003/health) |
 | Payment.Api (placeholder) | [http://localhost:5004/health](http://localhost:5004/health) |
+| Promotions.Api | [http://localhost:5005/health](http://localhost:5005/health) |
+| Fulfillment.Api | [http://localhost:5006/health](http://localhost:5006/health) |
+| dCMS.Gateway   | [http://localhost:5100/health](http://localhost:5100/health) |
 | dCMS.Web (Umbraco) | [http://localhost:5000/health](http://localhost:5000/health) |
 
 Compose **healthchecks** use `curl` against `http://127.0.0.1:8080/health` inside **catalog-api**, **inventory-api**, **order-api**, **payment-api**, and **umbraco-web** containers (runtime images install `curl` in the Dockerfiles). **catalog-worker** is a .NET worker host with **no HTTP port** — use logs / `docker compose ps` for liveness.
@@ -47,9 +50,9 @@ Compose **healthchecks** use `curl` against `http://127.0.0.1:8080/health` insid
 
 ### SQL migrations (Postgres)
 
-**Migrations run automatically on startup** — `catalog-api`, `inventory-api`, and `order-api` each run DbUp at boot and apply any pending scripts embedded in their assemblies. No manual `psql` steps required after `docker compose up`.
+**Migrations run automatically on startup** — core services run DbUp (or service-specific upgrader) at boot. No manual `psql` steps required after `docker compose up`.
 
-- **Catalog** (`dcms_catalog`): applied by `catalog-api` via `CatalogDbMigrationHostedService`
+- **Catalog** (`dcms_catalog`): applied by **`catalog-api`**, **`catalog-worker`**, and **`fulfillment-api`** via `CatalogDbMigrationHostedService` (all embedded `.sql` scripts, including campaigns and fulfillment). **`promotions-api`** does not run DbUp — run it together with **`catalog-api`** or **`fulfillment-api`** so `dcms_catalog` is already migrated (e.g. `020_CreateCampaigns.sql`).
 - **Inventory** (`dcms_inventory`): applied by `inventory-api` via `InventoryDbMigrationHostedService`
 - **Order** (`dcms_order`): applied by `order-api` via `OrderDbMigrationHostedService`
 - `catalog-worker` waits for both `catalog-api` and `inventory-api` to be healthy before starting, so migrations are guaranteed to be complete when the Worker connects.
@@ -118,6 +121,9 @@ Notes:
 | Inventory API  | 5002 |
 | Order API (M5) | 5003 |
 | Payment API (placeholder) | 5004 |
+| Promotions API | 5005 |
+| Fulfillment API | 5006 |
+| dCMS.Gateway   | 5100 |
 | RabbitMQ AMQP  | 5672 |
 | RabbitMQ UI    | 15672 |
 | Redis          | 6379 |

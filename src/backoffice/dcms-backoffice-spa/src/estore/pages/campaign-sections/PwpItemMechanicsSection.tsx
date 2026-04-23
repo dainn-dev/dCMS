@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { IconChevronDown, IconClose, IconSearch } from "../../../orders/icons";
-import { DEMO_PRODUCT_ROWS } from "../ProductsPage";
 
 const labelBase = "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider mb-1";
 const inputBase =
   "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-2 px-3 text-xs focus:ring-1 focus:ring-primary outline-none";
 const hintText = "mt-1 text-xs text-on-surface-variant";
 
-const PRODUCT_OPTIONS = DEMO_PRODUCT_ROWS.map((r) => `${r.name} (${r.sku})`);
+// DAI-620: TODO replace with `useProducts(...)` hook when campaign editor accepts tenantId/storeId.
+const PRODUCT_OPTIONS: string[] = [];
 
 export type PwpItemMechanicsValue = {
   promotionProducts: string[];

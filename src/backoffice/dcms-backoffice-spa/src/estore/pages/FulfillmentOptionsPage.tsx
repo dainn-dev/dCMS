@@ -52,9 +52,9 @@ type Props = {
   predefinedFieldSettings: FulfillmentPredefinedFieldSetting[];
   onPredefinedFieldSettingsChange: (next: FulfillmentPredefinedFieldSetting[]) => void;
   onOpenLogisticPartners: () => void;
-  onCreateGrouping: (next: Omit<FulfillmentGrouping, "id">) => string;
-  onUpdateGrouping: (id: string, next: Omit<FulfillmentGrouping, "id">) => void;
-  onDeleteGrouping: (id: string) => void;
+  onCreateGrouping: (next: Omit<FulfillmentGrouping, "id">) => string | Promise<string>;
+  onUpdateGrouping: (id: string, next: Omit<FulfillmentGrouping, "id">) => void | Promise<void>;
+  onDeleteGrouping: (id: string) => void | Promise<void>;
   onViewDeliverySlots: (groupingId: string) => void;
   onCreateTimeSlot: (groupingId: string) => void;
 };
@@ -278,7 +278,7 @@ export function FulfillmentOptionsPage({
     if (!code.trim() && groupName.trim()) setCode(seedCodeFromName(groupName));
   }
 
-  function handleCreateTimeSlot() {
+  async function handleCreateTimeSlot() {
     const next: Omit<FulfillmentGrouping, "id"> = {
       groupName: groupName.trim() || "New Group",
       code: (code.trim() || seedCodeFromName(groupName)).toUpperCase(),
@@ -292,13 +292,17 @@ export function FulfillmentOptionsPage({
       limitSelectedDistributionCenter,
       stockLocation: limitSelectedDistributionCenter ? stockLocation : "",
     };
-    const groupingId = onCreateGrouping(next);
-    setModalOpen(false);
-    showToast("Grouping created. Redirecting to time slot setup…");
-    setTimeout(() => onCreateTimeSlot(groupingId), 400);
+    try {
+      const groupingId = await Promise.resolve(onCreateGrouping(next));
+      setModalOpen(false);
+      showToast("Grouping created. Redirecting to time slot setup…");
+      setTimeout(() => onCreateTimeSlot(groupingId), 400);
+    } catch {
+      showToast("Could not create grouping. Check code (uppercase A–Z, digits, underscore) and dates.");
+    }
   }
 
-  function handleUpdateGrouping() {
+  async function handleUpdateGrouping() {
     if (!editingGroupingId) return;
     const next: Omit<FulfillmentGrouping, "id"> = {
       groupName: groupName.trim() || "New Group",
@@ -313,9 +317,13 @@ export function FulfillmentOptionsPage({
       limitSelectedDistributionCenter,
       stockLocation: limitSelectedDistributionCenter ? stockLocation : "",
     };
-    onUpdateGrouping(editingGroupingId, next);
-    setModalOpen(false);
-    showToast("Grouping updated.");
+    try {
+      await Promise.resolve(onUpdateGrouping(editingGroupingId, next));
+      setModalOpen(false);
+      showToast("Grouping updated.");
+    } catch {
+      showToast("Could not update grouping.");
+    }
   }
 
   return (
@@ -905,9 +913,11 @@ export function FulfillmentOptionsPage({
                 type="button"
                 className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
                 onClick={() => {
-                  onDeleteGrouping(deleteConfirmId);
-                  setDeleteConfirmId(null);
-                  showToast("Grouping deleted.");
+                  void (async () => {
+                    await Promise.resolve(onDeleteGrouping(deleteConfirmId));
+                    setDeleteConfirmId(null);
+                    showToast("Grouping deleted.");
+                  })();
                 }}
               >
                 <IconDelete className="h-4 w-4 shrink-0" />

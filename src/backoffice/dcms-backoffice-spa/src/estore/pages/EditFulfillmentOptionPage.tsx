@@ -241,8 +241,10 @@ export function EditFulfillmentOptionPage({
 
   const selectedAddress = useMemo(() => {
     if (!selectedLocation) return "";
-    const lines = [selectedLocation.address1, selectedLocation.address2, selectedLocation.address3].filter((x) => (x ?? "").trim());
-    const tail = [selectedLocation.postalCode, selectedLocation.country].filter((x) => (x ?? "").trim());
+    const lines = [selectedLocation.address1, selectedLocation.address2, selectedLocation.address3].filter(
+      (x): x is string => Boolean((x ?? "").trim())
+    );
+    const tail = [selectedLocation.postalCode, selectedLocation.country].filter((x): x is string => Boolean((x ?? "").trim()));
     return [...lines, tail.join(" ")].filter((x) => x.trim()).join(", ");
   }, [selectedLocation]);
 

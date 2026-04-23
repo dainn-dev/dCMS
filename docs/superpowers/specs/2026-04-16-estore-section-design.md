@@ -147,8 +147,14 @@ The existing `orders-spa.js` / `orders-spa.css` filenames are preserved so no ba
 
 ---
 
+## Updates (post–initial design)
+
+- **Fulfillment configuration** is backed by **`dCMS.Fulfillment.Api`** and the eStore SPA client `fulfillmentApi.ts` when `tenantId` is present. See [2026-04-23-fulfillment-api-integration.md](./2026-04-23-fulfillment-api-integration.md) (DAI-612 / DAI-613 / DAI-614).
+
+---
+
 ## Out of Scope
 
-- Real API integration for any eStore page (Phase 2+)
+- Full API integration for **all** eStore pages (brands/categories/products/attributes remain partially demo or separate milestones); fulfillment + campaigns paths are integrated separately.
 - RBAC per-page permission enforcement (handled by Umbraco section grant)
 - eStore-specific icons file (reuses `orders/icons.tsx` shared icons)

@@ -69,10 +69,12 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
         const string insertOrder = """
             INSERT INTO "Orders" (
                 "Id", "TenantId", "StoreId", "CustomerId", "Status", "Currency", "SubTotal", "TaxTotal", "Total",
-                "PaymentIntentId", "IdempotencyKey", "CreatedAt", "UpdatedAt", "ShippingAddress")
+                "PaymentIntentId", "IdempotencyKey", "CreatedAt", "UpdatedAt", "ShippingAddress",
+                "FailureReason", "FailureErrorCode", "FailedAt", "RetryCount")
             VALUES (
                 @Id, @TenantId, @StoreId, @CustomerId, @Status, @Currency, @SubTotal, @TaxTotal, @Total,
-                @PaymentIntentId, @IdempotencyKey, @Now, @Now, @ShippingAddress::jsonb)
+                @PaymentIntentId, @IdempotencyKey, @Now, @Now, @ShippingAddress::jsonb,
+                @FailureReason, @FailureErrorCode, @FailedAt, @RetryCount)
             """;
 
         await conn.ExecuteAsync(new CommandDefinition(insertOrder,
@@ -91,6 +93,10 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
                 IdempotencyKey = idempotencyKey,
                 Now = now,
                 ShippingAddress = shipJson,
+                order.FailureReason,
+                order.FailureErrorCode,
+                order.FailedAt,
+                order.RetryCount,
             },
             tx,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
@@ -618,6 +624,86 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
 
         if (rows > 0 && outboxIfUpdated is { Count: > 0 })
             await AppendOutboxAsync(outboxIfUpdated, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>DAI-637 — transition an order from any of <paramref name="expectedCurrentStatuses"/> to <paramref name="newStatus"/>.</summary>
+    public async Task<int> TrySetOrderStatusFromAnyAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        IReadOnlyList<string> expectedCurrentStatuses,
+        string newStatus,
+        IReadOnlyList<Core.Domain.IDomainEvent>? outboxIfUpdated,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var id) || expectedCurrentStatuses.Count == 0)
+            return 0;
+
+        const string sql = """
+            UPDATE "Orders"
+            SET "Status" = @NewStatus, "UpdatedAt" = @Now
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId AND "Status" = ANY(@Expected)
+            """;
+
+        var rows = await conn.ExecuteAsync(new CommandDefinition(sql,
+                new
+                {
+                    Id = id,
+                    TenantId = tenantId,
+                    StoreId = storeId,
+                    Expected = expectedCurrentStatuses.ToArray(),
+                    NewStatus = newStatus,
+                    Now = occurredAt,
+                },
+                tx,
+                cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+
+        if (rows > 0 && outboxIfUpdated is { Count: > 0 })
+            await AppendOutboxAsync(outboxIfUpdated, cancellationToken).ConfigureAwait(false);
+
+        return rows;
+    }
+
+    /// <summary>DAI-640: Retry failure transition with audit reset + RetryCount++.</summary>
+    public async Task<int> RetryFailureAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        IReadOnlyList<string> expectedFailureStatuses,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var id) || expectedFailureStatuses.Count == 0)
+            return 0;
+
+        const string sql = """
+            UPDATE "Orders"
+            SET "Status" = @NewStatus,
+                "RetryCount" = COALESCE("RetryCount", 0) + 1,
+                "FailureReason" = NULL,
+                "FailureErrorCode" = NULL,
+                "FailedAt" = NULL,
+                "UpdatedAt" = @Now
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId AND "Status" = ANY(@Expected)
+            """;
+
+        return await conn.ExecuteAsync(new CommandDefinition(sql,
+                new
+                {
+                    Id = id,
+                    TenantId = tenantId,
+                    StoreId = storeId,
+                    Expected = expectedFailureStatuses.ToArray(),
+                    NewStatus = nameof(Core.Domain.OrderStatus.PaymentPending),
+                    Now = occurredAt,
+                },
+                tx,
+                cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()

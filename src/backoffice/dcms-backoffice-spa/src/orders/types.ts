@@ -128,7 +128,13 @@ export type OrderStatus =
   | "Admin Cancelled"
   | "Pending Cancellation"
   | "User Cancelled"
-  | "Partially Fulfilled";
+  | "Partially Fulfilled"
+  // DAI-637 failure states — same Orders lifecycle, operator-recoverable
+  | "Payment Failed"
+  | "Auth Failed"
+  | "Address Error"
+  | "Stock Error"
+  | "System Error";
 
 export type Order = {
   doNumber: string;

@@ -82,6 +82,12 @@ public static class DcmsJwtAuthExtensions
             o.AddPolicy(DcmsPolicies.OrderAccess, p => p.RequireAuthenticatedUser());
 
             o.AddPolicy(DcmsPolicies.OrderDlqAdmin, p => p.RequireAuthenticatedUser().RequireRole(DcmsRoles.SuperAdmin));
+
+            o.AddPolicy(DcmsPolicies.OrderFailureManage, p => p.RequireAuthenticatedUser().RequireRole(
+                DcmsRoles.ChainAdmin,
+                DcmsRoles.StoreManager,
+                DcmsRoles.CustomerSupport,
+                DcmsRoles.SuperAdmin));
         });
 
         return services;

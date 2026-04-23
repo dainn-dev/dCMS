@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
+COPY src/backend/dCMS.Core/dCMS.Core.csproj dCMS.Core/
+COPY src/backend/dCMS.AspNetCore.Auth/dCMS.AspNetCore.Auth.csproj dCMS.AspNetCore.Auth/
+COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/
+COPY src/backend/dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj dCMS.Fulfillment.Api/
+RUN dotnet restore dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj
+
+COPY src/backend/ ./
+RUN dotnet publish dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj -c Release -o /app --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app .
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "dCMS.Fulfillment.Api.dll"]

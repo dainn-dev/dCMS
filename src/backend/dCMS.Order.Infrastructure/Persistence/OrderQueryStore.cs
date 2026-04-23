@@ -42,6 +42,10 @@ public sealed class OrderQueryStore
             SELECT "Id", "TenantId", "StoreId", "CustomerId", "Status", "Currency", "Total",
                    "ShippingAddress"::text AS ShippingAddressJson,
                    "PaymentIntentId",
+                   "FailureReason",
+                   "FailureErrorCode",
+                   "FailedAt",
+                   "RetryCount",
                    "CreatedAt"
             FROM "Orders"
             WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
@@ -83,6 +87,10 @@ public sealed class OrderQueryStore
             SELECT "Id", "TenantId", "StoreId", "CustomerId", "Status", "Currency", "Total",
                    "ShippingAddress"::text AS ShippingAddressJson,
                    "PaymentIntentId",
+                   "FailureReason",
+                   "FailureErrorCode",
+                   "FailedAt",
+                   "RetryCount",
                    "CreatedAt"
             FROM "Orders"
             WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId AND "IdempotencyKey" = @IdempotencyKey
@@ -118,11 +126,25 @@ public sealed class OrderQueryStore
         if (!TryDecodeCursor(query.Cursor, out var cursorCreated, out var cursorId))
             throw new ArgumentException("Invalid cursor.", nameof(OrderListQuery.Cursor));
 
-        string? dbStatus = null;
+        string[]? dbStatuses = null;
         if (!string.IsNullOrWhiteSpace(query.Status))
         {
-            if (!TryMapApiStatusToDb(query.Status.Trim(), out dbStatus))
-                throw new ArgumentException("Invalid status filter.", nameof(query));
+            var parts = query.Status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length > 10)
+                throw new ArgumentException("At most 10 statuses are allowed.", nameof(query));
+
+            var mapped = new List<string>(parts.Length);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in parts)
+            {
+                if (!seen.Add(p))
+                    continue;
+                if (!TryMapApiStatusToDb(p, out var db))
+                    throw new ArgumentException($"Invalid status filter: {p}", nameof(query));
+                mapped.Add(db);
+            }
+
+            dbStatuses = mapped.Count > 0 ? mapped.ToArray() : null;
         }
 
         await using var connection = new NpgsqlConnection(_connectionString);
@@ -132,11 +154,15 @@ public sealed class OrderQueryStore
             SELECT "Id", "TenantId", "StoreId", "CustomerId", "Status", "Currency", "Total",
                    "ShippingAddress"::text AS ShippingAddressJson,
                    "PaymentIntentId",
+                   "FailureReason",
+                   "FailureErrorCode",
+                   "FailedAt",
+                   "RetryCount",
                    "CreatedAt"
             FROM "Orders"
             WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId
               AND (@CustomerId IS NULL OR "CustomerId" = @CustomerId)
-              AND (@DbStatus IS NULL OR "Status" = @DbStatus)
+              AND (@DbStatuses::text[] IS NULL OR "Status" = ANY(@DbStatuses::text[]))
               AND (
                   @HasCursor = FALSE
                   OR ("CreatedAt", "Id") < (@CursorCreated::timestamptz, @CursorId::uuid)
@@ -153,7 +179,7 @@ public sealed class OrderQueryStore
                     TenantId = query.TenantId,
                     StoreId = query.StoreId,
                     CustomerId = string.IsNullOrWhiteSpace(query.CustomerId) ? (string?)null : query.CustomerId.Trim(),
-                    DbStatus = dbStatus,
+                    DbStatuses = dbStatuses,
                     HasCursor = cursorCreated.HasValue && cursorId.HasValue,
                     CursorCreated = cursorCreated,
                     CursorId = cursorId,
@@ -220,6 +246,12 @@ public sealed class OrderQueryStore
             "shipped" => nameof(Core.Domain.OrderStatus.Shipped),
             "delivered" => nameof(Core.Domain.OrderStatus.Delivered),
             "cancelled" => nameof(Core.Domain.OrderStatus.Cancelled),
+            // DAI-637 failure states
+            "payment_failed" => nameof(Core.Domain.OrderStatus.PaymentFailed),
+            "auth_failed" => nameof(Core.Domain.OrderStatus.AuthFailed),
+            "address_error" => nameof(Core.Domain.OrderStatus.AddressError),
+            "stock_error" => nameof(Core.Domain.OrderStatus.StockError),
+            "system_error" => nameof(Core.Domain.OrderStatus.SystemError),
             _ => "",
         };
         return db.Length > 0;
@@ -300,7 +332,11 @@ public sealed class OrderQueryStore
             new Core.Domain.Money(row.Total, row.Currency),
             ship,
             items,
-            row.PaymentIntentId);
+            row.PaymentIntentId,
+            row.FailureReason,
+            row.FailureErrorCode,
+            row.FailedAt,
+            row.RetryCount);
     }
 
     private sealed record OrderRow(
@@ -313,6 +349,10 @@ public sealed class OrderQueryStore
         decimal Total,
         string ShippingAddressJson,
         string? PaymentIntentId,
+        string? FailureReason,
+        string? FailureErrorCode,
+        DateTimeOffset? FailedAt,
+        int RetryCount,
         DateTime CreatedAt);
 
     private sealed record OrderItemRow(

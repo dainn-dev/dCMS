@@ -1,43 +1,21 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "../components/DataTable";
 import { IconDownload } from "../icons";
 import { createOrderColumns } from "../orders-columns";
 import { exportOrderProcessingFile } from "../exportOrders";
 import type { Order } from "../types";
+import {
+  cancelOrder,
+  deliverOrder,
+  fetchAllOrdersForExport,
+  fetchOrders,
+  getOrder,
+  shipOrder,
+  type OrderFilters,
+} from "../api/ordersApi";
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
-// Replace with API call when backend is wired.
-const MOCK_ORDERS: Order[] = [
-  {
-    doNumber: "DO-2024-001",
-    orderId: "ORD-998122",
-    orderDate: "24 May 2024",
-    type: "Retail",
-    customerName: "Michael Vance",
-    customerEmail: "m.vance@example.com",
-    customerContactNo: "+44 7911 123456",
-    status: "Open Order",
-    fulfilledDate: null,
-    deliveryDate: "27 May 2024",
-    deliveryOption: "Standard",
-    shippingStatus: "Pending",
-    processingOfficer: "Alice Tan",
-    tags: "VIP",
-    paymentGateway: "Stripe",
-    store: "London Central",
-    storeAutoId: "STR-001",
-    distributionCentre: "DC-North",
-    paymentMethod: "Credit Card",
-    paymentDate: "24 May 2024",
-    shippingAddressLine1: "12 Baker Street",
-    shippingAddressLine2: "Flat 3B",
-    shippingPostalCode: "NW1 6XE",
-    shippingCountry: "GB",
-    billingAddressLine1: "12 Baker Street",
-    billingAddressLine2: "Flat 3B",
-    billingPostalCode: "NW1 6XE",
-    billingCountry: "GB",
-  },
+// (DAI-626) Mock orders removed — API-backed list.
+/*
   {
     doNumber: "DO-2024-002",
     orderId: "ORD-998123",
@@ -368,24 +346,195 @@ const MOCK_ORDERS: Order[] = [
     billingPostalCode: "1016 BX",
     billingCountry: "NL",
   },
-];
 
+
+*/
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Props = {
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
   onViewOrder?: (orderId: string) => void;
   onTakeAction?: (orderId: string) => void;
 };
 
-export function OrderProcessingPage({ onViewOrder, onTakeAction }: Props) {
+const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "all", label: "All statuses" },
+  { value: "Created", label: "Created" },
+  { value: "Processing", label: "Processing" },
+  { value: "ReadyForDelivery", label: "Ready for Delivery" },
+  { value: "ReadyForPickup", label: "Ready for Pickup" },
+  { value: "Delivered", label: "Delivered" },
+  { value: "Archived", label: "Archived" },
+];
+
+export function OrderProcessingPage({ tenantId, storeId, authToken, onViewOrder }: Props) {
+  const [actionToast, setActionToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+  const [deliverTarget, setDeliverTarget] = useState<string | null>(null);
+  const [shipTarget, setShipTarget] = useState<string | null>(null);
+  const [shipCarrier, setShipCarrier] = useState("");
+  const [shipTracking, setShipTracking] = useState("");
+
+  useEffect(() => {
+    if (!actionToast) return;
+    const t = setTimeout(() => setActionToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [actionToast]);
+
   const columns = useMemo(
-    () => createOrderColumns(onViewOrder, onTakeAction),
-    [onViewOrder, onTakeAction]
+    () =>
+      createOrderColumns(onViewOrder, {
+        onCancel: (id) => setCancelTarget(id),
+        onShip: (id) => setShipTarget(id),
+        onDeliver: (id) => setDeliverTarget(id),
+      }),
+    [onViewOrder]
   );
+
+  const [rows, setRows] = useState<Order[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [exporting, setExporting] = useState(false);
+
+  const filters: OrderFilters | undefined = useMemo(
+    () => (statusFilter === "all" ? undefined : { status: statusFilter }),
+    [statusFilter]
+  );
+
+  useEffect(() => {
+    if (!tenantId || !storeId) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchOrders(tenantId, storeId, filters, { cursor: undefined, limit: 50 }, authToken)
+      .then(({ rows, nextCursor }) => {
+        if (cancelled) return;
+        setRows(rows);
+        setNextCursor(nextCursor);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setRows([]);
+        setNextCursor(null);
+        setError(e instanceof Error ? e.message : "Failed to load orders");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, storeId, authToken, filters]);
+
+  async function refreshRow(orderId: string) {
+    if (!tenantId || !storeId) return;
+    try {
+      const updated = await getOrder(tenantId, storeId, orderId, authToken);
+      setRows((prev) => prev.map((r) => (r.orderId === orderId ? { ...r, status: updated.status } : r)));
+    } catch {
+      // ignore row refresh failure
+    }
+  }
+
+  async function runCancel() {
+    if (!tenantId || !storeId || !cancelTarget) return;
+    setActionBusy(true);
+    try {
+      await cancelOrder(tenantId, storeId, cancelTarget, null, authToken);
+      setActionToast({ kind: "success", message: `Order ${cancelTarget} cancelled` });
+      await refreshRow(cancelTarget);
+      setCancelTarget(null);
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Cancel failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runDeliver() {
+    if (!tenantId || !storeId || !deliverTarget) return;
+    setActionBusy(true);
+    try {
+      await deliverOrder(tenantId, storeId, deliverTarget, authToken);
+      setActionToast({ kind: "success", message: `Order ${deliverTarget} delivered` });
+      await refreshRow(deliverTarget);
+      setDeliverTarget(null);
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Deliver failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runShip() {
+    if (!tenantId || !storeId || !shipTarget) return;
+    if (!shipCarrier.trim() || !shipTracking.trim()) {
+      setActionToast({ kind: "error", message: "Carrier and tracking number are required." });
+      return;
+    }
+    setActionBusy(true);
+    try {
+      await shipOrder(
+        tenantId,
+        storeId,
+        shipTarget,
+        { carrier: shipCarrier.trim(), trackingNumber: shipTracking.trim() },
+        authToken
+      );
+      setActionToast({ kind: "success", message: `Order ${shipTarget} shipped` });
+      await refreshRow(shipTarget);
+      setShipTarget(null);
+      setShipCarrier("");
+      setShipTracking("");
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Ship failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!tenantId || !storeId) return;
+    if (!nextCursor) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const out = await fetchOrders(tenantId, storeId, filters, { cursor: nextCursor, limit: 50 }, authToken);
+      setRows((prev) => [...prev, ...out.rows]);
+      setNextCursor(out.nextCursor);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load more orders");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runExport() {
+    if (!tenantId || !storeId) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const { rows, limited } = await fetchAllOrdersForExport(tenantId, storeId, filters, authToken, {
+        limit: 5000,
+        pageSize: 100,
+      });
+      if (limited) setError("Export limited to first 5000 rows. Please refine filters.");
+      exportOrderProcessingFile(rows);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <>
-      {/* Page header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <nav className="flex text-[10px] uppercase tracking-widest text-on-surface-variant font-bold mb-1">
@@ -393,31 +542,188 @@ export function OrderProcessingPage({ onViewOrder, onTakeAction }: Props) {
             <span className="mx-2">/</span>
             <span className="text-primary">Order Processing</span>
           </nav>
-          <h1 className="text-2xl font-bold tracking-tight text-on-surface font-headline">
-            Order Processing
-          </h1>
-          <p className="text-sm text-on-surface-variant mt-1">
-            Manage and track your end-to-end order lifecycle
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-on-surface font-headline">Order Processing</h1>
+          <p className="text-sm text-on-surface-variant mt-1">Manage and track your end-to-end order lifecycle</p>
         </div>
+
         <div className="flex items-center gap-3">
+          <select
+            className="h-10 rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            disabled={!tenantId || !storeId}
+            aria-label="Status filter"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
-            className="px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors rounded-lg flex items-center gap-2"
-            onClick={() => exportOrderProcessingFile(MOCK_ORDERS)}
+            className="px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors rounded-lg flex items-center gap-2 disabled:opacity-40"
+            onClick={() => void runExport()}
+            disabled={!tenantId || !storeId || exporting}
           >
             <IconDownload />
-            Export
+            {exporting ? "Exporting…" : "Export"}
           </button>
         </div>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={MOCK_ORDERS}
-        defaultHiddenColumns={["distributionCentre", "paymentMethod", "paymentDate"]}
-        globalFilterPlaceholder="Search by order, customer, store…"
-      />
+      {actionToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-6 py-3 shadow-2xl">
+          <p className={`text-sm font-semibold ${actionToast.kind === "error" ? "text-error" : "text-on-surface"}`}>
+            {actionToast.message}
+          </p>
+        </div>
+      )}
+
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[420px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="p-6">
+              <h3 className="text-sm font-bold text-on-surface">Cancel order</h3>
+              <p className="mt-2 text-xs text-on-surface-variant">
+                Cancel <strong>{cancelTarget}</strong>?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setCancelTarget(null)}
+                disabled={actionBusy}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 disabled:opacity-40"
+                onClick={() => void runCancel()}
+                disabled={actionBusy}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deliverTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[420px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="p-6">
+              <h3 className="text-sm font-bold text-on-surface">Mark as delivered</h3>
+              <p className="mt-2 text-xs text-on-surface-variant">
+                Mark <strong>{deliverTarget}</strong> as delivered?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setDeliverTarget(null)}
+                disabled={actionBusy}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-5 py-2.5 text-xs font-bold text-on-primary hover:opacity-90 disabled:opacity-40"
+                onClick={() => void runDeliver()}
+                disabled={actionBusy}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shipTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[460px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="p-6 space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-on-surface">Mark as shipped</h3>
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  Enter carrier + tracking for <strong>{shipTarget}</strong>.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Carrier</label>
+                  <input
+                    className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-primary outline-none"
+                    value={shipCarrier}
+                    onChange={(e) => setShipCarrier(e.target.value)}
+                    placeholder="e.g. DHL"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Tracking number</label>
+                  <input
+                    className="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-primary outline-none"
+                    value={shipTracking}
+                    onChange={(e) => setShipTracking(e.target.value)}
+                    placeholder="e.g. TRK-123"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setShipTarget(null)}
+                disabled={actionBusy}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-5 py-2.5 text-xs font-bold text-on-primary hover:opacity-90 disabled:opacity-40"
+                onClick={() => void runShip()}
+                disabled={actionBusy}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!tenantId || !storeId ? (
+        <div className="mt-6 rounded-xl border border-outline-variant/20 bg-surface-container-lowest p-6 text-sm text-on-surface-variant">
+          Select a tenant + store to view orders.
+        </div>
+      ) : (
+        <>
+          {error && (
+            <div className="mt-6 rounded-xl border border-error/25 bg-error/5 px-5 py-4 text-sm text-error">
+              {error}
+            </div>
+          )}
+
+          <div className="mt-6">
+            <DataTable
+              columns={columns}
+              data={rows}
+              defaultHiddenColumns={["distributionCentre", "paymentMethod", "paymentDate"]}
+              globalFilterPlaceholder="Search by order, customer, store…"
+              loading={loading && rows.length === 0}
+              footerMode="loadMore"
+              loadMore={{
+                onClick: () => void loadMore(),
+                disabled: loading || nextCursor === null,
+                label: nextCursor ? (loading ? "Loading…" : "Load more") : "No more",
+              }}
+            />
+          </div>
+        </>
+      )}
     </>
   );
 }

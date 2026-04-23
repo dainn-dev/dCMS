@@ -1,6 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { IconBolt, IconChevronDown, IconChevronUp, IconUnfoldMore, IconVisibility } from "./icons";
 import type { Order, OrderStatus } from "./types";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
   "Open Order": "bg-secondary-container/20 text-on-secondary-container",
@@ -15,6 +16,12 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
   "Pending Cancellation": "bg-orange-100 text-orange-800",
   "User Cancelled": "bg-red-100 text-red-700",
   "Partially Fulfilled": "bg-yellow-100 text-yellow-700",
+  // DAI-637 failure states — shown on Order Processing when mixed with active orders
+  "Payment Failed": "bg-red-100 text-red-800",
+  "Auth Failed": "bg-sky-100 text-sky-800",
+  "Address Error": "bg-orange-100 text-orange-800",
+  "Stock Error": "bg-amber-100 text-amber-800",
+  "System Error": "bg-purple-100 text-purple-800",
 };
 
 /** Sortable column header button */
@@ -49,7 +56,11 @@ function SortHeader({
 
 export function createOrderColumns(
   onViewOrder?: (orderId: string) => void,
-  onTakeAction?: (orderId: string) => void
+  actions?: {
+    onCancel: (orderId: string) => void;
+    onShip: (orderId: string) => void;
+    onDeliver: (orderId: string) => void;
+  }
 ): ColumnDef<Order>[] {
   return [
     // ── Row selection ───────────────────────────────────────────────────────
@@ -245,6 +256,7 @@ export function createOrderColumns(
       enableHiding: false,
       cell: ({ row }) => {
         const id = row.original.orderId;
+        const status = row.original.status;
         return (
           <div className="flex items-center justify-center gap-1">
             <button
@@ -256,20 +268,113 @@ export function createOrderColumns(
             >
               <IconVisibility />
             </button>
-            <button
-              type="button"
-              className="p-1.5 rounded hover:bg-white text-on-surface-variant hover:text-amber-500 transition-all"
-              aria-label="Take Action"
-              title="Take Action"
-              onClick={() => onTakeAction?.(id)}
-            >
-              <IconBolt />
-            </button>
+            <TakeActionMenu
+              orderId={id}
+              status={status}
+              onCancel={() => actions?.onCancel(id)}
+              onShip={() => actions?.onShip(id)}
+              onDeliver={() => actions?.onDeliver(id)}
+              disabled={!actions}
+            />
           </div>
         );
       },
     },
   ];
+}
+
+function TakeActionMenu({
+  orderId,
+  status,
+  onCancel,
+  onShip,
+  onDeliver,
+  disabled,
+}: {
+  orderId: string;
+  status: Order["status"];
+  onCancel: () => void;
+  onShip: () => void;
+  onDeliver: () => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const canCancel = status === "Open Order" || status === "Processing";
+  const canShip = status === "Ready for Delivery";
+  const canDeliver = status === "Out for Delivery";
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      const root = ref.current;
+      if (!root) return;
+      if (root.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const title = useMemo(() => `Take Action — ${orderId}`, [orderId]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        className="p-1.5 rounded hover:bg-white text-on-surface-variant hover:text-amber-500 transition-all disabled:opacity-40"
+        aria-label={title}
+        title={title}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <IconBolt />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
+          <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
+            Actions
+          </div>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-colors"
+            onClick={() => {
+              setOpen(false);
+              onCancel();
+            }}
+            disabled={!canCancel}
+          >
+            Cancel Order
+            {!canCancel && <span className="text-[10px] text-on-surface-variant">Not allowed</span>}
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-colors"
+            onClick={() => {
+              setOpen(false);
+              onShip();
+            }}
+            disabled={!canShip}
+          >
+            Mark as Shipped
+            {!canShip && <span className="text-[10px] text-on-surface-variant">Not allowed</span>}
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-on-surface hover:bg-surface-container-high transition-colors"
+            onClick={() => {
+              setOpen(false);
+              onDeliver();
+            }}
+            disabled={!canDeliver}
+          >
+            Mark as Delivered
+            {!canDeliver && <span className="text-[10px] text-on-surface-variant">Not allowed</span>}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Column id → display label for the visibility dropdown */

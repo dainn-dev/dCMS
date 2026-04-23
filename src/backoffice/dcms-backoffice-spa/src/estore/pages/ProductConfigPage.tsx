@@ -8,6 +8,7 @@ import {
   IconSave,
   IconWarning,
 } from "../../orders/icons";
+import { fetchStoreCatalogSettings, patchStoreCatalogSettings } from "../api/storeCatalogSettingsApi";
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
 const labelBase =
@@ -192,9 +193,23 @@ function emptyForm(): Omit<FieldRecord, "id"> {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-type Props = { onNavigateToProducts: () => void };
+type Props = {
+  onNavigateToProducts: () => void;
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
+};
 
-export function ProductConfigPage({ onNavigateToProducts }: Props) {
+export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, authToken }: Props) {
+  const apiStoreMode = Boolean(tenantId && storeId);
+  const [storeCatReload, setStoreCatReload] = useState(0);
+  const [storeCatLoading, setStoreCatLoading] = useState(false);
+  const [storeCatReady, setStoreCatReady] = useState(false);
+  const [storeCatSaving, setStoreCatSaving] = useState(false);
+  const [storeCatError, setStoreCatError] = useState<string | null>(null);
+  const [storeApproval, setStoreApproval] = useState(false);
+  const [storeLowStockRaw, setStoreLowStockRaw] = useState("");
+
   const [fields, setFields] = useState<FieldRecord[]>(() => loadStoredFields());
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -209,6 +224,62 @@ export function ProductConfigPage({ onNavigateToProducts }: Props) {
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    if (!tenantId || !storeId) return;
+    let cancelled = false;
+    setStoreCatLoading(true);
+    setStoreCatReady(false);
+    setStoreCatError(null);
+    fetchStoreCatalogSettings(tenantId, storeId, authToken)
+      .then((s) => {
+        if (cancelled) return;
+        setStoreApproval(s.approvalRequired);
+        setStoreLowStockRaw(s.lowStockThreshold == null ? "" : String(s.lowStockThreshold));
+        setStoreCatReady(true);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setStoreCatError(e instanceof Error ? e.message : "Failed to load store catalog settings");
+      })
+      .finally(() => {
+        if (!cancelled) setStoreCatLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, storeId, authToken, storeCatReload]);
+
+  async function saveStoreCatalogSettings() {
+    if (!tenantId || !storeId) return;
+    const raw = storeLowStockRaw.trim();
+    let low: number | null;
+    if (raw === "") low = null;
+    else {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 0) {
+        setStoreCatError("Low stock threshold must be empty or a non-negative integer.");
+        return;
+      }
+      low = n;
+    }
+    setStoreCatSaving(true);
+    setStoreCatError(null);
+    try {
+      const next = await patchStoreCatalogSettings(
+        tenantId,
+        storeId,
+        { approvalRequired: storeApproval, lowStockThreshold: low },
+        authToken
+      );
+      setStoreApproval(next.approvalRequired);
+      setStoreLowStockRaw(next.lowStockThreshold == null ? "" : String(next.lowStockThreshold));
+      setToast("Store catalog settings saved.");
+    } catch (e: unknown) {
+      setStoreCatError(e instanceof Error ? e.message : "Failed to save store catalog settings");
+    } finally {
+      setStoreCatSaving(false);
+    }
+  }
 
   function openAdd() {
     setEditId(null);
@@ -380,6 +451,71 @@ export function ProductConfigPage({ onNavigateToProducts }: Props) {
       </header>
 
       <div className="flex-1 space-y-6 p-6 pb-24">
+
+        {apiStoreMode && (
+          <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
+            <div className="border-b border-outline-variant/10 px-6 py-4">
+              <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Store catalog settings</h3>
+              <p className="mt-0.5 text-[11px] text-on-surface-variant">
+                Approval workflow and low-stock alert threshold for this store (Catalog API).
+              </p>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              {storeCatLoading && (
+                <p className="text-xs text-on-surface-variant">Loading store settings…</p>
+              )}
+              {storeCatError && (
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-error/25 bg-error/5 px-4 py-3">
+                  <p className="text-xs text-error">{storeCatError}</p>
+                  <button
+                    type="button"
+                    className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+                    onClick={() => setStoreCatReload((n) => n + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+              {!storeCatLoading && storeCatReady && (
+                <>
+                  <label className="flex cursor-pointer items-center gap-2.5 select-none">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={storeApproval}
+                      onChange={(e) => setStoreApproval(e.target.checked)}
+                    />
+                    <span className="text-xs font-bold text-on-surface">Approval required</span>
+                    <span className="text-[10px] text-on-surface-variant">Product changes need approval before publish.</span>
+                  </label>
+                  <div className="max-w-xs">
+                    <label className={labelBase}>Low stock threshold</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      className={inputBase}
+                      placeholder="e.g. 10 (empty = none)"
+                      value={storeLowStockRaw}
+                      onChange={(e) => setStoreLowStockRaw(e.target.value.replace(/[^\d]/g, ""))}
+                    />
+                    <p className="mt-1 text-[10px] text-on-surface-variant">
+                      Optional. Non-negative integer; leave empty to clear.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`${btnPrimary} w-fit`}
+                    disabled={storeCatSaving}
+                    onClick={() => void saveStoreCatalogSettings()}
+                  >
+                    <IconSave className="h-4 w-4 shrink-0" />
+                    {storeCatSaving ? "Saving…" : "Save store settings"}
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
 
         <div className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
           <IconInfo className="mt-0.5 h-5 w-5 shrink-0 text-primary" />

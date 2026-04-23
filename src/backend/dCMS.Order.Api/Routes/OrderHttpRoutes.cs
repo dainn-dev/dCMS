@@ -60,6 +60,19 @@ public static class OrderHttpRoutes
             .WithTags("shipments")
             .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
+
+        // DAI-637 Failed-order recovery transitions
+        app.MapPost("/api/orders/{orderId}/retry-failure", RetryFailure)
+            .WithName("RetryOrderFailure")
+            .WithTags("orders")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        app.MapPost("/api/orders/{orderId}/resolve-failure", ResolveFailure)
+            .WithName("ResolveOrderFailure")
+            .WithTags("orders")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
     }
 
     private static async Task<IResult> GetOrderById(
@@ -160,6 +173,10 @@ public static class OrderHttpRoutes
             currency = t.Order.Total.Currency,
             createdAt = t.CreatedAt,
             lineCount = t.Order.Items.Count,
+            failureReason = t.Order.FailureReason,
+            failureErrorCode = t.Order.FailureErrorCode,
+            failedAt = t.Order.FailedAt,
+            retryCount = t.Order.RetryCount,
         };
 
     private static object ToOrderDetailJson(TimedOrder t)
@@ -175,6 +192,10 @@ public static class OrderHttpRoutes
             status = ToApiStatus(o.Status),
             total = new { amount = o.Total.Amount, currency = o.Total.Currency },
             paymentIntentId = o.PaymentIntentId,
+            failureReason = o.FailureReason,
+            failureErrorCode = o.FailureErrorCode,
+            failedAt = o.FailedAt,
+            retryCount = o.RetryCount,
             createdAt = t.CreatedAt,
             shippingAddress = new
             {
@@ -716,6 +737,129 @@ public static class OrderHttpRoutes
             _ => variantSnapshot.GetRawText(),
         };
 
+    // ── DAI-637 Failed-order recovery handlers ──────────────────────────────
+
+    private static readonly IReadOnlyList<string> FailureStatusNames =
+    [
+        nameof(OrderStatus.PaymentFailed),
+        nameof(OrderStatus.AuthFailed),
+        nameof(OrderStatus.AddressError),
+        nameof(OrderStatus.StockError),
+        nameof(OrderStatus.SystemError),
+    ];
+
+    /// <summary>DAI-637 — re-queue a failed order for another attempt (moves to PaymentPending).</summary>
+    private static async Task<IResult> RetryFailure(
+        string orderId,
+        HttpContext http,
+        [FromServices] IConfiguration configuration,
+        [FromServices] IOrderDetailCache orderDetailCache,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (!Guid.TryParse(orderId, out _))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ORDER_ID", message = "orderId must be a UUID." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var cs = configuration.GetConnectionString("Order")
+                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+
+        await using var uow = new OrderUnitOfWork(cs);
+        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rows = await uow.RetryFailureAsync(
+                tenantId,
+                storeId,
+                orderId,
+                FailureStatusNames,
+                DateTimeOffset.UtcNow,
+                cancellationToken).ConfigureAwait(false);
+
+            if (rows == 0)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "NOT_FAILED", message = "Order is not in a failure state, or not found." } },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await orderDetailCache.InvalidateAsync(orderId, cancellationToken).ConfigureAwait(false);
+
+            return Results.Json(new { orderId, status = ToApiStatus(OrderStatus.PaymentPending) });
+        }
+        catch
+        {
+            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>DAI-637 — manually resolve a failed order (treated as cancelled with note).</summary>
+    private static async Task<IResult> ResolveFailure(
+        string orderId,
+        ResolveFailureBody? body,
+        HttpContext http,
+        [FromServices] IConfiguration configuration,
+        [FromServices] IOrderDetailCache orderDetailCache,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (!Guid.TryParse(orderId, out _))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ORDER_ID", message = "orderId must be a UUID." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var note = body?.Note?.Trim() ?? "";
+        var cs = configuration.GetConnectionString("Order")
+                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+
+        await using var uow = new OrderUnitOfWork(cs);
+        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rows = await uow.TrySetOrderStatusFromAnyAsync(
+                tenantId,
+                storeId,
+                orderId,
+                FailureStatusNames,
+                nameof(OrderStatus.Cancelled),
+                outboxIfUpdated: null,
+                DateTimeOffset.UtcNow,
+                cancellationToken).ConfigureAwait(false);
+
+            if (rows == 0)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "NOT_FAILED", message = "Order is not in a failure state, or not found." } },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await orderDetailCache.InvalidateAsync(orderId, cancellationToken).ConfigureAwait(false);
+
+            return Results.Json(new { orderId, status = ToApiStatus(OrderStatus.Cancelled), note });
+        }
+        catch
+        {
+            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public sealed record ResolveFailureBody(string? Note);
+
     private static string ToApiStatus(OrderStatus s) =>
         s switch
         {
@@ -725,6 +869,12 @@ public static class OrderHttpRoutes
             OrderStatus.Shipped => "shipped",
             OrderStatus.Delivered => "delivered",
             OrderStatus.Cancelled => "cancelled",
+            // DAI-637 failure states
+            OrderStatus.PaymentFailed => "payment_failed",
+            OrderStatus.AuthFailed => "auth_failed",
+            OrderStatus.AddressError => "address_error",
+            OrderStatus.StockError => "stock_error",
+            OrderStatus.SystemError => "system_error",
             _ => s.ToString().ToLowerInvariant(),
         };
 }

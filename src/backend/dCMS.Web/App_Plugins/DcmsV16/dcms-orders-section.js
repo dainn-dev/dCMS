@@ -11,6 +11,28 @@ function resolveUrl(path) {
   }
 }
 
+/**
+ * Optional tenant/store for Orders API (DAI-628). Configure under Dcms:Estore in appsettings.
+ * Reuses /umbraco/dcms/api/estore/context which returns { tenantId, storeId }.
+ * @returns {Promise<{ tenantId?: string, storeId?: string }>}
+ */
+async function fetchOrdersContext() {
+  try {
+    const res = await fetch("/umbraco/dcms/api/estore/context", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return {};
+    const json = await res.json();
+    const out = {};
+    if (json.tenantId) out.tenantId = String(json.tenantId);
+    if (json.storeId) out.storeId = String(json.storeId);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export default class DcmsOrdersSectionElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
@@ -34,6 +56,7 @@ export default class DcmsOrdersSectionElement extends UmbElementMixin(HTMLElemen
     if (!this.#host) return;
 
     try {
+      const ordersContext = await fetchOrdersContext();
       // Fetch CSS text and inject a <style> tag directly inside THIS element,
       // not in <head> — required because Umbraco v16 renders sections inside
       // its own Shadow DOM, so global <head> styles can't pierce through.
@@ -54,7 +77,7 @@ export default class DcmsOrdersSectionElement extends UmbElementMixin(HTMLElemen
       if (!jsRes.ok) throw new Error(`GET ${jsUrl} -> ${jsRes.status} ${jsRes.statusText}`);
 
       this.#spa = await import(/* @vite-ignore */ SPA_JS);
-      this.#spa?.mount?.(this.#host);
+      this.#spa?.mount?.(this.#host, ordersContext);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (this.#host) {

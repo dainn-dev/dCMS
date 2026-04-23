@@ -59,3 +59,5 @@ src/backend/dCMS.Gateway/bin/
 src/backend/dCMS.Gateway/obj/
 src/backend/dCMS.Promotions.Api/bin/
 src/backend/dCMS.Promotions.Api/obj/
+src/backend/dCMS.Fulfillment.Api/bin/
+src/backend/dCMS.Fulfillment.Api/obj/

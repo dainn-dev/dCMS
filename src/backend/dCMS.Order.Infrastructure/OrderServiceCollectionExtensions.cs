@@ -43,6 +43,7 @@ public static class OrderServiceCollectionExtensions
         });
         services.AddSingleton<IOrderService, OrderService>();
         services.AddSingleton<IOrderDlqAdminRepository, OrderDlqAdminRepository>();
+        services.AddSingleton<IOrderFailureRepository, PgOrderFailureRepository>();
         services.AddHttpClient(nameof(OperationAlerts));
         services.AddSingleton<IOperationAlerts, OperationAlerts>();
         services.AddHostedService<OrderOutboxRelayHostedService>();
@@ -55,6 +56,7 @@ public static class OrderServiceCollectionExtensions
             bus.AddConsumer<OrderPaymentSettledConsumer>();
             bus.AddConsumer<OrderCancelledIntegrationConsumer>();
             bus.AddConsumer<OrderStatusProjectionConsumer>();
+            bus.AddConsumer<OrderFailureConsumer>();
             bus.AddSagaStateMachine<OrderSaga, OrderSagaState>()
                 .EntityFrameworkRepository(r =>
                 {

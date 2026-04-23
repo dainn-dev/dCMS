@@ -15,4 +15,6 @@ export const GATEWAY = {
   inventory: "/gateway/v1/inventory",
   /** dCMS.Promotions.Api routes — /gateway/v1/promotions/... → promotions-api /api/v1/... */
   promotions: "/gateway/v1/promotions",
+  /** dCMS.Fulfillment.Api routes — /gateway/v1/fulfillment/... → fulfillment-api /api/v1/... */
+  fulfillment: "/gateway/v1/fulfillment",
 } as const;

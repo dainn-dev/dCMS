@@ -35,6 +35,12 @@ interface DataTableProps<TData, TValue> {
   /** Controlled row selection — pass together with onRowSelectionChange (e.g. bulk bar outside table). */
   rowSelection?: RowSelectionState;
   onRowSelectionChange?: (updater: Updater<RowSelectionState>) => void;
+  /** When true and data empty, show a loading row and disable footer controls. */
+  loading?: boolean;
+  /** Footer mode: default is page-based pagination. */
+  footerMode?: "pagination" | "loadMore" | "none";
+  /** Cursor pagination: show a load more button in footer. */
+  loadMore?: { onClick: () => void; disabled?: boolean; label?: string };
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -48,6 +54,9 @@ export function DataTable<TData, TValue>({
   getRowId,
   rowSelection: rowSelectionProp,
   onRowSelectionChange: onRowSelectionChangeProp,
+  loading = false,
+  footerMode = "pagination",
+  loadMore,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -208,6 +217,15 @@ export function DataTable<TData, TValue>({
                   ))}
                 </tr>
               ))
+            ) : loading ? (
+              <tr>
+                <td
+                  colSpan={columns.length}
+                  className="h-32 text-center text-sm text-on-surface-variant"
+                >
+                  Loading…
+                </td>
+              </tr>
             ) : (
               <tr>
                 <td
@@ -223,73 +241,87 @@ export function DataTable<TData, TValue>({
       </div>
 
       {/* ── Pagination footer ─────────────────────────────────────────────── */}
-      <div className="px-5 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-outline-variant/10 bg-surface-container-low/20">
-        <span className="text-xs text-on-surface-variant">
-          {totalFiltered === 0 ? (
-            "No results"
-          ) : (
-            <>
-              Showing <span className="font-bold text-on-surface">{firstRow}</span>–
-              <span className="font-bold text-on-surface">{lastRow}</span> of{" "}
-              <span className="font-bold text-on-surface">{totalFiltered}</span> orders
-            </>
-          )}
-        </span>
-
-        <div className="flex items-center gap-1">
-          <PageButton
-            onClick={() => table.setPageIndex(0)}
-            disabled={!table.getCanPreviousPage()}
-            aria-label="First page"
-          >
-            <IconFirstPage />
-          </PageButton>
-          <PageButton
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-            aria-label="Previous page"
-          >
-            <IconChevronLeft />
-          </PageButton>
-
-          {/* Page number pills */}
-          {buildPageRange(table.getPageCount(), pageIndex).map((p, i) =>
-            p === "…" ? (
-              <span key={`ellipsis-${i}`} className="px-2 text-outline text-xs">
-                …
-              </span>
+      {footerMode !== "none" && (
+        <div className="px-5 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-outline-variant/10 bg-surface-container-low/20">
+          <span className="text-xs text-on-surface-variant">
+            {totalFiltered === 0 ? (
+              "No results"
             ) : (
-              <button
-                key={p}
-                type="button"
-                className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-colors ${
-                  p === pageIndex
-                    ? "bg-primary text-on-primary"
-                    : "hover:bg-surface-container-high text-on-surface-variant"
-                }`}
-                onClick={() => table.setPageIndex(p as number)}
-              >
-                {(p as number) + 1}
-              </button>
-            )
-          )}
+              <>
+                Showing <span className="font-bold text-on-surface">{firstRow}</span>–
+                <span className="font-bold text-on-surface">{lastRow}</span> of{" "}
+                <span className="font-bold text-on-surface">{totalFiltered}</span> orders
+              </>
+            )}
+          </span>
 
-          <PageButton
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-            aria-label="Next page"
-          >
-            <IconChevronRight />
-          </PageButton>
-          <PageButton
-            onClick={() => table.setPageIndex(table.getPageCount() - 1)}
-            disabled={!table.getCanNextPage()}
-            aria-label="Last page"
-          >
-            <IconLastPage />
-          </PageButton>
+          {footerMode === "loadMore" ? (
+            <button
+              type="button"
+              className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-on-primary hover:opacity-90 disabled:opacity-40"
+              disabled={loading || loadMore?.disabled}
+              onClick={loadMore?.onClick}
+            >
+              {loadMore?.label ?? "Load more"}
+            </button>
+          ) : (
+            <div className="flex items-center gap-1">
+              <PageButton
+                onClick={() => table.setPageIndex(0)}
+                disabled={loading || !table.getCanPreviousPage()}
+                aria-label="First page"
+              >
+                <IconFirstPage />
+              </PageButton>
+              <PageButton
+                onClick={() => table.previousPage()}
+                disabled={loading || !table.getCanPreviousPage()}
+                aria-label="Previous page"
+              >
+                <IconChevronLeft />
+              </PageButton>
+
+              {/* Page number pills */}
+              {buildPageRange(table.getPageCount(), pageIndex).map((p, i) =>
+                p === "…" ? (
+                  <span key={`ellipsis-${i}`} className="px-2 text-outline text-xs">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-bold transition-colors ${
+                      p === pageIndex
+                        ? "bg-primary text-on-primary"
+                        : "hover:bg-surface-container-high text-on-surface-variant"
+                    }`}
+                    onClick={() => table.setPageIndex(p as number)}
+                    disabled={loading}
+                  >
+                    {(p as number) + 1}
+                  </button>
+                )
+              )}
+
+              <PageButton
+                onClick={() => table.nextPage()}
+                disabled={loading || !table.getCanNextPage()}
+                aria-label="Next page"
+              >
+                <IconChevronRight />
+              </PageButton>
+              <PageButton
+                onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                disabled={loading || !table.getCanNextPage()}
+                aria-label="Last page"
+              >
+                <IconLastPage />
+              </PageButton>
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

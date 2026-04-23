@@ -16,6 +16,7 @@ else
     {
         o.AddPolicy(DcmsPolicies.OrderAccess, p => p.RequireAssertion(_ => true));
         o.AddPolicy(DcmsPolicies.OrderDlqAdmin, p => p.RequireAssertion(_ => true));
+        o.AddPolicy(DcmsPolicies.OrderFailureManage, p => p.RequireAssertion(_ => true));
     });
 }
 
@@ -60,6 +61,7 @@ app.UseMiddleware<IdempotencyMiddleware>();
 app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();
 app.MapOrderHttpRoutes();
+app.MapOrderFailedRoutes();
 app.MapOrderDlqAdminRoutes();
 app.MapShipmentWebhookRoutes();
 app.MapGet("/", () => Results.Text(

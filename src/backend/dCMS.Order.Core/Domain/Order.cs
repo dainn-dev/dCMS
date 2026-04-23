@@ -15,7 +15,11 @@ public sealed class Order
         Money total,
         ShippingAddress shippingAddress,
         IEnumerable<OrderItem> items,
-        string? paymentIntentId)
+        string? paymentIntentId,
+        string? failureReason,
+        string? failureErrorCode,
+        DateTimeOffset? failedAt,
+        int retryCount)
     {
         Id = id;
         TenantId = tenantId;
@@ -26,6 +30,10 @@ public sealed class Order
         ShippingAddress = shippingAddress;
         _items = items.ToList();
         PaymentIntentId = paymentIntentId;
+        FailureReason = failureReason;
+        FailureErrorCode = failureErrorCode;
+        FailedAt = failedAt;
+        RetryCount = retryCount;
     }
 
     public string Id { get; }
@@ -39,6 +47,11 @@ public sealed class Order
 
     /// <summary>Payment provider intent id for saga correlation (DAI-315). Set before first persistence.</summary>
     public string? PaymentIntentId { get; private set; }
+
+    public string? FailureReason { get; private set; }
+    public string? FailureErrorCode { get; private set; }
+    public DateTimeOffset? FailedAt { get; private set; }
+    public int RetryCount { get; private set; }
 
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents;
 
@@ -72,7 +85,11 @@ public sealed class Order
             total,
             shippingAddress,
             items,
-            paymentIntentId: null);
+            paymentIntentId: null,
+            failureReason: null,
+            failureErrorCode: null,
+            failedAt: null,
+            retryCount: 0);
 
         order._domainEvents.Add(new OrderPlaced(
             order.Id,
@@ -97,8 +114,13 @@ public sealed class Order
         Money total,
         ShippingAddress shippingAddress,
         IEnumerable<OrderItem> items,
-        string? paymentIntentId = null) =>
-        new(id, tenantId, storeId, customerId, status, total, shippingAddress, items, paymentIntentId);
+        string? paymentIntentId = null,
+        string? failureReason = null,
+        string? failureErrorCode = null,
+        DateTimeOffset? failedAt = null,
+        int retryCount = 0) =>
+        new(id, tenantId, storeId, customerId, status, total, shippingAddress, items, paymentIntentId, failureReason,
+            failureErrorCode, failedAt, retryCount);
 
     /// <summary>Assigns the payment intent id after Payment Service returns success (DAI-315).</summary>
     public void AssignPaymentIntent(string paymentIntentId)
@@ -166,4 +188,68 @@ public sealed class Order
         Status = OrderStatus.Cancelled;
         _domainEvents.Add(new OrderCancelled(Id, reason, occurredAt));
     }
+
+    // ── DAI-637 Failure transitions ─────────────────────────────────────────
+
+    /// <summary>Returns true if the order is in any failure state recoverable via retry.</summary>
+    public bool IsFailed => Status is OrderStatus.PaymentFailed
+        or OrderStatus.AuthFailed
+        or OrderStatus.AddressError
+        or OrderStatus.StockError
+        or OrderStatus.SystemError;
+
+    /// <summary>Retry a failed order — moves back to <see cref="OrderStatus.PaymentPending"/> for re-attempt.</summary>
+    public void RetryFailure(DateTimeOffset occurredAt)
+    {
+        if (!IsFailed)
+            throw new InvalidOperationException($"Cannot retry order in status {Status}; not a failure state.");
+
+        Status = OrderStatus.PaymentPending;
+        RetryCount++;
+        FailureReason = null;
+        FailureErrorCode = null;
+        FailedAt = null;
+        _domainEvents.Add(new OrderFailureRetried(Id, occurredAt));
+    }
+
+    public void MarkFailed(OrderStatus failureStatus, string reason, string? errorCode, DateTimeOffset occurredAt)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("Failure reason is required.", nameof(reason));
+
+        if (failureStatus is not (OrderStatus.PaymentFailed or OrderStatus.AuthFailed or OrderStatus.AddressError
+            or OrderStatus.StockError or OrderStatus.SystemError))
+            throw new ArgumentException("Invalid failure status.", nameof(failureStatus));
+
+        Status = failureStatus;
+        FailureReason = reason.Trim();
+        FailureErrorCode = string.IsNullOrWhiteSpace(errorCode) ? null : errorCode.Trim();
+        FailedAt = occurredAt;
+        _domainEvents.Add(new OrderFailed(Id, TenantId, StoreId, failureStatus.ToString(), FailureReason, FailureErrorCode, occurredAt));
+    }
+
+    /// <summary>Manually resolve a failed order — moves to <see cref="OrderStatus.Cancelled"/> with note.</summary>
+    public void ResolveFailure(string note, DateTimeOffset occurredAt)
+    {
+        if (!IsFailed)
+            throw new InvalidOperationException($"Cannot resolve order in status {Status}; not a failure state.");
+
+        Status = OrderStatus.Cancelled;
+        _domainEvents.Add(new OrderFailureResolved(Id, note ?? "", occurredAt));
+    }
 }
+
+/// <summary>Emitted when a failed order is queued for retry.</summary>
+public sealed record OrderFailureRetried(string OrderId, DateTimeOffset OccurredAt) : IDomainEvent;
+
+public sealed record OrderFailed(
+    string OrderId,
+    string TenantId,
+    string StoreId,
+    string FailureStatus,
+    string FailureReason,
+    string? FailureErrorCode,
+    DateTimeOffset FailedAt) : IDomainEvent;
+
+/// <summary>Emitted when a failed order is manually resolved (treated as cancelled with note).</summary>
+public sealed record OrderFailureResolved(string OrderId, string Note, DateTimeOffset OccurredAt) : IDomainEvent;

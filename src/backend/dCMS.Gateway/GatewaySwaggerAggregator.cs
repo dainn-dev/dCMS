@@ -28,9 +28,11 @@ public sealed class GatewaySwaggerAggregator(
     {
         var sources = new[]
         {
-            (Service: "catalog",   PathPrefix: "/gateway/v1/catalog"),
-            (Service: "orders",    PathPrefix: "/gateway/v1/orders"),
-            (Service: "inventory", PathPrefix: "/gateway/v1/inventory"),
+            (Service: "catalog",    PathPrefix: "/gateway/v1/catalog"),
+            (Service: "orders",     PathPrefix: "/gateway/v1/orders"),
+            (Service: "inventory",  PathPrefix: "/gateway/v1/inventory"),
+            (Service: "promotions", PathPrefix: "/gateway/v1/promotions"),
+            (Service: "fulfillment", PathPrefix: "/gateway/v1/fulfillment"),
         };
         return await MergeSpecsAsync(sources, "dCMS Gateway API", "Backoffice + internal routes for all dCMS microservices.", ct);
     }

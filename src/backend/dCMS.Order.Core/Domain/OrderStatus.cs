@@ -16,4 +16,25 @@ public enum OrderStatus
     Delivered,
 
     Cancelled,
+
+    // ── Failure states (DAI-637) ────────────────────────────────────────────
+    // Failure = Order at a sub-state of an existing lifecycle stage that needs
+    // operator intervention (retry / resolve). Same Orders table; no separate
+    // domain entity.
+
+    /// <summary>Payment intent was declined by gateway. Recoverable via retry.</summary>
+    PaymentFailed,
+
+    /// <summary>3DS / SCA challenge timed out or failed. Recoverable via re-issue.</summary>
+    AuthFailed,
+
+    /// <summary>Shipping address validation failed. Recoverable with corrected address.</summary>
+    AddressError,
+
+    /// <summary>Inventory reservation could not be honoured. Recoverable when stock returns.</summary>
+    StockError,
+
+    /// <summary>Saga compensation / unhandled exception during state machine.</summary>
+    SystemError,
 }
+

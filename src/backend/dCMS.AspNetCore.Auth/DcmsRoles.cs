@@ -11,4 +11,7 @@ public static class DcmsRoles
     public const string BrandManager = "BrandManager";
     public const string StoreManager = "StoreManager";
     public const string StoreStaff = "StoreStaff";
+
+    /// <summary>Operations/support role for order failures and customer issues (DAI-631).</summary>
+    public const string CustomerSupport = "CustomerSupport";
 }

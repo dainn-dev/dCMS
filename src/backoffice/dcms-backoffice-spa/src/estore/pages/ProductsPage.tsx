@@ -22,6 +22,9 @@ import {
   downloadInventoryImportTemplateXlsx,
   downloadProductImportTemplateXlsx,
 } from "../exportProductImportTemplates";
+import { bulkOperateProducts, fetchAllProductsForExport, fetchProducts, type BulkProductOp, type ProductFilters } from "../api/productsApi";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import * as XLSX from "xlsx";
 
 const labelFilter = "text-[10px] font-bold text-on-surface-variant uppercase tracking-wider";
 const inputFilter =
@@ -44,82 +47,6 @@ export type ProductListRow = {
   imageSrc: string;
   imageAlt: string;
 };
-
-/** Demo catalog rows — shared with Best Seller Settings (US-20). */
-export const DEMO_PRODUCT_ROWS: ProductListRow[] = [
-  {
-    id: "1",
-    name: "Vantage Series 5 Watch",
-    categoryPath: "Timepieces > Luxury",
-    brand: "Cronos Ltd.",
-    upc: "400234110",
-    sku: "WT-550-B",
-    price: "$549.00",
-    qty: 124,
-    eStoreLabel: "Live",
-    eStoreVariant: "live",
-    statusLabel: "Active",
-    statusVariant: "active",
-    modified: "Oct 12, 2023",
-    imageAlt: "minimalist modern watch product shot on clean white background with soft shadows",
-    imageSrc:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuBQGVuwgea0Cqfj1gQeahtKlyScXePS2WTXEXlaLjBqC48b60oWv_8VjCZXUHPBgddtXv5yolcdoNx686Mqq7V5t1T6ELmgfGBDzH0OsLHdlcAZG5sbskFzOBUtqgONEM_8afgtdGTXFpIP9mcDI9Xvp1IU6Dq47meMpWiWSpSO_IuhhvwDnwa5NVXdtQefSGKJ0M2tobZ5pUj2X0K6fzIr32JmWIt2V-P63NkJOOQdvmK0P1CTdIuptZcNO9ujs79hOj8CtJ4HmJc",
-  },
-  {
-    id: "2",
-    name: "Echo-Noise Headphones",
-    categoryPath: "Audio > Wireless",
-    brand: "Sonic Bloom",
-    upc: "400234111",
-    sku: "AU-102-S",
-    price: "$299.00",
-    qty: 12,
-    eStoreLabel: "Low Stock",
-    eStoreVariant: "low-stock",
-    statusLabel: "Active",
-    statusVariant: "active",
-    modified: "Oct 11, 2023",
-    imageAlt: "professional studio shot of noise-cancelling headphones on a warm wood surface",
-    imageSrc:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuABsa3VLstm8xkOM8pTEmpECWRGPbZ6Wu1nACeFLb-UHb5kI0vaMaF17BQGOfvBcUvh6twmyaOFL4k7ZyJlVCYowRmZ_zQJsFVa9T_FV2rLDlL8gOkEs6IsUAV0f9W_ji4cy5ejl2_RD69de3XVqqEAYzbUfzY9AbyAqkaiXSV47AZSF6SAxedG5RiwrIu9T6VDZGZHe-ygSdKSp6xDQfVN2RevDUK_QSzhbQVDCj-REFTo5s-Hs_L6fyhdqYVVvatZs0X7P9KhEyI",
-  },
-  {
-    id: "3",
-    name: "SwiftRun Pro Z",
-    categoryPath: "Footwear > Athletics",
-    brand: "Velocity Sport",
-    upc: "400234115",
-    sku: "FT-99-R",
-    price: "$120.00",
-    qty: 0,
-    eStoreLabel: "Offline",
-    eStoreVariant: "offline",
-    statusLabel: "Out of Stock",
-    statusVariant: "out-of-stock",
-    modified: "Oct 09, 2023",
-    imageAlt: "vibrant red sneaker on a clean minimalist studio background with sharp lighting",
-    imageSrc:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuC3s1mKURMJ9Ev9YS9JjPeP5VsFm_t4eldi7XmGVtSvenw7tMsr48em8tjJ4VwiA4RdwAh0cmRezEnQc9MGmUHRC47g1CKAMopomHys9OEQtbFvrsl3B8wM5QmCPtzJYe-f-YCIDd-wXvSRYfQRN-eXJczwdtPVh7ya7WGpiHCekm7A9ll02Nvh97T6k4-3n2eMEshY8kl1eKZDi9edqm9fUrUralRFrRcLYz4fNO2bUsu_B8zpfKPVfDXbA8vt6-rcD4-fVips-v4",
-  },
-  {
-    id: "4",
-    name: "InstaCam Retro X",
-    categoryPath: "Photography > Gadgets",
-    brand: "Optic Visions",
-    upc: "400234120",
-    sku: "CM-42-P",
-    price: "$185.00",
-    qty: 45,
-    eStoreLabel: "Live",
-    eStoreVariant: "live",
-    statusLabel: "Active",
-    statusVariant: "active",
-    modified: "Oct 05, 2023",
-    imageAlt: "vintage style polaroid camera on a minimalist grey background with professional lighting",
-    imageSrc:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDofZzQKDYKYwUX8w-CtCegEiQpnaYSBSDQntdqsTS3LkeMRWZmnv8y77KBS0tcjHsT49HG93aWBlUuj1dkKRckoiXdBXAxmGEWo4dwIhzh8o26B4yl9G8yOeqMQMl7q0fcEfR_zp0Abz6ZpQCM0Cy0JMSt5Fs9vMWvDrnBEHhna3e6tYr90r9490RT2n8d6qmMFsQwE0vwQxpfnfsdkhfAlfrAcLZHu_h2w72WCeR_2ymyfgqqeeKYaXmOWyVsXEjlw8cLIf0j_UM",
-  },
-];
 
 function eStoreBadgeClasses(variant: ProductListRow["eStoreVariant"]) {
   switch (variant) {
@@ -145,7 +72,26 @@ function statusBadgeClasses(variant: ProductListRow["statusVariant"]) {
   }
 }
 
+function getCompactPages(totalPages: number, current: number): Array<number | "…"> {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+  const clamp = (n: number) => Math.min(totalPages, Math.max(1, n));
+  const cur = clamp(current);
+  const out: Array<number | "…"> = [1];
+
+  const windowStart = Math.max(2, cur - 1);
+  const windowEnd = Math.min(totalPages - 1, cur + 1);
+
+  if (windowStart > 2) out.push("…");
+  for (let p = windowStart; p <= windowEnd; p++) out.push(p);
+  if (windowEnd < totalPages - 1) out.push("…");
+  out.push(totalPages);
+  return out;
+}
+
 type ProductsPageProps = {
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
   onAddProduct?: () => void;
   onEditProduct?: (row: ProductListRow) => void;
   onImportProduct?: () => void;
@@ -165,7 +111,16 @@ const QUICK_ACCESS_OPTIONS: { key: string; label: string; hint: string }[] = [
   { key: "estore-only",    label: "eStore Only",             hint: ""                          },
 ];
 
-export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onImageImport, onInventoryImport }: ProductsPageProps) {
+export function ProductsPage({
+  tenantId,
+  storeId,
+  authToken,
+  onAddProduct,
+  onEditProduct,
+  onImportProduct,
+  onImageImport,
+  onInventoryImport,
+}: ProductsPageProps) {
   // ── Group Actions dropdown state ──────────────────────────────────────────
   const [groupOpen, setGroupOpen] = useState(false);
   const groupRef = useRef<HTMLDivElement>(null);
@@ -187,46 +142,180 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
   const [exportFormat, setExportFormat] = useState<"csv" | "excel">("csv");
   const [exportStripHtml, setExportStripHtml] = useState(false);
 
-  // ── doExport ──────────────────────────────────────────────────────────────
-  function doExport() {
-    const bom = "\uFEFF";
-    let csv = "";
-    let filename = "";
+  const [rows, setRows] = useState<ProductListRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
-    if (exportType === "products") {
-      const headers = ["UPC", "SKU", "Product Name", "Category", "Brand", "Retail Price", "Qty", "eStore Status", "Status", "Last Modified"];
-      const rows = DEMO_PRODUCT_ROWS.slice(0, 50).map((r) =>
-        [r.upc, r.sku, r.name, r.categoryPath, r.brand, r.price, r.qty, r.eStoreLabel, r.statusLabel, r.modified]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(",")
-      );
-      csv = bom + [headers.join(","), ...rows].join("\n");
-      filename = exportFormat === "excel" ? "products-export.xlsx" : "products-export.csv";
-    } else if (exportType === "inventory") {
-      const headers = ["UPC", "Product Name", "Store ID", "Store Name", "Store Quantity"];
-      const rows = DEMO_PRODUCT_ROWS.slice(0, 50).map((r) =>
-        [`"${r.upc}"`, `"${r.name}"`, `"STR-001"`, `"Main Store"`, `"${r.qty}"`].join(",")
-      );
-      csv = bom + [headers.join(","), ...rows].join("\n");
-      filename = exportFormat === "excel" ? "inventory-qty-export.xlsx" : "inventory-qty-export.csv";
-    } else if (exportType === "preview") {
-      const headers = ["UPC", "SKU", "Product Name", "Preview URL"];
-      const rows = DEMO_PRODUCT_ROWS.slice(0, 50).map((r) =>
-        [`"${r.upc}"`, `"${r.sku}"`, `"${r.name}"`, `"https://preview.dcms.local/products/${r.id}"`].join(",")
-      );
-      csv = bom + [headers.join(","), ...rows].join("\n");
-      filename = exportFormat === "excel" ? "preview-links-export.xlsx" : "preview-links-export.csv";
-    }
+  // Filter state (controlled inputs)
+  const [upc, setUpc] = useState("");
+  const [sku, setSku] = useState("");
+  const [name, setName] = useState("");
+  const [priceMin, setPriceMin] = useState<number | "">("");
+  const [priceMax, setPriceMax] = useState<number | "">("");
+  const [qtyMin, setQtyMin] = useState<number | "">("");
+  const [qtyMax, setQtyMax] = useState<number | "">("");
+  const [brand, setBrand] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [estoreStatus, setEstoreStatus] = useState<"all" | "live" | "draft" | "inactive">("all");
 
-    if (!csv) return;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  // Manual search trigger (Search button)
+  const [searchNonce, setSearchNonce] = useState(0);
+
+  const debUpc = useDebouncedValue(upc, 300);
+  const debSku = useDebouncedValue(sku, 300);
+  const debName = useDebouncedValue(name, 300);
+  const debPriceMin = useDebouncedValue(priceMin, 300);
+  const debPriceMax = useDebouncedValue(priceMax, 300);
+  const debQtyMin = useDebouncedValue(qtyMin, 300);
+  const debQtyMax = useDebouncedValue(qtyMax, 300);
+  const debBrand = useDebouncedValue(brand, 300);
+  const debCategory = useDebouncedValue(category, 300);
+  const debStatus = useDebouncedValue(estoreStatus, 300);
+
+  function stripHtml(raw: string): string {
+    if (!raw) return "";
+    // quick + safe for export (not for rendering)
+    return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function csvEscape(v: unknown): string {
+    const s = String(v ?? "");
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+
+  function downloadBlob(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    setExportType(null);
+  }
+
+  // ── doExport ──────────────────────────────────────────────────────────────
+  async function doExport() {
+    if (!tenantId || !storeId) {
+      setToast({ kind: "error", message: "Missing tenantId / storeId for export." });
+      return;
+    }
+    const bom = "\uFEFF";
+    setExportLoading(true);
+    try {
+      const { rows: exportRows, total: exportTotal, limited } = await fetchAllProductsForExport(
+        tenantId,
+        storeId,
+        filters,
+        authToken,
+        { limit: 5000, pageSize: 200 }
+      );
+
+      if (limited) {
+        setToast({ kind: "error", message: `Export limited to first 5000 rows (total ${exportTotal}). Please refine filters.` });
+      }
+
+      if (!exportType) return;
+
+      const clean = (s: string) => (exportStripHtml ? stripHtml(s) : s);
+
+      if (exportFormat === "csv") {
+        let filename = "";
+        let csv = "";
+
+        if (exportType === "products") {
+          const headers = ["UPC", "SKU", "Product Name", "Category", "Brand", "Retail Price", "Qty", "eStore Status", "Status", "Last Modified"];
+          const lines = exportRows.map((r) =>
+            [
+              clean(r.upc),
+              clean(r.sku),
+              clean(r.name),
+              clean(r.categoryPath),
+              clean(r.brand),
+              clean(r.price),
+              r.qty,
+              clean(r.eStoreLabel),
+              clean(r.statusLabel),
+              clean(r.modified),
+            ]
+              .map(csvEscape)
+              .join(",")
+          );
+          csv = bom + [headers.join(","), ...lines].join("\n");
+          filename = "products-export.csv";
+        } else if (exportType === "inventory") {
+          const headers = ["UPC", "Product Name", "Store ID", "Store Name", "Store Quantity"];
+          const lines = exportRows.map((r) =>
+            [clean(r.upc), clean(r.name), "STR-001", "Main Store", r.qty].map(csvEscape).join(",")
+          );
+          csv = bom + [headers.join(","), ...lines].join("\n");
+          filename = "inventory-qty-export.csv";
+        } else if (exportType === "preview") {
+          const headers = ["UPC", "SKU", "Product Name", "Preview URL"];
+          const lines = exportRows.map((r) =>
+            [clean(r.upc), clean(r.sku), clean(r.name), `https://preview.dcms.local/products/${r.id}`].map(csvEscape).join(",")
+          );
+          csv = bom + [headers.join(","), ...lines].join("\n");
+          filename = "preview-links-export.csv";
+        }
+
+        if (!csv) return;
+        downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), filename);
+        setToast({ kind: "success", message: `Exported ${exportRows.length} row(s)` });
+      } else {
+        // XLSX
+        let filename = "";
+        let sheetName = "";
+        let aoa: unknown[][] = [];
+
+        if (exportType === "products") {
+          filename = "products-export.xlsx";
+          sheetName = "Products";
+          aoa = [
+            ["UPC", "SKU", "Product Name", "Category", "Brand", "Retail Price", "Qty", "eStore Status", "Status", "Last Modified"],
+            ...exportRows.map((r) => [
+              clean(r.upc),
+              clean(r.sku),
+              clean(r.name),
+              clean(r.categoryPath),
+              clean(r.brand),
+              clean(r.price),
+              r.qty,
+              clean(r.eStoreLabel),
+              clean(r.statusLabel),
+              clean(r.modified),
+            ]),
+          ];
+        } else if (exportType === "inventory") {
+          filename = "inventory-qty-export.xlsx";
+          sheetName = "Inventory";
+          aoa = [["UPC", "Product Name", "Store ID", "Store Name", "Store Quantity"], ...exportRows.map((r) => [clean(r.upc), clean(r.name), "STR-001", "Main Store", r.qty])];
+        } else if (exportType === "preview") {
+          filename = "preview-links-export.xlsx";
+          sheetName = "Preview";
+          aoa = [["UPC", "SKU", "Product Name", "Preview URL"], ...exportRows.map((r) => [clean(r.upc), clean(r.sku), clean(r.name), `https://preview.dcms.local/products/${r.id}`])];
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, sheetName || "Sheet1");
+        const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+        downloadBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
+        setToast({ kind: "success", message: `Exported ${exportRows.length} row(s)` });
+      }
+    } catch (e: unknown) {
+      setToast({ kind: "error", message: e instanceof Error ? e.message : "Export failed" });
+    } finally {
+      setExportLoading(false);
+      setExportType(null);
+    }
   }
 
   // ── More Filters state ────────────────────────────────────────────────────
@@ -275,31 +364,85 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
     });
   }
 
-  // ── Filtering logic ───────────────────────────────────────────────────────
-  const filteredRows = useMemo(() => {
-    return DEMO_PRODUCT_ROWS.filter((row) => {
-      if (activeCategories.length > 0) {
-        const topLevel = row.categoryPath.split(" > ")[0];
-        if (!activeCategories.includes(topLevel)) return false;
-      }
-      if (activeQuickAccess.has("zero-qty") && row.qty !== 0) return false;
-      if (activeQuickAccess.has("restock") && row.statusVariant !== "out-of-stock") return false;
-      if (activeQuickAccess.has("sell-on-estore") && row.eStoreVariant === "offline") return false;
-      if (activeQuickAccess.has("estore-only") && row.eStoreVariant !== "live") return false;
-      return true;
-    });
-  }, [activeCategories, activeQuickAccess]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+
+  const filters: ProductFilters = useMemo(() => {
+    const quick = Array.from(activeQuickAccess) as Exclude<ProductFilters["quickAccess"], undefined>;
+    return {
+      upc: debUpc.trim() || undefined,
+      sku: debSku.trim() || undefined,
+      name: debName.trim() || undefined,
+      priceMin: typeof debPriceMin === "number" ? debPriceMin : undefined,
+      priceMax: typeof debPriceMax === "number" ? debPriceMax : undefined,
+      qtyMin: typeof debQtyMin === "number" ? debQtyMin : undefined,
+      qtyMax: typeof debQtyMax === "number" ? debQtyMax : undefined,
+      brand: debBrand !== "all" ? debBrand : undefined,
+      category: debCategory !== "all" ? debCategory : undefined,
+      estoreStatus: debStatus !== "all" ? debStatus : undefined,
+      quickAccess: quick.length ? quick : undefined,
+    };
+  }, [
+    activeQuickAccess,
+    debBrand,
+    debCategory,
+    debName,
+    debPriceMax,
+    debPriceMin,
+    debQtyMax,
+    debQtyMin,
+    debSku,
+    debStatus,
+    debUpc,
+  ]);
+
+  useEffect(() => {
+    if (!tenantId || !storeId) {
+      setRows([]);
+      setTotal(0);
+      setError("Missing tenantId / storeId for Products API.");
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchProducts(tenantId, storeId, filters, { page: safePage, pageSize }, authToken)
+      .then(({ rows, total }) => {
+        if (cancelled) return;
+        setRows(rows);
+        setTotal(total);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setRows([]);
+        setTotal(0);
+        setError(e instanceof Error ? e.message : "Failed to load products");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, storeId, authToken, filters, safePage, pageSize, searchNonce]);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
-  const allFilteredSelected =
-    filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.id));
-  const someFilteredSelected = filteredRows.some((r) => selectedIds.has(r.id));
+  const allSelected = rows.length > 0 && rows.every((r) => selectedIds.has(r.id));
+  const someSelected = rows.some((r) => selectedIds.has(r.id));
 
-  function toggleSelectAllFiltered(checked: boolean) {
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  function toggleSelectAll(checked: boolean) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      for (const r of filteredRows) {
+      for (const r of rows) {
         if (checked) next.add(r.id);
         else next.delete(r.id);
       }
@@ -319,6 +462,27 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
   const filteredCatOptions = FILTER_CATEGORIES.filter((c) =>
     c.toLowerCase().includes(catSearch.toLowerCase())
   );
+
+  async function runBulk(op: BulkProductOp) {
+    if (!tenantId || !storeId) return;
+    if (selectedIds.size === 0) return;
+    setBulkLoading(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const { succeeded, failed } = await bulkOperateProducts(tenantId, storeId, ids, op, authToken);
+      if (failed > 0) {
+        setToast({ kind: "error", message: `${failed} product(s) failed to update.` });
+        return; // don't clear selection on partial failure
+      }
+      setToast({ kind: "success", message: `${succeeded} products updated` });
+      setSelectedIds(new Set());
+      setSearchNonce((n) => n + 1); // refetch
+    } catch (e: unknown) {
+      setToast({ kind: "error", message: e instanceof Error ? e.message : "Bulk update failed" });
+    } finally {
+      setBulkLoading(false);
+    }
+  }
 
   return (
     <div
@@ -453,77 +617,178 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           <div className="space-y-1.5">
             <label className={labelFilter}>UPC</label>
-            <input className={inputFilter} placeholder="Enter UPC" type="text" />
+            <input
+              className={inputFilter}
+              placeholder="Enter UPC"
+              type="text"
+              value={upc}
+              onChange={(e) => {
+                setUpc(e.target.value);
+                setPage(1);
+              }}
+            />
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>SKU</label>
-            <input className={inputFilter} placeholder="Enter SKU" type="text" />
+            <input
+              className={inputFilter}
+              placeholder="Enter SKU"
+              type="text"
+              value={sku}
+              onChange={(e) => {
+                setSku(e.target.value);
+                setPage(1);
+              }}
+            />
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>Product Name</label>
-            <input className={inputFilter} placeholder="Search by name" type="text" />
+            <input
+              className={inputFilter}
+              placeholder="Search by name"
+              type="text"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                setPage(1);
+              }}
+            />
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>Price (Min/Max)</label>
             <div className="flex gap-2">
-              <input className={`${inputFilter} w-1/2`} placeholder="Min" type="number" />
-              <input className={`${inputFilter} w-1/2`} placeholder="Max" type="number" />
+              <input
+                className={`${inputFilter} w-1/2`}
+                placeholder="Min"
+                type="number"
+                value={priceMin}
+                onChange={(e) => {
+                  setPriceMin(e.target.value === "" ? "" : Number(e.target.value));
+                  setPage(1);
+                }}
+              />
+              <input
+                className={`${inputFilter} w-1/2`}
+                placeholder="Max"
+                type="number"
+                value={priceMax}
+                onChange={(e) => {
+                  setPriceMax(e.target.value === "" ? "" : Number(e.target.value));
+                  setPage(1);
+                }}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>Brand</label>
-            <select className={`${inputFilter} appearance-none`}>
-              <option>All Brands</option>
-              <option>Premium Collection</option>
-              <option>Eco-Essentials</option>
-              <option>Luxe Goods</option>
+            <select
+              className={`${inputFilter} appearance-none`}
+              value={brand}
+              onChange={(e) => {
+                setBrand(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">All Brands</option>
+              <option value="Premium Collection">Premium Collection</option>
+              <option value="Eco-Essentials">Eco-Essentials</option>
+              <option value="Luxe Goods">Luxe Goods</option>
             </select>
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>Category</label>
-            <select className={`${inputFilter} appearance-none`}>
-              <option>All Categories</option>
-              <option>Electronics</option>
-              <option>Home &amp; Living</option>
-              <option>Apparel</option>
+            <select
+              className={`${inputFilter} appearance-none`}
+              value={category}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">All Categories</option>
+              <option value="Electronics">Electronics</option>
+              <option value="Home & Living">Home &amp; Living</option>
+              <option value="Apparel">Apparel</option>
             </select>
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>eStore Qty</label>
             <div className="flex gap-2">
-              <input className={`${inputFilter} w-1/2`} placeholder="Min" type="number" />
-              <input className={`${inputFilter} w-1/2`} placeholder="Max" type="number" />
+              <input
+                className={`${inputFilter} w-1/2`}
+                placeholder="Min"
+                type="number"
+                value={qtyMin}
+                onChange={(e) => {
+                  setQtyMin(e.target.value === "" ? "" : Number(e.target.value));
+                  setPage(1);
+                }}
+              />
+              <input
+                className={`${inputFilter} w-1/2`}
+                placeholder="Max"
+                type="number"
+                value={qtyMax}
+                onChange={(e) => {
+                  setQtyMax(e.target.value === "" ? "" : Number(e.target.value));
+                  setPage(1);
+                }}
+              />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>Quick Access</label>
-            <select className={inputFilter}>
-              <option>Last 30 Days</option>
-              <option>Out of Stock</option>
-              <option>New Arrivals</option>
+            <select className={inputFilter} value="__more" onChange={openMoreFilters}>
+              <option value="__more">Use “More Filters”</option>
             </select>
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>eStore Status</label>
-            <select className={inputFilter}>
-              <option>All States</option>
-              <option>Live</option>
-              <option>Draft</option>
-              <option>Inactive</option>
+            <select
+              className={inputFilter}
+              value={estoreStatus}
+              onChange={(e) => {
+                setEstoreStatus(e.target.value as typeof estoreStatus);
+                setPage(1);
+              }}
+            >
+              <option value="all">All States</option>
+              <option value="live">Live</option>
+              <option value="draft">Draft</option>
+              <option value="inactive">Inactive</option>
             </select>
           </div>
           <div className="flex items-end gap-2 lg:col-span-1">
             <button
               type="button"
               className="h-9 flex-1 rounded-lg bg-primary py-2 text-xs font-bold text-on-primary transition-all hover:opacity-90"
-              onClick={() => console.info("[Products] Search (placeholder)")}
+              onClick={() => {
+                setPage(1);
+                setSearchNonce((n) => n + 1);
+              }}
             >
               Search
             </button>
             <button
               type="button"
               className="h-9 rounded-lg bg-surface-container-high px-3 py-2 text-xs font-bold text-on-surface-variant transition-all hover:bg-outline-variant/40"
-              onClick={() => console.info("[Products] Reset filters (placeholder)")}
+              onClick={() => {
+                setUpc("");
+                setSku("");
+                setName("");
+                setPriceMin("");
+                setPriceMax("");
+                setQtyMin("");
+                setQtyMax("");
+                setBrand("all");
+                setCategory("all");
+                setEstoreStatus("all");
+                setActiveCategories([]);
+                setActiveQuickAccess(new Set());
+                setPageSize(25);
+                setPage(1);
+                setSearchNonce((n) => n + 1);
+              }}
             >
               Reset
             </button>
@@ -544,7 +809,61 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
         </div>
       </section>
 
-      <div className="overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-[0_4px_20px_rgba(40,23,22,0.02)]">
+      {error && (
+        <div className="rounded-xl border border-error/25 bg-error/5 px-5 py-4 text-sm text-error">
+          {error}
+        </div>
+      )}
+
+      <div className="relative overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-[0_4px_20px_rgba(40,23,22,0.02)]">
+        {selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/10 bg-surface-container px-6 py-3">
+            <div className="text-xs font-semibold text-on-surface">
+              {selectedIds.size} selected{" "}
+              <button
+                type="button"
+                className="ml-2 text-[11px] font-bold text-primary hover:underline"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Clear selection
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-4 py-2 text-[11px] font-bold text-on-primary hover:opacity-90 disabled:opacity-40"
+                disabled={bulkLoading}
+                onClick={() => void runBulk("publish")}
+              >
+                Publish selected
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/25 bg-surface-container-lowest px-4 py-2 text-[11px] font-bold text-on-surface hover:bg-surface-container-high disabled:opacity-40"
+                disabled={bulkLoading}
+                onClick={() => void runBulk("hide")}
+              >
+                Hide selected
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-error px-4 py-2 text-[11px] font-bold text-on-error hover:opacity-90 disabled:opacity-40"
+                disabled={bulkLoading}
+                onClick={() => setConfirmArchiveOpen(true)}
+              >
+                Archive selected
+              </button>
+            </div>
+          </div>
+        )}
+
+        {bulkLoading && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/10 backdrop-blur-[1px]">
+            <div className="rounded-full bg-surface-container-lowest px-4 py-2 text-xs font-semibold text-on-surface shadow">
+              Updating…
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto custom-scrollbar">
           <table className="w-full border-collapse text-left">
             <thead>
@@ -554,12 +873,12 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
                     type="checkbox"
                     className="h-3.5 w-3.5 cursor-pointer rounded border-outline-variant accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                     aria-label="Select all"
-                    checked={allFilteredSelected}
-                    disabled={filteredRows.length === 0}
+                    checked={allSelected}
+                    disabled={rows.length === 0}
                     ref={(el) => {
-                      if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected;
+                      if (el) el.indeterminate = someSelected && !allSelected;
                     }}
-                    onChange={(e) => toggleSelectAllFiltered(e.target.checked)}
+                    onChange={(e) => toggleSelectAll(e.target.checked)}
                   />
                 </th>
                 <th className="w-20 px-4 py-4">Image</th>
@@ -575,21 +894,33 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/10">
-              {filteredRows.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-on-surface-variant">
+                    Loading…
+                  </td>
+                </tr>
+              )}
+              {!loading && rows.length === 0 && (
                 <tr>
                   <td colSpan={11} className="px-6 py-10 text-center text-sm text-on-surface-variant">
                     No products match the selected filters.{" "}
                     <button
                       type="button"
                       className="font-bold text-primary hover:underline"
-                      onClick={() => { setActiveCategories([]); setActiveQuickAccess(new Set()); }}
+                      onClick={() => {
+                        setActiveCategories([]);
+                        setActiveQuickAccess(new Set());
+                        setPage(1);
+                        setSearchNonce((n) => n + 1);
+                      }}
                     >
                       Clear filters
                     </button>
                   </td>
                 </tr>
               )}
-              {filteredRows.map((row) => (
+              {!loading && rows.map((row) => (
                 <tr key={row.id} className="text-[12px] transition-colors hover:bg-surface-container-low">
                   <td className="px-6 py-4 text-center">
                     <input
@@ -668,19 +999,25 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
         <footer className="flex flex-col items-center justify-between gap-4 bg-surface-container px-6 py-4 sm:flex-row">
           <div className="flex flex-wrap items-center gap-4 text-[11px] font-medium text-on-surface-variant">
             <span>
-              {filteredRows.length === DEMO_PRODUCT_ROWS.length
-                ? `Showing 1 to ${filteredRows.length} of ${filteredRows.length} entries`
-                : `Showing ${filteredRows.length} of ${DEMO_PRODUCT_ROWS.length} entries (filtered)`}
+              {total === 0
+                ? "Showing 0 entries"
+                : `Showing ${(safePage - 1) * pageSize + 1} to ${Math.min(safePage * pageSize, total)} of ${total} entries`}
             </span>
             <div className="flex items-center gap-2">
               <label htmlFor="products-page-size">Show</label>
               <select
                 id="products-page-size"
                 className="rounded border-none bg-surface-container-lowest px-2 py-1 text-[11px] focus:ring-1 focus:ring-primary focus:outline-none"
+                value={String(pageSize)}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setPageSize(Number.isFinite(next) && next > 0 ? next : 25);
+                  setPage(1);
+                }}
               >
-                <option>10</option>
-                <option>25</option>
-                <option>50</option>
+                <option value="10">10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
               </select>
             </div>
           </div>
@@ -688,50 +1025,49 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
             <button
               type="button"
               className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
-              disabled
+              disabled={safePage <= 1}
               aria-label="First page"
+              onClick={() => setPage(1)}
             >
               <IconFirstPage className="h-5 w-5" />
             </button>
             <button
               type="button"
               className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high disabled:opacity-30"
-              disabled
+              disabled={safePage <= 1}
               aria-label="Previous page"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               <IconChevronLeft className="h-5 w-5" />
             </button>
             <div className="mx-2 flex items-center gap-1">
-              <button
-                type="button"
-                className="h-8 w-8 rounded bg-primary text-[11px] font-bold text-on-primary"
-              >
-                1
-              </button>
-              <button
-                type="button"
-                className="h-8 w-8 rounded text-[11px] font-medium text-on-surface hover:bg-surface-container-high"
-              >
-                2
-              </button>
-              <button
-                type="button"
-                className="h-8 w-8 rounded text-[11px] font-medium text-on-surface hover:bg-surface-container-high"
-              >
-                3
-              </button>
-              <span className="px-1">...</span>
-              <button
-                type="button"
-                className="h-8 w-8 rounded text-[11px] font-medium text-on-surface hover:bg-surface-container-high"
-              >
-                59
-              </button>
+              {getCompactPages(totalPages, safePage).map((p, i) =>
+                p === "…" ? (
+                  <span key={`e-${i}`} className="px-1 text-[11px] text-on-surface-variant">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    className={
+                      p === safePage
+                        ? "h-8 w-8 rounded bg-primary text-[11px] font-bold text-on-primary"
+                        : "h-8 w-8 rounded text-[11px] font-medium text-on-surface hover:bg-surface-container-high"
+                    }
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
             </div>
             <button
               type="button"
               className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high"
               aria-label="Next page"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >
               <IconChevronRight className="h-5 w-5" />
             </button>
@@ -739,12 +1075,54 @@ export function ProductsPage({ onAddProduct, onEditProduct, onImportProduct, onI
               type="button"
               className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high"
               aria-label="Last page"
+              disabled={safePage >= totalPages}
+              onClick={() => setPage(totalPages)}
             >
               <IconLastPage className="h-5 w-5" />
             </button>
           </div>
         </footer>
       </div>
+
+      {confirmArchiveOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[420px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="p-6">
+              <h3 className="text-sm font-bold text-on-surface">Archive products</h3>
+              <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
+                Archive <strong>{selectedIds.size}</strong> selected product(s)? This is a soft archive.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setConfirmArchiveOpen(false)}
+                disabled={bulkLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 disabled:opacity-40"
+                onClick={() => {
+                  setConfirmArchiveOpen(false);
+                  void runBulk("archive");
+                }}
+                disabled={bulkLoading}
+              >
+                Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-6 py-3 shadow-2xl">
+          <p className={`text-sm font-semibold ${toast.kind === "error" ? "text-error" : "text-on-surface"}`}>{toast.message}</p>
+        </div>
+      )}
 
       </div>
 

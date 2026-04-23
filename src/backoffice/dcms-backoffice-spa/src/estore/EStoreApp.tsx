@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { eStoreHashForPage, parseEStorePageFromHash } from "./estoreHashRouting";
 import { EStoreLayout, type EStorePageId, type EStoreSidebarScope } from "./layout/EStoreLayout";
 import { LanguageProvider } from "./LanguageContext";
@@ -9,6 +9,26 @@ import { EditBrandPage } from "./pages/EditBrandPage";
 import { EditProductPage } from "./pages/EditProductPage";
 import { ProductImageImportPage } from "./pages/ProductImageImportPage";
 import { createBrand, deleteBrand, fetchBrands, updateBrand } from "./api/brandsApi";
+import {
+  createCollectionLocationApi,
+  createFulfillmentGrouping,
+  createFulfillmentSlot,
+  createLogisticPartnerApi,
+  deleteCollectionLocationApi,
+  deleteFulfillmentGrouping,
+  deleteFulfillmentSlot,
+  deleteLogisticPartnerApi,
+  fetchCollectionLocations,
+  fetchFulfillmentGroupings,
+  fetchFulfillmentSettings,
+  fetchFulfillmentSlots,
+  fetchLogisticPartnersApi,
+  putFulfillmentSettings,
+  updateCollectionLocationApi,
+  updateFulfillmentGrouping,
+  updateFulfillmentSlot,
+  updateLogisticPartnerApi,
+} from "./api/fulfillmentApi";
 import { ProductImportPage } from "./pages/ProductImportPage";
 import { ProductInventoryImportPage } from "./pages/ProductInventoryImportPage";
 import { CategoryAssignmentPage } from "./pages/CategoryAssignmentPage";
@@ -21,8 +41,9 @@ import { PromoExclusionListPage } from "./pages/PromoExclusionListPage";
 import type { PromoListRow } from "./promotions-columns";
 import type { AttributeListRow } from "./attributes-columns";
 import type { ProductListRow } from "./pages/ProductsPage";
-import { DEMO_PRODUCT_ROWS, ProductsPage } from "./pages/ProductsPage";
+import { ProductsPage } from "./pages/ProductsPage";
 import { BestSellerSettingsPage } from "./pages/BestSellerSettingsPage";
+import { DEMO_PRODUCT_ROWS } from "./demo/demoProductRows";
 import { AttributesPage } from "./pages/AttributesPage";
 import {
   BrandConfigPage,
@@ -285,6 +306,118 @@ const DEFAULT_PREDEFINED_FIELDS: FulfillmentPredefinedFieldSetting[] = [
   { key: "timeslot", label: "Timeslot", enabled: true },
 ];
 
+/** Demo / offline fallback when `tenantId` is absent (DAI-615). Never used as initial data for API mode. */
+const DEMO_FULFILLMENT_GROUPINGS: FulfillmentGrouping[] = [
+  {
+    id: "grp-1",
+    groupName: "Standard Delivery",
+    code: "STD_DELIVERY",
+    startDate: "2026-04-01T00:00",
+    endDate: "",
+    priority: 10,
+    active: true,
+    tenantEnabled: false,
+    maxPerTenant: "",
+    deliveryMode: "Local Delivery",
+    limitSelectedDistributionCenter: false,
+    stockLocation: "",
+  },
+];
+
+const DEMO_FULFILLMENT_SLOTS: FulfillmentSlot[] = [
+  {
+    id: "slot-1",
+    groupingId: "grp-1",
+    name: "10am – 4pm",
+    code: "SLOT_10_16",
+    mode: "Local Delivery",
+    startingDate: "2026-04-01T00:00",
+    endingDate: "",
+    price: "5.99",
+    updatedAt: "2026-04-10 09:30",
+  },
+  {
+    id: "slot-2",
+    groupingId: "grp-1",
+    name: "4pm – 10pm",
+    code: "SLOT_16_22",
+    mode: "Local Delivery",
+    startingDate: "2026-04-01T00:00",
+    endingDate: "",
+    price: "7.99",
+    updatedAt: "2026-04-12 15:20",
+  },
+];
+
+const DEMO_STOCK_LOCATIONS: StockLocation[] = [
+  { id: "dc-1", name: "DC - Central", code: "DC_CENTRAL", active: true },
+  { id: "dc-2", name: "DC - East", code: "DC_EAST", active: true },
+  { id: "dc-3", name: "DC - West", code: "DC_WEST", active: false },
+];
+
+const DEMO_DYNAMIC_FIELDS: FulfillmentDynamicField[] = [
+  {
+    id: "df-1",
+    enabled: true,
+    required: false,
+    property: "deliveryNote",
+    columnLabel: "Delivery Note",
+    fieldName: "delivery_note",
+    fieldType: "Text Box",
+    section: "Additional Info",
+  },
+  {
+    id: "df-2",
+    enabled: false,
+    required: false,
+    property: "pickupInstructions",
+    columnLabel: "Pickup Instructions",
+    fieldName: "pickup_instructions",
+    fieldType: "WYSIWYG",
+    section: "Additional Info",
+  },
+];
+
+const DEMO_LOGISTIC_PARTNERS: LogisticPartner[] = [
+  { id: "lp-1", name: "DHL", code: "DHL", enabled: true, integratedLogistic: true },
+  { id: "lp-2", name: "FedEx", code: "FEDEX", enabled: true, integratedLogistic: true },
+  { id: "lp-3", name: "Ninja Van", code: "NINJA_VAN", enabled: false, integratedLogistic: false },
+  { id: "lp-4", name: "J&T Express", code: "JNT", enabled: true, integratedLogistic: false },
+];
+
+const DEMO_COLLECTION_LOCATIONS: CollectionLocation[] = [
+  {
+    id: "LOC_MAIN",
+    name: "Main Store",
+    brandCodes: ["CAS-7721", "VEL-4490"],
+    address1: "123 Market Street",
+    address2: "",
+    address3: "",
+    postalCode: "000000",
+    country: "Singapore",
+    geoLat: "1.3000",
+    geoLng: "103.8000",
+    active: true,
+    openingHours: "10:00",
+    closingHours: "22:00",
+  },
+  {
+    id: "LOC_WAREHOUSE",
+    name: "Warehouse Pickup",
+    brandCodes: ["AUR-5501"],
+    address1: "88 Industrial Ave",
+    address2: "",
+    address3: "",
+    postalCode: "000000",
+    country: "Singapore",
+    geoLat: "1.3100",
+    geoLng: "103.8200",
+    active: true,
+    openingHours: "09:00",
+    closingHours: "18:00",
+  },
+];
+
 function safeJsonParse<T>(raw: string | null): T | null {
   if (!raw) return null;
   try {
@@ -308,12 +441,15 @@ export function EStoreApp({
   languages,
   sidebarScope = "estore",
   tenantId,
+  storeId,
   authToken,
 }: {
   languages?: import("./useUmbracoLanguages").UmbracoLanguage[];
   sidebarScope?: EStoreSidebarScope;
   /** Umbraco tenant ID for Catalog API calls. Falls back to demo data when absent. */
   tenantId?: string;
+  /** Store ID for store-scoped catalog settings (DAI-616). */
+  storeId?: string;
   /** Bearer token from Umbraco auth context. */
   authToken?: string;
 }) {
@@ -324,6 +460,13 @@ export function EStoreApp({
   const [promoForm, setPromoForm] = useState<PromoFormState>({ mode: "idle" });
   const [campaignForm, setCampaignForm] = useState<CampaignFormState>({ mode: "idle" });
   const [fulfillmentForm, setFulfillmentForm] = useState<FulfillmentFormState>({ mode: "idle" });
+  /** When tenantId is set: false until Fulfillment API hydration completes (avoid persisting demo defaults). */
+  const [fulfillmentSynced, setFulfillmentSynced] = useState(() => !tenantId);
+  const [fulfillmentLoading, setFulfillmentLoading] = useState(false);
+  const [fulfillmentError, setFulfillmentError] = useState<string | null>(null);
+  /** DAI-615: true after successful tenant-scoped fulfillment fetch (settings PUT waits for this). */
+  const fulfillmentLoadedRef = useRef(false);
+  const [fulfillmentToast, setFulfillmentToast] = useState<string | null>(null);
   const [accessUserForm, setAccessUserForm] = useState<AccessUserFormState>({ mode: "idle" });
   const [accessRoleForm, setAccessRoleForm] = useState<AccessRoleFormState>({ mode: "idle" });
   const [accessTenantForm, setAccessTenantForm] = useState<AccessTenantFormState>({ mode: "idle" });
@@ -376,88 +519,43 @@ export function EStoreApp({
       DEFAULT_BEST_SELLER_FLAGS
   );
 
-  const [predefinedFieldSettings, setPredefinedFieldSettings] = useState<FulfillmentPredefinedFieldSetting[]>(
-    () => safeJsonParse<FulfillmentPredefinedFieldSetting[]>(localStorage.getItem(LS_KEYS.fulfillmentPredefinedFields)) ?? DEFAULT_PREDEFINED_FIELDS
+  const [predefinedFieldSettings, setPredefinedFieldSettings] = useState<FulfillmentPredefinedFieldSetting[]>(() =>
+    tenantId
+      ? DEFAULT_PREDEFINED_FIELDS
+      : safeJsonParse<FulfillmentPredefinedFieldSetting[]>(localStorage.getItem(LS_KEYS.fulfillmentPredefinedFields)) ??
+        DEFAULT_PREDEFINED_FIELDS
   );
 
-  const [logisticPartners, setLogisticPartners] = useState<LogisticPartner[]>(
-    () =>
-      safeJsonParse<LogisticPartner[]>(localStorage.getItem(LS_KEYS.logisticPartners)) ?? [
-        { id: "lp-1", name: "DHL", code: "DHL", enabled: true, integratedLogistic: true },
-        { id: "lp-2", name: "FedEx", code: "FEDEX", enabled: true, integratedLogistic: true },
-        { id: "lp-3", name: "Ninja Van", code: "NINJA_VAN", enabled: false, integratedLogistic: false },
-        { id: "lp-4", name: "J&T Express", code: "JNT", enabled: true, integratedLogistic: false },
-      ]
+  const [logisticPartners, setLogisticPartners] = useState<LogisticPartner[]>(() =>
+    tenantId
+      ? []
+      : safeJsonParse<LogisticPartner[]>(localStorage.getItem(LS_KEYS.logisticPartners)) ?? DEMO_LOGISTIC_PARTNERS
   );
 
-  const [fulfillmentGroupings, setFulfillmentGroupings] = useState<FulfillmentGrouping[]>([
-    {
-      id: "grp-1",
-      groupName: "Standard Delivery",
-      code: "STD_DELIVERY",
-      startDate: "2026-04-01T00:00",
-      endDate: "",
-      priority: 10,
-      active: true,
-      tenantEnabled: false,
-      maxPerTenant: "",
-      deliveryMode: "Local Delivery",
-      limitSelectedDistributionCenter: false,
-      stockLocation: "",
-    },
-  ]);
-
-  const defaultCollectionLocations = useMemo<CollectionLocation[]>(
-    () => [
-      {
-        id: "LOC_MAIN",
-        name: "Main Store",
-        brandCodes: ["CAS-7721", "VEL-4490"],
-        address1: "123 Market Street",
-        address2: "",
-        address3: "",
-        postalCode: "000000",
-        country: "Singapore",
-        geoLat: "1.3000",
-        geoLng: "103.8000",
-        active: true,
-        openingHours: "10:00",
-        closingHours: "22:00",
-      },
-      {
-        id: "LOC_WAREHOUSE",
-        name: "Warehouse Pickup",
-        brandCodes: ["AUR-5501"],
-        address1: "88 Industrial Ave",
-        address2: "",
-        address3: "",
-        postalCode: "000000",
-        country: "Singapore",
-        geoLat: "1.3100",
-        geoLng: "103.8200",
-        active: true,
-        openingHours: "09:00",
-        closingHours: "18:00",
-      },
-    ],
-    []
+  const [fulfillmentGroupings, setFulfillmentGroupings] = useState<FulfillmentGrouping[]>(() =>
+    tenantId ? [] : DEMO_FULFILLMENT_GROUPINGS
   );
 
-  const [collectionLocations, setCollectionLocations] = useState<CollectionLocation[]>(
-    () => safeJsonParse<CollectionLocation[]>(localStorage.getItem(LS_KEYS.collectionLocations)) ?? defaultCollectionLocations
+  const [collectionLocations, setCollectionLocations] = useState<CollectionLocation[]>(() =>
+    tenantId
+      ? []
+      : safeJsonParse<CollectionLocation[]>(localStorage.getItem(LS_KEYS.collectionLocations)) ?? DEMO_COLLECTION_LOCATIONS
   );
 
   useEffect(() => {
+    if (tenantId) return;
     localStorage.setItem(LS_KEYS.collectionLocations, JSON.stringify(collectionLocations));
-  }, [collectionLocations]);
+  }, [collectionLocations, tenantId]);
 
   useEffect(() => {
+    if (tenantId) return;
     localStorage.setItem(LS_KEYS.fulfillmentPredefinedFields, JSON.stringify(predefinedFieldSettings));
-  }, [predefinedFieldSettings]);
+  }, [predefinedFieldSettings, tenantId]);
 
   useEffect(() => {
+    if (tenantId) return;
     localStorage.setItem(LS_KEYS.logisticPartners, JSON.stringify(logisticPartners));
-  }, [logisticPartners]);
+  }, [logisticPartners, tenantId]);
 
   useEffect(() => {
     localStorage.setItem(LS_KEYS.brandAdditionalFields, JSON.stringify(brandAdditionalFields));
@@ -467,59 +565,178 @@ export function EStoreApp({
     localStorage.setItem(LS_KEYS.bestSellerFlags, JSON.stringify(bestSellerFlags));
   }, [bestSellerFlags]);
 
-  const [stockLocations, setStockLocations] = useState<StockLocation[]>([
-    { id: "dc-1", name: "DC - Central", code: "DC_CENTRAL", active: true },
-    { id: "dc-2", name: "DC - East", code: "DC_EAST", active: true },
-    { id: "dc-3", name: "DC - West", code: "DC_WEST", active: false },
-  ]);
+  const [stockLocations, setStockLocations] = useState<StockLocation[]>(() => (tenantId ? [] : DEMO_STOCK_LOCATIONS));
 
-  const [fulfillmentSlots, setFulfillmentSlots] = useState<FulfillmentSlot[]>([
-    {
-      id: "slot-1",
-      groupingId: "grp-1",
-      name: "10am – 4pm",
-      code: "SLOT_10_16",
-      mode: "Local Delivery",
-      startingDate: "2026-04-01T00:00",
-      endingDate: "",
-      price: "5.99",
-      updatedAt: "2026-04-10 09:30",
-    },
-    {
-      id: "slot-2",
-      groupingId: "grp-1",
-      name: "4pm – 10pm",
-      code: "SLOT_16_22",
-      mode: "Local Delivery",
-      startingDate: "2026-04-01T00:00",
-      endingDate: "",
-      price: "7.99",
-      updatedAt: "2026-04-12 15:20",
-    },
-  ]);
+  const [fulfillmentSlots, setFulfillmentSlots] = useState<FulfillmentSlot[]>(() =>
+    tenantId ? [] : DEMO_FULFILLMENT_SLOTS
+  );
 
-  const [dynamicFields, setDynamicFields] = useState<FulfillmentDynamicField[]>([
-    {
-      id: "df-1",
-      enabled: true,
-      required: false,
-      property: "deliveryNote",
-      columnLabel: "Delivery Note",
-      fieldName: "delivery_note",
-      fieldType: "Text Box",
-      section: "Additional Info",
-    },
-    {
-      id: "df-2",
-      enabled: false,
-      required: false,
-      property: "pickupInstructions",
-      columnLabel: "Pickup Instructions",
-      fieldName: "pickup_instructions",
-      fieldType: "WYSIWYG",
-      section: "Additional Info",
-    },
-  ]);
+  const [dynamicFields, setDynamicFields] = useState<FulfillmentDynamicField[]>(() =>
+    tenantId ? [] : DEMO_DYNAMIC_FIELDS
+  );
+
+  useEffect(() => {
+    if (!fulfillmentError) return;
+    setFulfillmentToast(fulfillmentError);
+    const t = window.setTimeout(() => setFulfillmentToast(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [fulfillmentError]);
+
+  useEffect(() => {
+    if (!tenantId) {
+      fulfillmentLoadedRef.current = false;
+      setFulfillmentSynced(true);
+      setFulfillmentLoading(false);
+      setFulfillmentError(null);
+      setFulfillmentGroupings(DEMO_FULFILLMENT_GROUPINGS);
+      setFulfillmentSlots(DEMO_FULFILLMENT_SLOTS);
+      setStockLocations(DEMO_STOCK_LOCATIONS);
+      setDynamicFields(DEMO_DYNAMIC_FIELDS);
+      setPredefinedFieldSettings(
+        safeJsonParse<FulfillmentPredefinedFieldSetting[]>(localStorage.getItem(LS_KEYS.fulfillmentPredefinedFields)) ??
+          DEFAULT_PREDEFINED_FIELDS
+      );
+      setLogisticPartners(
+        safeJsonParse<LogisticPartner[]>(localStorage.getItem(LS_KEYS.logisticPartners)) ?? DEMO_LOGISTIC_PARTNERS
+      );
+      setCollectionLocations(
+        safeJsonParse<CollectionLocation[]>(localStorage.getItem(LS_KEYS.collectionLocations)) ??
+          DEMO_COLLECTION_LOCATIONS
+      );
+      return;
+    }
+
+    fulfillmentLoadedRef.current = false;
+    setFulfillmentSynced(false);
+    setFulfillmentLoading(true);
+    setFulfillmentError(null);
+    setFulfillmentGroupings([]);
+    setFulfillmentSlots([]);
+    setStockLocations([]);
+    setDynamicFields([]);
+    setCollectionLocations([]);
+    setLogisticPartners([]);
+    setPredefinedFieldSettings(DEFAULT_PREDEFINED_FIELDS);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [groupings, locations, partners, settings] = await Promise.all([
+          fetchFulfillmentGroupings(tenantId, authToken),
+          fetchCollectionLocations(tenantId, authToken),
+          fetchLogisticPartnersApi(tenantId, authToken),
+          fetchFulfillmentSettings(tenantId, authToken),
+        ]);
+        if (cancelled) return;
+        const slotLists = await Promise.all(
+          groupings.map((g) => fetchFulfillmentSlots(tenantId, g.id, authToken))
+        );
+        if (cancelled) return;
+        setFulfillmentGroupings(groupings);
+        setFulfillmentSlots(slotLists.flat());
+        setCollectionLocations(locations);
+        setLogisticPartners(partners);
+        setPredefinedFieldSettings(
+          settings.predefinedFields.length > 0 ? settings.predefinedFields : DEFAULT_PREDEFINED_FIELDS
+        );
+        setDynamicFields(settings.dynamicFields);
+        setStockLocations(settings.stockLocations);
+        fulfillmentLoadedRef.current = true;
+      } catch (err) {
+        fulfillmentLoadedRef.current = false;
+        if (!cancelled) {
+          setFulfillmentError(err instanceof Error ? err.message : "Failed to load fulfillment data");
+        }
+      } finally {
+        if (!cancelled) {
+          setFulfillmentLoading(false);
+          setFulfillmentSynced(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, authToken]);
+
+  useEffect(() => {
+    if (!tenantId || !fulfillmentSynced || !fulfillmentLoadedRef.current) return;
+    const t = window.setTimeout(() => {
+      void putFulfillmentSettings(
+        tenantId,
+        {
+          predefinedFields: predefinedFieldSettings,
+          dynamicFields,
+          stockLocations,
+        },
+        authToken
+      ).catch((e) =>
+        setFulfillmentError(e instanceof Error ? e.message : "Failed to save fulfillment settings")
+      );
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [tenantId, fulfillmentSynced, predefinedFieldSettings, dynamicFields, stockLocations, authToken]);
+
+  async function handleCollectionLocationsChange(next: CollectionLocation[]) {
+    if (!tenantId) {
+      setCollectionLocations(next);
+      return;
+    }
+    const prev = collectionLocations;
+    try {
+      setFulfillmentError(null);
+      if (next.length < prev.length) {
+        const removed = prev.find((p) => !next.some((n) => n.id === p.id));
+        if (removed) await deleteCollectionLocationApi(tenantId, removed.id, authToken);
+      } else if (next.length > prev.length) {
+        const added = next.find((n) => !prev.some((p) => p.id === n.id));
+        if (added) await createCollectionLocationApi(tenantId, added, authToken);
+      } else {
+        for (const n of next) {
+          const o = prev.find((p) => p.id === n.id);
+          if (!o) continue;
+          const snap = ({ id: _id, ...r }: CollectionLocation) => JSON.stringify(r);
+          if (snap(o) !== snap(n)) await updateCollectionLocationApi(tenantId, n.id, n, authToken);
+        }
+      }
+      setCollectionLocations(await fetchCollectionLocations(tenantId, authToken));
+    } catch (err) {
+      setFulfillmentError(err instanceof Error ? err.message : "Collection location sync failed");
+    }
+  }
+
+  async function handleLogisticPartnersChange(next: LogisticPartner[]) {
+    if (!tenantId) {
+      setLogisticPartners(next);
+      return;
+    }
+    const prev = logisticPartners;
+    try {
+      setFulfillmentError(null);
+      if (next.length < prev.length) {
+        const removed = prev.find((p) => !next.some((n) => n.id === p.id));
+        if (removed) await deleteLogisticPartnerApi(tenantId, removed.id, authToken);
+      } else if (next.length > prev.length) {
+        const added = next.find((n) => !prev.some((p) => p.id === n.id));
+        if (added) await createLogisticPartnerApi(tenantId, added, authToken);
+      } else {
+        for (const n of next) {
+          const o = prev.find((p) => p.id === n.id);
+          if (!o) continue;
+          if (
+            o.name !== n.name ||
+            o.code !== n.code ||
+            o.enabled !== n.enabled ||
+            o.integratedLogistic !== n.integratedLogistic
+          ) {
+            await updateLogisticPartnerApi(tenantId, n.id, n, authToken);
+          }
+        }
+      }
+      setLogisticPartners(await fetchLogisticPartnersApi(tenantId, authToken));
+    } catch (err) {
+      setFulfillmentError(err instanceof Error ? err.message : "Logistic partner sync failed");
+    }
+  }
 
   function resetNestedFormsForPage(id: EStorePageId) {
     if (id !== "brands") setBrandForm({ mode: "idle" });
@@ -685,7 +902,12 @@ export function EStoreApp({
         <CategoryAssignmentPage onNavigateToProducts={() => handlePageChange("products")} />
       )}
       {page === "product-configuration" && (
-        <ProductConfigPage onNavigateToProducts={() => handlePageChange("products")} />
+        <ProductConfigPage
+          onNavigateToProducts={() => handlePageChange("products")}
+          tenantId={tenantId}
+          storeId={storeId}
+          authToken={authToken}
+        />
       )}
       {page === "products" &&
         (productForm.mode === "inventory-import" ? (
@@ -702,6 +924,9 @@ export function EStoreApp({
           />
         ) : (
           <ProductsPage
+            tenantId={tenantId}
+            storeId={storeId}
+            authToken={authToken}
             onAddProduct={() => setProductForm({ mode: "add" })}
             onEditProduct={(row) => setProductForm({ mode: "edit", data: row })}
             onImportProduct={() => setProductForm({ mode: "import" })}
@@ -781,7 +1006,7 @@ export function EStoreApp({
       {page === "fulfillment-collection-locations" && (
         <CollectionLocationsPage
           locations={collectionLocations}
-          onChange={setCollectionLocations}
+          onChange={handleCollectionLocationsChange}
           brands={brands}
           onNavigateToFulfillmentOptions={() => handlePageChange("fulfillment-options")}
         />
@@ -790,7 +1015,7 @@ export function EStoreApp({
         (fulfillmentForm.mode === "logistic-partners" ? (
           <LogisticPartnerManagementPage
             partners={logisticPartners}
-            onChange={setLogisticPartners}
+            onChange={handleLogisticPartnersChange}
             onBack={() => setFulfillmentForm({ mode: "idle" })}
           />
         ) : fulfillmentForm.mode === "slots" ? (
@@ -799,25 +1024,66 @@ export function EStoreApp({
             slots={fulfillmentSlots.filter((s) => s.groupingId === fulfillmentForm.groupingId)}
             onBack={() => setFulfillmentForm({ mode: "idle" })}
             onCreate={() => {
-              const slotId = `slot-${Math.random().toString(36).slice(2, 8)}`;
-              setFulfillmentSlots((prev) => [
-                {
-                  id: slotId,
-                  groupingId: fulfillmentForm.groupingId,
-                  name: "New Slot",
-                  code: "NEW_SLOT",
-                  mode: fulfillmentGroupings.find((g) => g.id === fulfillmentForm.groupingId)?.deliveryMode ?? "Local Delivery",
-                  startingDate: "",
-                  endingDate: "",
-                  price: "0.00",
-                  updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-                },
-                ...prev,
-              ]);
-              setFulfillmentForm({ mode: "edit-slot", groupingId: fulfillmentForm.groupingId, slotId });
+              void (async () => {
+                const groupingId = fulfillmentForm.groupingId;
+                const grp = fulfillmentGroupings.find((g) => g.id === groupingId);
+                if (tenantId) {
+                  try {
+                    setFulfillmentError(null);
+                    const code = `NEW_${Date.now().toString(36).toUpperCase()}`;
+                    const created = await createFulfillmentSlot(
+                      tenantId,
+                      groupingId,
+                      {
+                        groupingId,
+                        name: "New Slot",
+                        code,
+                        mode: grp?.deliveryMode ?? "Local Delivery",
+                        startingDate: "",
+                        endingDate: "",
+                        price: "0.00",
+                      },
+                      authToken
+                    );
+                    setFulfillmentSlots((prev) => [created, ...prev]);
+                    setFulfillmentForm({ mode: "edit-slot", groupingId, slotId: created.id });
+                  } catch (err) {
+                    setFulfillmentError(err instanceof Error ? err.message : "Create slot failed");
+                  }
+                } else {
+                  const slotId = `slot-${Math.random().toString(36).slice(2, 8)}`;
+                  setFulfillmentSlots((prev) => [
+                    {
+                      id: slotId,
+                      groupingId,
+                      name: "New Slot",
+                      code: "NEW_SLOT",
+                      mode: grp?.deliveryMode ?? "Local Delivery",
+                      startingDate: "",
+                      endingDate: "",
+                      price: "0.00",
+                      updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+                    },
+                    ...prev,
+                  ]);
+                  setFulfillmentForm({ mode: "edit-slot", groupingId, slotId });
+                }
+              })();
             }}
             onEdit={(slotId) => setFulfillmentForm({ mode: "edit-slot", groupingId: fulfillmentForm.groupingId, slotId })}
-            onDelete={(slotId) => setFulfillmentSlots((prev) => prev.filter((s) => s.id !== slotId))}
+            onDelete={(slotId) => {
+              void (async () => {
+                if (tenantId) {
+                  try {
+                    setFulfillmentError(null);
+                    await deleteFulfillmentSlot(tenantId, fulfillmentForm.groupingId, slotId, authToken);
+                  } catch (err) {
+                    setFulfillmentError(err instanceof Error ? err.message : "Delete slot failed");
+                  }
+                }
+                setFulfillmentSlots((prev) => prev.filter((s) => s.id !== slotId));
+              })();
+            }}
           />
         ) : fulfillmentForm.mode === "edit-slot" ? (
           <EditFulfillmentOptionPage
@@ -829,53 +1095,151 @@ export function EStoreApp({
             predefinedFieldSettings={predefinedFieldSettings}
             logisticPartners={logisticPartners}
             onSave={(slot) => {
-              setFulfillmentSlots((prev) => {
-                const exists = prev.some((s) => s.id === slot.id);
-                return exists ? prev.map((s) => (s.id === slot.id ? slot : s)) : [slot, ...prev];
-              });
+              void (async () => {
+                const gid = fulfillmentForm.groupingId;
+                if (tenantId) {
+                  try {
+                    setFulfillmentError(null);
+                    const { id, groupingId: _g, updatedAt: _u, ...rest } = slot;
+                    const u = await updateFulfillmentSlot(tenantId, gid, id, rest, authToken);
+                    setFulfillmentSlots((prev) => prev.map((s) => (s.id === u.id ? u : s)));
+                  } catch (err) {
+                    setFulfillmentError(err instanceof Error ? err.message : "Update slot failed");
+                  }
+                } else {
+                  setFulfillmentSlots((prev) => {
+                    const exists = prev.some((s) => s.id === slot.id);
+                    return exists ? prev.map((s) => (s.id === slot.id ? slot : s)) : [slot, ...prev];
+                  });
+                }
+              })();
             }}
             onBack={() => setFulfillmentForm({ mode: "idle" })}
           />
         ) : (
-          <FulfillmentOptionsPage
-            groupings={fulfillmentGroupings}
-            slots={fulfillmentSlots}
-            stockLocations={stockLocations}
-            dynamicFields={dynamicFields}
-            onDynamicFieldsChange={setDynamicFields}
-            predefinedFieldSettings={predefinedFieldSettings}
-            onPredefinedFieldSettingsChange={setPredefinedFieldSettings}
-            onOpenLogisticPartners={() => setFulfillmentForm({ mode: "logistic-partners" })}
-            onCreateGrouping={(next) => {
-              const id = `grp-${Math.random().toString(36).slice(2, 8)}`;
-              setFulfillmentGroupings((prev) => [{ ...next, id }, ...prev]);
-              return id;
-            }}
-            onUpdateGrouping={(id, next) =>
-              setFulfillmentGroupings((prev) => prev.map((g) => (g.id === id ? { ...next, id } : g)))
-            }
-            onDeleteGrouping={(id) => setFulfillmentGroupings((prev) => prev.filter((g) => g.id !== id))}
-            onViewDeliverySlots={(groupingId) => setFulfillmentForm({ mode: "slots", groupingId })}
-            onCreateTimeSlot={(groupingId) => {
-              const slotId = `slot-${Math.random().toString(36).slice(2, 8)}`;
-              const grp = fulfillmentGroupings.find((g) => g.id === groupingId);
-              setFulfillmentSlots((prev) => [
-                {
-                  id: slotId,
-                  groupingId,
-                  name: "New Slot",
-                  code: "NEW_SLOT",
-                  mode: grp?.deliveryMode ?? "Local Delivery",
-                  startingDate: "",
-                  endingDate: "",
-                  price: "0.00",
-                  updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-                },
-                ...prev,
-              ]);
-              setFulfillmentForm({ mode: "edit-slot", groupingId, slotId });
-            }}
-          />
+          <div className="flex min-h-0 flex-1 flex-col">
+            {tenantId && fulfillmentLoading && (
+              <div className="shrink-0 border-b border-outline-variant/10 bg-surface-container-high/50 px-6 py-2 text-xs text-on-surface-variant">
+                Đang tải cấu hình fulfillment…
+              </div>
+            )}
+            {fulfillmentError && (
+              <div className="shrink-0 border-b border-error/30 bg-error/10 px-6 py-2 text-xs text-error">
+                {fulfillmentError}
+              </div>
+            )}
+            {fulfillmentToast && (
+              <div
+                className="fixed bottom-6 right-6 z-[100] max-w-sm rounded-lg border border-outline-variant/30 bg-inverse-surface px-4 py-3 text-xs text-inverse-on-surface shadow-xl"
+                role="status"
+              >
+                {fulfillmentToast}
+              </div>
+            )}
+            <div className="min-h-0 flex-1 overflow-auto">
+              <FulfillmentOptionsPage
+                groupings={fulfillmentGroupings}
+                slots={fulfillmentSlots}
+                stockLocations={stockLocations}
+                dynamicFields={dynamicFields}
+                onDynamicFieldsChange={setDynamicFields}
+                predefinedFieldSettings={predefinedFieldSettings}
+                onPredefinedFieldSettingsChange={setPredefinedFieldSettings}
+                onOpenLogisticPartners={() => setFulfillmentForm({ mode: "logistic-partners" })}
+                onCreateGrouping={async (next) => {
+                  if (!tenantId) {
+                    const id = `grp-${Math.random().toString(36).slice(2, 8)}`;
+                    setFulfillmentGroupings((prev) => [{ ...next, id }, ...prev]);
+                    return id;
+                  }
+                  try {
+                    setFulfillmentError(null);
+                    const created = await createFulfillmentGrouping(tenantId, next, authToken);
+                    setFulfillmentGroupings((prev) => [created, ...prev]);
+                    return created.id;
+                  } catch (err) {
+                    setFulfillmentError(err instanceof Error ? err.message : "Create grouping failed");
+                    throw err;
+                  }
+                }}
+                onUpdateGrouping={async (id, next) => {
+                  if (!tenantId) {
+                    setFulfillmentGroupings((prev) => prev.map((g) => (g.id === id ? { ...next, id } : g)));
+                    return;
+                  }
+                  try {
+                    setFulfillmentError(null);
+                    const u = await updateFulfillmentGrouping(tenantId, id, next, authToken);
+                    setFulfillmentGroupings((prev) => prev.map((g) => (g.id === id ? u : g)));
+                  } catch (err) {
+                    setFulfillmentError(err instanceof Error ? err.message : "Update grouping failed");
+                  }
+                }}
+                onDeleteGrouping={async (id) => {
+                  if (!tenantId) {
+                    setFulfillmentGroupings((prev) => prev.filter((g) => g.id !== id));
+                    setFulfillmentSlots((prev) => prev.filter((s) => s.groupingId !== id));
+                    return;
+                  }
+                  try {
+                    setFulfillmentError(null);
+                    await deleteFulfillmentGrouping(tenantId, id, authToken);
+                    setFulfillmentGroupings((prev) => prev.filter((g) => g.id !== id));
+                    setFulfillmentSlots((prev) => prev.filter((s) => s.groupingId !== id));
+                  } catch (err) {
+                    setFulfillmentError(err instanceof Error ? err.message : "Delete grouping failed");
+                  }
+                }}
+                onViewDeliverySlots={(groupingId) => setFulfillmentForm({ mode: "slots", groupingId })}
+                onCreateTimeSlot={(groupingId) => {
+                  const grp = fulfillmentGroupings.find((g) => g.id === groupingId);
+                  if (tenantId) {
+                    void (async () => {
+                      try {
+                        setFulfillmentError(null);
+                        const code = `NEW_${Date.now().toString(36).toUpperCase()}`;
+                        const created = await createFulfillmentSlot(
+                          tenantId,
+                          groupingId,
+                          {
+                            groupingId,
+                            name: "New Slot",
+                            code,
+                            mode: grp?.deliveryMode ?? "Local Delivery",
+                            startingDate: "",
+                            endingDate: "",
+                            price: "0.00",
+                          },
+                          authToken
+                        );
+                        setFulfillmentSlots((prev) => [created, ...prev]);
+                        setFulfillmentForm({ mode: "edit-slot", groupingId, slotId: created.id });
+                      } catch (err) {
+                        setFulfillmentError(err instanceof Error ? err.message : "Create slot failed");
+                      }
+                    })();
+                    return;
+                  }
+                  const slotId = `slot-${Math.random().toString(36).slice(2, 8)}`;
+                  setFulfillmentSlots((prev) => [
+                    {
+                      id: slotId,
+                      groupingId,
+                      name: "New Slot",
+                      code: "NEW_SLOT",
+                      mode: grp?.deliveryMode ?? "Local Delivery",
+                      startingDate: "",
+                      endingDate: "",
+                      price: "0.00",
+                      updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+                    },
+                    ...prev,
+                  ]);
+                  setFulfillmentForm({ mode: "edit-slot", groupingId, slotId });
+                }}
+              />
+            </div>
+          </div>
         ))}
       {/* ── Access: Users ── */}
       {page === "access-users" &&

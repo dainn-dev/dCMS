@@ -7,7 +7,7 @@ import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderProcessingPage } from "./pages/OrderProcessingPage";
 import { RefundCasesPage } from "./pages/RefundCasesPage";
 
-export function OrdersApp() {
+export function OrdersApp({ tenantId, storeId, authToken }: { tenantId?: string; storeId?: string; authToken?: string }) {
   const [page, setPage] = useState<OrdersPageId>(() => parseOrdersPageFromHash() ?? "order-processing");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedOrderMode, setSelectedOrderMode] = useState<"view" | "action">("view");
@@ -93,20 +93,33 @@ export function OrdersApp() {
   return (
     <OrdersLayout page={page} onPageChange={navigateToOrdersPage}>
       {page === "order-processing" && (
-        <OrderProcessingPage onViewOrder={handleViewOrder} onTakeAction={handleTakeAction} />
+        <OrderProcessingPage tenantId={tenantId} storeId={storeId} authToken={authToken} onViewOrder={handleViewOrder} onTakeAction={handleTakeAction} />
       )}
-      {page === "failed-orders" && <FailedOrdersPage onViewFailedOrder={handleViewFailedOrder} />}
+      {page === "failed-orders" && (
+        <FailedOrdersPage
+          tenantId={tenantId}
+          storeId={storeId}
+          authToken={authToken}
+          onViewFailedOrder={handleViewFailedOrder}
+        />
+      )}
       {page === "refund-cases" && <RefundCasesPage />}
       {page === "order-detail" && (
         <OrderDetailPage
           orderId={selectedOrderId ?? "EX-99284-B"}
           mode={selectedOrderMode}
           onBack={handleBackToProcessing}
+          tenantId={tenantId}
+          storeId={storeId}
+          authToken={authToken}
         />
       )}
       {page === "failed-order-detail" && (
         <FailedOrderDetailPage
           orderId={selectedFailedOrderId ?? ""}
+          tenantId={tenantId}
+          storeId={storeId}
+          authToken={authToken}
           onBack={handleBackFromFailedDetail}
         />
       )}

@@ -29,6 +29,20 @@ internal static class OrderOutboxSerializer
             OrderShipped x => ("OrderShipped", JsonSerializer.Serialize(new { x.OrderId, x.OccurredAt }, Json)),
             OrderDelivered x => ("OrderDelivered", JsonSerializer.Serialize(new { x.OrderId, x.OccurredAt }, Json)),
             OrderCancelled x => ("OrderCancelled", JsonSerializer.Serialize(new { x.OrderId, x.Reason, x.OccurredAt }, Json)),
+            OrderFailed x => (
+                "OrderFailed",
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        x.OrderId,
+                        x.TenantId,
+                        x.StoreId,
+                        x.FailureStatus,
+                        x.FailureReason,
+                        x.FailureErrorCode,
+                        failedAt = x.FailedAt
+                    },
+                    Json)),
             _ => throw new InvalidOperationException($"Unknown order domain event {e.GetType().Name}."),
         };
 }

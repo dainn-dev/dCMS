@@ -96,4 +96,47 @@ public sealed class OrderAggregateTests
         Assert.Equal(OrderStatus.Shipped, order.Status);
         Assert.Empty(order.DomainEvents);
     }
+
+    [Fact]
+    public void MarkFailed_sets_failure_fields_and_raises_OrderFailed()
+    {
+        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], PlaceLines(), Address(), T0);
+        order.ClearDomainEvents();
+
+        var at = T0.AddMinutes(5);
+        order.MarkFailed(OrderStatus.PaymentFailed, "gateway_timeout", "PAY_408", at);
+
+        Assert.Equal(OrderStatus.PaymentFailed, order.Status);
+        Assert.Equal("gateway_timeout", order.FailureReason);
+        Assert.Equal("PAY_408", order.FailureErrorCode);
+        Assert.Equal(at, order.FailedAt);
+        Assert.Equal(0, order.RetryCount);
+
+        var ev = Assert.Single(order.DomainEvents);
+        var failed = Assert.IsType<OrderFailed>(ev);
+        Assert.Equal("ord-1", failed.OrderId);
+        Assert.Equal("t1", failed.TenantId);
+        Assert.Equal("s1", failed.StoreId);
+        Assert.Equal(nameof(OrderStatus.PaymentFailed), failed.FailureStatus);
+        Assert.Equal("gateway_timeout", failed.FailureReason);
+        Assert.Equal("PAY_408", failed.FailureErrorCode);
+        Assert.Equal(at, failed.FailedAt);
+    }
+
+    [Fact]
+    public void RetryFailure_increments_RetryCount_and_clears_failure_context()
+    {
+        var order = OrderRoot.Create("ord-1", "t1", "s1", "c1", [Line()], PlaceLines(), Address(), T0);
+        order.MarkFailed(OrderStatus.SystemError, "boom", null, T0.AddMinutes(1));
+        order.ClearDomainEvents();
+
+        order.RetryFailure(T0.AddMinutes(2));
+
+        Assert.Equal(OrderStatus.PaymentPending, order.Status);
+        Assert.Equal(1, order.RetryCount);
+        Assert.Null(order.FailureReason);
+        Assert.Null(order.FailureErrorCode);
+        Assert.Null(order.FailedAt);
+        Assert.Single(order.DomainEvents);
+    }
 }

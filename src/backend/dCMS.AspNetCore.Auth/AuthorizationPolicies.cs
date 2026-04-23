@@ -14,4 +14,7 @@ public static class DcmsPolicies
 
     /// <summary>Order outbox DLQ admin (US-F4 / DAI-362): SuperAdmin only.</summary>
     public const string OrderDlqAdmin = "order:dlq-admin";
+
+    /// <summary>DAI-631: manage order failures (support / store operations).</summary>
+    public const string OrderFailureManage = "order:failure-manage";
 }
