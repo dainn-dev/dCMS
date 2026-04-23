@@ -4,11 +4,11 @@ using System.Text.Json;
 using FluentAssertions;
 using Xunit;
 
-namespace dCMS.Tests.Integration.Catalog;
+namespace dCMS.Tests.Integration.Promotions;
 
 /// <summary>DAI-602: Campaign API integration tests.</summary>
-[Collection("CatalogApi")]
-public sealed class CampaignApiIntegrationTests(CatalogApiFixture fixture)
+[Collection("PromotionsApi")]
+public sealed class CampaignApiIntegrationTests(PromotionsApiFixture fixture)
 {
     private static string MakeId()
     {
@@ -18,7 +18,7 @@ public sealed class CampaignApiIntegrationTests(CatalogApiFixture fixture)
     }
     private readonly string _id = MakeId();
     private void Skip() => Xunit.Skip.IfNot(fixture.IsReady && fixture.Factory is not null, "Docker / Testcontainers not available.");
-    private static HttpClient Client(CatalogApiFixture f) => f.Factory!.CreateClient();
+    private static HttpClient Client(PromotionsApiFixture f) => f.Factory!.CreateClient();
     private string Tenant(string s = "t1") => $"{s}-cmp-{_id}";
     private string Url(string? t = null) => $"/api/v1/tenants/{Tenant(t ?? "t1")}/campaigns";
     private string CmpUrl(string id, string? t = null) => $"/api/v1/tenants/{Tenant(t ?? "t1")}/campaigns/{id}";
@@ -212,12 +212,21 @@ public sealed class CampaignApiIntegrationTests(CatalogApiFixture fixture)
     private async Task Transition(HttpClient c, string id, string action)
     {
         var resp = await c.PostAsJsonAsync(CmpUrl(id) + $"/{action}", new { });
-        resp.EnsureSuccessStatusCode();
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync();
+            throw new HttpRequestException($"Response status code does not indicate success: {(int)resp.StatusCode} ({resp.StatusCode}). Body: {body}");
+        }
     }
 
     private async Task AssertTransition(HttpClient c, string id, string action, string expectedState)
     {
         var resp = await c.PostAsJsonAsync(CmpUrl(id) + $"/{action}", new { });
+        if (!resp.IsSuccessStatusCode)
+        {
+            var body = await resp.Content.ReadAsStringAsync();
+            throw new Exception($"Transition '{action}' failed {(int)resp.StatusCode}: {body}");
+        }
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
         var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         doc.RootElement.GetProperty("data").GetProperty("workflowState").GetString().Should().Be(expectedState);

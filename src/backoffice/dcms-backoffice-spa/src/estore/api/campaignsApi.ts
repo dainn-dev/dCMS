@@ -6,7 +6,7 @@
 import { GATEWAY } from "./gatewayConfig";
 import type { CampaignListRow, CampaignStatus, CampaignChannel, CampaignEditorKind } from "../campaigns-columns";
 
-const BASE = GATEWAY.catalog;
+const BASE = GATEWAY.promotions;
 
 export type CampaignPayload = {
   code: string;

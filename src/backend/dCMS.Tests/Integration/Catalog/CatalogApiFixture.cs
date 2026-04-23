@@ -62,9 +62,7 @@ public sealed class CatalogApiFixture : IAsyncLifetime
                     .ConfigureAwait(false);
                 await conn.ExecuteAsync(extendAttrScript).ConfigureAwait(false);
 
-                var campaignsScript = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", "020_CreateCampaigns.sql"))
-                    .ConfigureAwait(false);
-                await conn.ExecuteAsync(campaignsScript).ConfigureAwait(false);
+                // 020_CreateCampaigns.sql is NOT needed here — Campaigns moved to dCMS.Promotions.Api (DAI-606).
 
                 var colorAttrId = await conn.QuerySingleAsync<int>(
                     """

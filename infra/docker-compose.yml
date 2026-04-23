@@ -87,6 +87,29 @@ services:
       - "9200:9200"
     mem_limit: 1073741824
 
+  promotions-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.promotions-api
+    ports:
+      - "5005:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Redis: "redis:6379"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   gateway:
     build:
       context: ..
@@ -113,12 +136,15 @@ services:
       ReverseProxy__Clusters__catalog-cluster__Destinations__default__Address: "http://catalog-api:8080"
       ReverseProxy__Clusters__orders-cluster__Destinations__default__Address: "http://order-api:8080"
       ReverseProxy__Clusters__inventory-cluster__Destinations__default__Address: "http://inventory-api:8080"
+      ReverseProxy__Clusters__promotions-cluster__Destinations__default__Address: "http://promotions-api:8080"
     depends_on:
       catalog-api:
         condition: service_healthy
       order-api:
         condition: service_healthy
       inventory-api:
+        condition: service_healthy
+      promotions-api:
         condition: service_healthy
 
   catalog-api:

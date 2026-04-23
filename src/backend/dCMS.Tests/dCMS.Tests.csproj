@@ -33,6 +33,7 @@
   <ItemGroup>
     <ProjectReference Include="..\dCMS.Catalog.Api\dCMS.Catalog.Api.csproj" />
     <ProjectReference Include="..\dCMS.Gateway\dCMS.Gateway.csproj" />
+    <ProjectReference Include="..\dCMS.Promotions.Api\dCMS.Promotions.Api.csproj" />
     <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
     <ProjectReference Include="..\dCMS.Inventory.Api\dCMS.Inventory.Api.csproj" />
@@ -51,6 +52,7 @@
     <None Include="..\dCMS.Infrastructure\Migrations\016_CreateBrands.sql" Link="Migrations\016_CreateBrands.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\017_AddBrandAdditionalInfo.sql" Link="Migrations\017_AddBrandAdditionalInfo.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\018_ExtendCategories.sql" Link="Migrations\018_ExtendCategories.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\009_CreateAuditAndNotifications.sql" Link="Migrations\009_CreateAuditAndNotifications.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\019_ExtendCatalogAttributes.sql" Link="Migrations\019_ExtendCatalogAttributes.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\020_CreateCampaigns.sql" Link="Migrations\020_CreateCampaigns.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Inventory.Infrastructure\Migrations\007_CreateInventory.sql" Link="007_CreateInventory.sql" CopyToOutputDirectory="PreserveNewest" />
