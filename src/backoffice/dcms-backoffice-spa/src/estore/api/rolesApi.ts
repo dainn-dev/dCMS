@@ -176,6 +176,159 @@ export async function upsertModulePermissions(
   await checkOk(res);
 }
 
+// ── DAI-671: built-in Umbraco section + start-node permissions ───────────────
+
+/**
+ * Built-in Umbraco section permissions for a role. Server enforces a whitelist:
+ * only "content" and "media" are managed here. Tenants/Users have dCMS UI;
+ * Settings/Members/etc are out of scope.
+ */
+export type RoleUmbracoPermissions = {
+  /** Subset of {"content","media"} that the role currently has access to. */
+  sections: string[];
+  /** Start-node key for Content tree (null = root). */
+  contentStartNodeKey: string | null;
+  /** Start-node key for Media tree (null = root). */
+  mediaStartNodeKey: string | null;
+  /** True if the role is a built-in protected group (Admins / Sensitive data) and cannot be edited. */
+  isProtected: boolean;
+};
+
+export type RoleUmbracoPermissionsPayload = {
+  sections: string[];
+  contentStartNodeKey?: string | null;
+  mediaStartNodeKey?: string | null;
+};
+
+function mapUmbracoPermissions(raw: Record<string, unknown>): RoleUmbracoPermissions {
+  const sections = raw.sections;
+  const contentKey = raw.contentStartNodeKey;
+  const mediaKey = raw.mediaStartNodeKey;
+  return {
+    sections: Array.isArray(sections) ? sections.map(String) : [],
+    contentStartNodeKey: typeof contentKey === "string" && contentKey.length > 0 ? contentKey : null,
+    mediaStartNodeKey: typeof mediaKey === "string" && mediaKey.length > 0 ? mediaKey : null,
+    isProtected: Boolean(raw.isProtected),
+  };
+}
+
+export async function fetchRoleUmbracoPermissions(
+  alias: string,
+  token?: string
+): Promise<RoleUmbracoPermissions> {
+  const res = await fetch(`${BASE}/${encodeURIComponent(alias)}/umbraco-permissions`, {
+    credentials: "include",
+    headers: headers(token),
+  });
+  await checkOk(res);
+  const body = (await res.json()) as ApiEnvelope<Record<string, unknown>>;
+  return mapUmbracoPermissions(body.data ?? {});
+}
+
+export async function updateRoleUmbracoPermissions(
+  alias: string,
+  payload: RoleUmbracoPermissionsPayload,
+  token?: string
+): Promise<RoleUmbracoPermissions> {
+  const res = await fetch(`${BASE}/${encodeURIComponent(alias)}/umbraco-permissions`, {
+    method: "PUT",
+    credentials: "include",
+    headers: headers(token),
+    body: JSON.stringify({
+      sections: payload.sections,
+      contentStartNodeKey: payload.contentStartNodeKey ?? null,
+      mediaStartNodeKey: payload.mediaStartNodeKey ?? null,
+    }),
+  });
+  await checkOk(res);
+  const body = (await res.json()) as ApiEnvelope<Record<string, unknown>>;
+  return mapUmbracoPermissions(body.data ?? {});
+}
+
+// ── DAI-671 follow-up: granular per-content-node permissions ─────────────────
+
+/** A single permission verb available for assignment on a content node. */
+export type ContentActionDescriptor = {
+  /** Verb identifier stored in `DocumentGranularPermission.Permission` (e.g. "Umb.Document.Read"). */
+  alias: string;
+  /** Human-readable label (e.g. "Browse"). */
+  label: string;
+  /** UI grouping bucket: "content" | "structure" | "administration" | "other". */
+  category: string;
+};
+
+/** A single content node with the verbs currently granted to the role on that node. */
+export type RoleContentNodeGrant = {
+  nodeKey: string;
+  permissions: string[];
+};
+
+export type RoleGranularPermissions = {
+  contentNodes: RoleContentNodeGrant[];
+  availablePermissions: ContentActionDescriptor[];
+  /** True if the role is a built-in protected group (Admins / Sensitive data). */
+  isProtected: boolean;
+};
+
+export type RoleGranularPermissionsPayload = {
+  contentNodes: RoleContentNodeGrant[];
+};
+
+function mapGranularPermissions(raw: Record<string, unknown>): RoleGranularPermissions {
+  const nodesRaw = Array.isArray(raw.contentNodes) ? raw.contentNodes : [];
+  const availRaw = Array.isArray(raw.availablePermissions) ? raw.availablePermissions : [];
+  return {
+    contentNodes: nodesRaw.map((n) => {
+      const node = n as Record<string, unknown>;
+      const perms = Array.isArray(node.permissions) ? node.permissions.map(String) : [];
+      return { nodeKey: String(node.nodeKey ?? ""), permissions: perms };
+    }).filter((n) => n.nodeKey.length > 0),
+    availablePermissions: availRaw.map((d) => {
+      const desc = d as Record<string, unknown>;
+      return {
+        alias: String(desc.alias ?? desc.Item1 ?? ""),
+        label: String(desc.label ?? desc.Item2 ?? ""),
+        category: String(desc.category ?? desc.Item3 ?? "other"),
+      };
+    }).filter((d) => d.alias.length > 0),
+    isProtected: Boolean(raw.isProtected),
+  };
+}
+
+export async function fetchRoleGranularPermissions(
+  alias: string,
+  token?: string
+): Promise<RoleGranularPermissions> {
+  const res = await fetch(`${BASE}/${encodeURIComponent(alias)}/granular-permissions`, {
+    credentials: "include",
+    headers: headers(token),
+  });
+  await checkOk(res);
+  const body = (await res.json()) as ApiEnvelope<Record<string, unknown>>;
+  return mapGranularPermissions(body.data ?? {});
+}
+
+export async function updateRoleGranularPermissions(
+  alias: string,
+  payload: RoleGranularPermissionsPayload,
+  token?: string
+): Promise<RoleGranularPermissions> {
+  const res = await fetch(`${BASE}/${encodeURIComponent(alias)}/granular-permissions`, {
+    method: "PUT",
+    credentials: "include",
+    headers: headers(token),
+    body: JSON.stringify({
+      contentNodes: payload.contentNodes.map((n) => ({
+        nodeKey: n.nodeKey,
+        permissions: n.permissions,
+      })),
+    }),
+  });
+  await checkOk(res);
+  const body = (await res.json()) as ApiEnvelope<Record<string, unknown>>;
+  return mapGranularPermissions(body.data ?? {});
+}
+
 /** Alias rules aligned with typical Umbraco user-group alias (lowercase slug). */
 export const ROLE_ALIAS_PATTERN = /^[a-z][a-z0-9_-]{0,62}$/;
 

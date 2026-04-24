@@ -14,7 +14,7 @@ namespace dCMS.Web.Controllers;
 /// <summary>Backoffice API for managing Umbraco users (dCMS Access module §8).</summary>
 [ApiController]
 [Route("umbraco/dcms/api/users")]
-[Authorize(Policy = "BackOfficeAccess")]
+[Authorize(AuthenticationSchemes = Umbraco.Cms.Core.Constants.Security.BackOfficeAuthenticationType)]
 public sealed class DcmsUserController : ControllerBase
 {
     private static readonly Regex PasswordRegex = new(

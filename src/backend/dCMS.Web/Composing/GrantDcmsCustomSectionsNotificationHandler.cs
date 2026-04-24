@@ -59,6 +59,12 @@ public sealed class GrantDcmsCustomSectionsNotificationHandler
             DcmsSectionAliases.Reports,
             DcmsSectionAliases.Access,
         };
+        // Built-in sections to hide because dCMS provides equivalents under Access (Users / Roles / Tenants).
+        // Keep Content + Media + Settings + Members + Translation intact.
+        var sectionsToRemove = new[]
+        {
+            Constants.Applications.Users,
+        };
         var groupKeys = new[]
         {
             Constants.Security.AdminGroupKey,
@@ -80,6 +86,15 @@ public sealed class GrantDcmsCustomSectionsNotificationHandler
                         continue;
 
                     group.AddAllowedSection(section);
+                    changed = true;
+                }
+
+                foreach (var section in sectionsToRemove)
+                {
+                    if (!group.AllowedSections.InvariantContains(section))
+                        continue;
+
+                    group.RemoveAllowedSection(section);
                     changed = true;
                 }
 

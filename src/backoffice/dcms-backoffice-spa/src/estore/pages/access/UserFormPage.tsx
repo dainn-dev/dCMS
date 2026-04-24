@@ -95,8 +95,8 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
         setUsername(dto.username);
         setEmail(dto.email);
         setFullName(dto.name);
-        setRole(dto.groupAliases[0] ?? ROLES[0]);
-        setActive(dto.isApproved);
+        setRole(dto.groups?.[0] ?? ROLES[0]);
+        setActive(dto.isActive);
       })
       .catch(() => { /* prefill silently fails → user sees empty form */ });
   }, [isAdd, userId]);
@@ -122,8 +122,8 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
     setSaving(true);
     setApiError(null);
     const call = isAdd
-      ? createUser({ username, email, name: fullName, groupAlias: role, password })
-      : updateUser(Number(userId), { name: fullName, email, groupAlias: role, isApproved: active });
+      ? createUser({ username, email, name: fullName, userGroupAlias: role, password })
+      : updateUser(Number(userId), { name: fullName, email, userGroupAlias: role, active });
     call
       .then(() => setShowSuccess(true))
       .catch((e: unknown) => setApiError(e instanceof Error ? e.message : "Save failed"))

@@ -12,8 +12,8 @@ export type UserDto = {
   username: string;
   email: string;
   name: string;
-  isApproved: boolean;
-  groupAliases: string[];
+  isActive: boolean;
+  groups: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -22,15 +22,16 @@ export type UserCreatePayload = {
   username: string;
   email: string;
   name: string;
-  groupAlias: string;
+  userGroupAlias: string;
   password: string;
+  active?: boolean;
 };
 
 export type UserUpdatePayload = {
   name?: string;
   email?: string;
-  groupAlias?: string;
-  isApproved?: boolean;
+  userGroupAlias?: string;
+  active?: boolean;
 };
 
 type ApiEnvelope<T, TMeta = unknown> = {
@@ -62,8 +63,8 @@ function mapDtoToRow(d: UserDto): UserRow {
     username: d.username,
     name: d.name,
     email: d.email,
-    role: d.groupAliases[0] ?? "—",
-    active: d.isApproved,
+    role: d.groups?.[0] ?? "—",
+    active: d.isActive,
   };
 }
 
@@ -135,14 +136,14 @@ export async function deleteUser(id: number): Promise<void> {
 
 export async function changePassword(
   id: number,
-  currentPassword: string,
+  _currentPassword: string,
   newPassword: string
 ): Promise<void> {
   const res = await fetch(`${BASE}/${id}/change-password`, {
     method: "POST",
     credentials: "include",
     headers: HDR,
-    body: JSON.stringify({ currentPassword, newPassword }),
+    body: JSON.stringify({ newPassword }),
   });
   await checkOk(res);
 }

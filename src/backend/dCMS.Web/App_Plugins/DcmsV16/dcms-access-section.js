@@ -34,6 +34,28 @@ async function fetchUmbracoLanguages() {
   }
 }
 
+/**
+ * Tenant/store/authToken bootstrap (same as eStore section).
+ * @returns {Promise<{ tenantId?: string, storeId?: string, authToken?: string }>}
+ */
+async function fetchEstoreContext() {
+  try {
+    const res = await fetch("/umbraco/dcms/api/estore/context", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return {};
+    const json = await res.json();
+    const out = {};
+    if (json.tenantId) out.tenantId = String(json.tenantId);
+    if (json.storeId) out.storeId = String(json.storeId);
+    if (json.authToken) out.authToken = String(json.authToken);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export default class DcmsAccessSectionElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
@@ -59,7 +81,7 @@ export default class DcmsAccessSectionElement extends UmbElementMixin(HTMLElemen
     this.#host = this.querySelector("[data-react-root]");
     if (!this.#host) return;
 
-    const languages = await fetchUmbracoLanguages();
+    const [languages, estoreContext] = await Promise.all([fetchUmbracoLanguages(), fetchEstoreContext()]);
 
     try {
       const cssUrl = resolveUrl(SPA_CSS);
@@ -77,7 +99,7 @@ export default class DcmsAccessSectionElement extends UmbElementMixin(HTMLElemen
       if (!jsRes.ok) throw new Error(`GET ${jsUrl} -> ${jsRes.status} ${jsRes.statusText}`);
 
       this.#spa = await import(/* @vite-ignore */ SPA_JS);
-      this.#spa?.mount?.(this.#host, { languages, sidebarScope: "access" });
+      this.#spa?.mount?.(this.#host, { languages, sidebarScope: "access", ...estoreContext });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (this.#host) {

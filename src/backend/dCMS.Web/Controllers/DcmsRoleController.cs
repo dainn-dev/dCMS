@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core;
+using Umbraco.Cms.Core.Actions;
+using Umbraco.Cms.Core.Models;
+using Umbraco.Cms.Core.Models.Entities;
 using Umbraco.Cms.Core.Models.Membership;
+using Umbraco.Cms.Core.Models.Membership.Permissions;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Strings;
 using Umbraco.Cms.Infrastructure.Persistence;
@@ -11,24 +15,27 @@ namespace dCMS.Web.Controllers;
 /// <summary>Backoffice API for managing Umbraco UserGroups and their module permissions (dCMS Access §8).</summary>
 [ApiController]
 [Route("umbraco/dcms/api/roles")]
-[Authorize(Policy = "BackOfficeAccess")]
+[Authorize(AuthenticationSchemes = Constants.Security.BackOfficeAuthenticationType)]
 public sealed class DcmsRoleController : ControllerBase
 {
     private readonly IUserGroupService _userGroupService;
     private readonly IUserService _userService;
     private readonly IShortStringHelper _shortStringHelper;
     private readonly IUmbracoDatabaseFactory _dbFactory;
+    private readonly IEntityService _entityService;
 
     public DcmsRoleController(
         IUserGroupService userGroupService,
         IUserService userService,
         IShortStringHelper shortStringHelper,
-        IUmbracoDatabaseFactory dbFactory)
+        IUmbracoDatabaseFactory dbFactory,
+        IEntityService entityService)
     {
         _userGroupService = userGroupService;
         _userService = userService;
         _shortStringHelper = shortStringHelper;
         _dbFactory = dbFactory;
+        _entityService = entityService;
     }
 
     // ── GET / ────────────────────────────────────────────────────────────────
@@ -247,6 +254,206 @@ public sealed class DcmsRoleController : ControllerBase
         }
     }
 
+    // ── GET /{alias}/umbraco-permissions ──────────────────────────────────────
+    /// <summary>
+    /// DAI-671: Read built-in Umbraco section + start-node assignments for a role,
+    /// so the dCMS Roles UI can manage Content/Media access (now that the built-in
+    /// Users section is hidden).
+    /// </summary>
+    [HttpGet("{alias}/umbraco-permissions")]
+    public async Task<IActionResult> GetUmbracoPermissions(string alias)
+    {
+        try
+        {
+            var group = await _userGroupService.GetAsync(alias).ConfigureAwait(false);
+            if (group is null)
+                return NotFound(ErrorEnvelope("Role not found."));
+
+            return Ok(new
+            {
+                data = MapUmbracoPermissions(group),
+                meta = (object?)null,
+                error = (object?)null,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ErrorEnvelope("Failed to read Umbraco permissions.", ex));
+        }
+    }
+
+    // ── PUT /{alias}/umbraco-permissions ──────────────────────────────────────
+    [HttpPut("{alias}/umbraco-permissions")]
+    public async Task<IActionResult> UpdateUmbracoPermissions(
+        string alias,
+        [FromBody] UpdateUmbracoPermissionsRequest request)
+    {
+        try
+        {
+            var group = await _userGroupService.GetAsync(alias).ConfigureAwait(false);
+            if (group is null)
+                return NotFound(ErrorEnvelope("Role not found."));
+
+            // Protected built-in groups: refuse changes (DAI-671 spec).
+            if (IsProtectedGroup(group))
+                return Forbid();
+
+            // ── AllowedSections diff: only manage Content + Media (whitelist) ──
+            var requested = new HashSet<string>(
+                (request.Sections ?? Array.Empty<string>())
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            var manageable = new[] { Constants.Applications.Content, Constants.Applications.Media };
+            foreach (var section in manageable)
+            {
+                var has = group.AllowedSections.InvariantContains(section);
+                var want = requested.Contains(section);
+                if (want && !has)
+                    group.AddAllowedSection(section);
+                else if (!want && has)
+                    group.RemoveAllowedSection(section);
+            }
+
+            // ── Start nodes (single id each, scalar in IUserGroup) ──
+            group.StartContentId = ResolveEntityIdFromKey(request.ContentStartNodeKey, UmbracoObjectTypes.Document);
+            group.StartMediaId = ResolveEntityIdFromKey(request.MediaStartNodeKey, UmbracoObjectTypes.Media);
+
+            await _userGroupService.UpdateAsync(group, Constants.Security.SuperUserKey).ConfigureAwait(false);
+
+            return Ok(new
+            {
+                data = MapUmbracoPermissions(group),
+                meta = (object?)null,
+                error = (object?)null,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ErrorEnvelope("Failed to update Umbraco permissions.", ex));
+        }
+    }
+
+    // ── GET /{alias}/granular-permissions ─────────────────────────────────────
+    /// <summary>
+    /// DAI-671 follow-up: Per-content-node granular permissions for a role.
+    /// Media nodes aren't supported by stock Umbraco v16 (no <c>MediaGranularPermission</c>).
+    /// </summary>
+    [HttpGet("{alias}/granular-permissions")]
+    public async Task<IActionResult> GetGranularPermissions(string alias)
+    {
+        try
+        {
+            var group = await _userGroupService.GetAsync(alias).ConfigureAwait(false);
+            if (group is null)
+                return NotFound(ErrorEnvelope("Role not found."));
+
+            // Group by node key → list of permission verbs.
+            var grouped = group.GranularPermissions
+                .OfType<DocumentGranularPermission>()
+                .Where(d => d.Key != Guid.Empty && !string.IsNullOrEmpty(d.Permission))
+                .GroupBy(d => d.Key)
+                .Select(g => new
+                {
+                    nodeKey = g.Key,
+                    permissions = g.Select(p => p.Permission).Distinct().OrderBy(p => p).ToArray(),
+                })
+                .ToArray();
+
+            return Ok(new
+            {
+                data = new
+                {
+                    contentNodes = grouped,
+                    availablePermissions = DcmsContentActions.All,
+                    isProtected = IsProtectedGroup(group),
+                },
+                meta = (object?)null,
+                error = (object?)null,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ErrorEnvelope("Failed to read granular permissions.", ex));
+        }
+    }
+
+    // ── PUT /{alias}/granular-permissions ─────────────────────────────────────
+    [HttpPut("{alias}/granular-permissions")]
+    public async Task<IActionResult> UpdateGranularPermissions(
+        string alias,
+        [FromBody] UpdateGranularPermissionsRequest request)
+    {
+        try
+        {
+            var group = await _userGroupService.GetAsync(alias).ConfigureAwait(false);
+            if (group is null)
+                return NotFound(ErrorEnvelope("Role not found."));
+
+            if (IsProtectedGroup(group))
+                return Forbid();
+
+            // Drop existing document-node entries; replace wholesale with incoming set.
+            // (Property-value entries, if any, are left untouched.)
+            foreach (var existing in group.GranularPermissions
+                         .OfType<DocumentGranularPermission>()
+                         .ToList())
+            {
+                group.GranularPermissions.Remove(existing);
+            }
+
+            var validVerbs = DcmsContentActions.All.Select(a => a.alias)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var node in request.ContentNodes ?? Array.Empty<ContentNodeGrant>())
+            {
+                if (node.NodeKey is null || node.NodeKey == Guid.Empty) continue;
+                if (node.Permissions is null) continue;
+
+                foreach (var verb in node.Permissions.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (string.IsNullOrWhiteSpace(verb) || !validVerbs.Contains(verb)) continue;
+                    group.GranularPermissions.Add(new DocumentGranularPermission
+                    {
+                        Key = node.NodeKey.Value,
+                        Permission = verb,
+                    });
+                }
+            }
+
+            await _userGroupService.UpdateAsync(group, Constants.Security.SuperUserKey).ConfigureAwait(false);
+
+            // Re-serialize current state to mirror the GET contract.
+            var grouped = group.GranularPermissions
+                .OfType<DocumentGranularPermission>()
+                .Where(d => d.Key != Guid.Empty && !string.IsNullOrEmpty(d.Permission))
+                .GroupBy(d => d.Key)
+                .Select(g => new
+                {
+                    nodeKey = g.Key,
+                    permissions = g.Select(p => p.Permission).Distinct().OrderBy(p => p).ToArray(),
+                })
+                .ToArray();
+
+            return Ok(new
+            {
+                data = new
+                {
+                    contentNodes = grouped,
+                    availablePermissions = DcmsContentActions.All,
+                    isProtected = IsProtectedGroup(group),
+                },
+                meta = (object?)null,
+                error = (object?)null,
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ErrorEnvelope("Failed to update granular permissions.", ex));
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static object MapGroupRich(IUserGroup g, int memberCount, bool isTenantRole, string description) => new
@@ -259,6 +466,44 @@ public sealed class DcmsRoleController : ControllerBase
         isTenantRole,
         description,
     };
+
+    /// <summary>
+    /// DAI-671: Built-in groups whose Umbraco permissions cannot be touched from the dCMS UI
+    /// (Admins always have everything; Sensitive data is a security boundary).
+    /// </summary>
+    private static bool IsProtectedGroup(IUserGroup g) =>
+        string.Equals(g.Alias, Constants.Security.AdminGroupAlias, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(g.Alias, "sensitiveData", StringComparison.OrdinalIgnoreCase);
+
+    private object MapUmbracoPermissions(IUserGroup g)
+    {
+        var manageable = new[] { Constants.Applications.Content, Constants.Applications.Media };
+        var sections = g.AllowedSections
+            .Where(s => manageable.Contains(s, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        return new
+        {
+            sections,
+            contentStartNodeKey = ResolveEntityKeyFromId(g.StartContentId, UmbracoObjectTypes.Document),
+            mediaStartNodeKey = ResolveEntityKeyFromId(g.StartMediaId, UmbracoObjectTypes.Media),
+            isProtected = IsProtectedGroup(g),
+        };
+    }
+
+    private int? ResolveEntityIdFromKey(Guid? key, UmbracoObjectTypes objectType)
+    {
+        if (key is null || key == Guid.Empty) return null;
+        var attempt = _entityService.GetId(key.Value, objectType);
+        return attempt.Success ? attempt.Result : null;
+    }
+
+    private Guid? ResolveEntityKeyFromId(int? id, UmbracoObjectTypes objectType)
+    {
+        if (id is null or <= 0) return null;
+        var attempt = _entityService.GetKey(id.Value, objectType);
+        return attempt.Success ? attempt.Result : null;
+    }
 
     private static Task UpsertRoleMetaAsync(IUmbracoDatabase db, string roleAlias, bool isTenantRole, string description) =>
         db.ExecuteAsync("""
@@ -307,6 +552,60 @@ public sealed class DcmsRoleController : ControllerBase
             public string Action { get; set; } = null!;
             public bool Granted { get; set; }
         }
+    }
+
+    /// <summary>DAI-671: Payload for PUT /roles/{alias}/umbraco-permissions.</summary>
+    public sealed class UpdateUmbracoPermissionsRequest
+    {
+        /// <summary>Subset of Umbraco built-in section aliases to allow. Whitelist enforced server-side: only "content" + "media".</summary>
+        public string[]? Sections { get; set; }
+
+        /// <summary>Start-node key for Content tree (null = no restriction / root).</summary>
+        public Guid? ContentStartNodeKey { get; set; }
+
+        /// <summary>Start-node key for Media tree (null = no restriction / root).</summary>
+        public Guid? MediaStartNodeKey { get; set; }
+    }
+
+    /// <summary>DAI-671 follow-up: payload for PUT /roles/{alias}/granular-permissions.</summary>
+    public sealed class UpdateGranularPermissionsRequest
+    {
+        public ContentNodeGrant[]? ContentNodes { get; set; }
+    }
+
+    public sealed class ContentNodeGrant
+    {
+        public Guid? NodeKey { get; set; }
+        public string[]? Permissions { get; set; }
+    }
+
+    /// <summary>
+    /// Catalog of Umbraco core document actions surfaced in the dCMS Roles UI.
+    /// Verb strings are <c>IAction.Letter</c> values (the <c>Permission</c> field of <see cref="DocumentGranularPermission"/>).
+    /// Source: <c>Umbraco.Cms.Core.Actions.Action*</c> reflection (v16.5.1).
+    /// </summary>
+    private static class DcmsContentActions
+    {
+        public static readonly (string alias, string label, string category)[] All =
+        [
+            // category aliases match Constants.Conventions.PermissionCategories
+            ("Umb.Document.Read",                "Browse",            "content"),
+            ("Umb.Document.Update",              "Update",            "content"),
+            ("Umb.Document.Create",              "Create",            "content"),
+            ("Umb.Document.Delete",              "Delete",            "content"),
+            ("Umb.Document.Publish",             "Publish",           "content"),
+            ("Umb.Document.Unpublish",           "Unpublish",         "content"),
+            ("Umb.Document.Sort",                "Sort",              "structure"),
+            ("Umb.Document.Move",                "Move",              "structure"),
+            ("Umb.Document.Duplicate",           "Copy",              "structure"),
+            ("Umb.DocumentRecycleBin.Restore",   "Restore",           "structure"),
+            ("Umb.Document.Rollback",            "Rollback",          "administration"),
+            ("Umb.Document.Notifications",       "Notifications",     "administration"),
+            ("Umb.Document.Permissions",         "Permissions",       "administration"),
+            ("Umb.Document.PublicAccess",        "Public Access",     "administration"),
+            ("Umb.Document.CultureAndHostnames", "Culture & Hostnames","administration"),
+            ("Umb.Document.CreateBlueprint",     "Create Blueprint",  "other"),
+        ];
     }
 
     private sealed class PermissionRow
