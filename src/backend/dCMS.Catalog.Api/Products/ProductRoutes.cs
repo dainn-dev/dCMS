@@ -5,6 +5,7 @@ using dCMS.Catalog.Api.Http;
 using dCMS.Core.Commands;
 using dCMS.Core.Exceptions;
 using dCMS.Core.Models;
+using dCMS.Core.Persistence;
 using dCMS.Core.Search;
 using dCMS.Core.Services;
 using Microsoft.Extensions.Configuration;
@@ -22,6 +23,7 @@ public static class ProductRoutes
             .WithTenantStoreAccess(configuration);
 
         Auth(g.MapGet("", SearchProducts), auth, write: false);
+        AuthApproval(g.MapGet("pending-approvals", ListPendingApprovals), auth);
         Auth(g.MapGet("{productId}/variants", ListVariants), auth, write: false);
         Auth(g.MapGet("{productId}/approval-comments", ListApprovalComments), auth, write: false);
         Auth(g.MapPost("{productId}/approval-comments", PostApprovalComment), auth, write: true);
@@ -137,6 +139,39 @@ public static class ProductRoutes
                 }
             };
         return ApiEnvelope.Ok(items, meta);
+    }
+
+    /// <summary>DAI-658: products awaiting approval for the store (cursor = last <c>Id</c> from previous page).</summary>
+    private static async Task<IResult> ListPendingApprovals(
+        string tenantId,
+        string storeId,
+        ICatalogPersistence persistence,
+        int? limit,
+        string? cursor,
+        CancellationToken cancellationToken)
+    {
+        var lim = limit is > 0 ? Math.Min(limit.Value, 100) : 50;
+        var after = string.IsNullOrWhiteSpace(cursor) ? null : cursor.Trim();
+
+        var (items, total, nextCursor) = await persistence
+            .ListPendingApprovalsForStoreAsync(tenantId, storeId, lim, after, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ApiEnvelope.Ok(new
+        {
+            items = items.Select(i => new
+            {
+                id = i.Id,
+                name = i.Name,
+                brandName = i.BrandName,
+                categoryPath = i.CategoryPath,
+                submittedByUserId = i.SubmittedByUserId,
+                submittedAt = i.SubmittedAt,
+                status = i.Status,
+            }).ToList(),
+            nextCursor,
+            total,
+        });
     }
 
     internal static bool TryParseAttributeFilters(string? raw, out IReadOnlyDictionary<string, string>? filters,

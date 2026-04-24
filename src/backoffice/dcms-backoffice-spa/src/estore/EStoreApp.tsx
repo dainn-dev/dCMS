@@ -68,7 +68,7 @@ import { RoleFormPage } from "./pages/access/RoleFormPage";
 import { ManageModulesPage } from "./pages/access/ManageModulesPage";
 import { TenantsPage } from "./pages/access/TenantsPage";
 import { TenantFormPage } from "./pages/access/TenantFormPage";
-import type { RoleRow } from "./pages/access/RolesPage";
+import type { TenantRow } from "./api/tenantsApi";
 
 type BrandEditData = Pick<BrandListRow, "code" | "name" | "active" | "imageSrc" | "imageAlt">;
 
@@ -123,7 +123,7 @@ type AccessRoleFormState =
 type AccessTenantFormState =
   | { mode: "idle" }
   | { mode: "add" }
-  | { mode: "edit"; tenantId: string };
+  | { mode: "edit"; row: TenantRow };
 
 export type FulfillmentDeliveryMode = "Store Collection" | "Local Delivery" | "Overseas Delivery";
 
@@ -470,20 +470,6 @@ export function EStoreApp({
   const [accessUserForm, setAccessUserForm] = useState<AccessUserFormState>({ mode: "idle" });
   const [accessRoleForm, setAccessRoleForm] = useState<AccessRoleFormState>({ mode: "idle" });
   const [accessTenantForm, setAccessTenantForm] = useState<AccessTenantFormState>({ mode: "idle" });
-
-  // Demo role data shared between RolesPage and ManageModulesPage for roleName lookup
-  const [accessRoles] = useState<RoleRow[]>([
-    { alias: "it-admin", name: "IT Administrator", description: "", isTenantRole: false, memberCount: 2 },
-    { alias: "sys-admin", name: "System Administrator", description: "", isTenantRole: false, memberCount: 3 },
-    { alias: "ecom-mgr", name: "Ecommerce Manager", description: "", isTenantRole: false, memberCount: 5 },
-    { alias: "tenant-pm", name: "Tenant Product Manager", description: "", isTenantRole: true, memberCount: 12 },
-    { alias: "tenant-inv-mgr", name: "Tenant Inventory Manager", description: "", isTenantRole: true, memberCount: 8 },
-    { alias: "operations", name: "Operations", description: "", isTenantRole: false, memberCount: 7 },
-    { alias: "finance", name: "Finance", description: "", isTenantRole: false, memberCount: 4 },
-    { alias: "brand-mgr", name: "Brand Manager", description: "", isTenantRole: true, memberCount: 15 },
-    { alias: "product-upload", name: "Product Upload", description: "", isTenantRole: true, memberCount: 10 },
-    { alias: "guest", name: "Guest", description: "", isTenantRole: false, memberCount: 3 },
-  ]);
 
   // ── Brands: API-backed when tenantId provided, fallback to DEFAULT_BRANDS ──
   const [brands, setBrands] = useState<BrandListRow[]>(DEFAULT_BRANDS);
@@ -987,6 +973,8 @@ export function EStoreApp({
             promoType={promoForm.mode === "add" ? promoForm.promoType : "standard"}
             promo={promoForm.mode === "edit" ? promoForm.data : undefined}
             onBack={() => setPromoForm({ mode: "idle" })}
+            tenantId={tenantId}
+            authToken={authToken}
           />
         ) : (
           <PromotionsPage
@@ -994,6 +982,8 @@ export function EStoreApp({
             onEditPromo={(row) => setPromoForm({ mode: "edit", data: row })}
             onViewCodes={(row) => setPromoForm({ mode: "grouped", parent: row })}
             onOpenExclusionList={() => setPromoForm({ mode: "exclusion-list" })}
+            tenantId={tenantId}
+            authToken={authToken}
           />
         ))}
       {page === "fulfillment-delivery-allocation" && (
@@ -1276,6 +1266,7 @@ export function EStoreApp({
             roleAlias={accessRoleForm.roleAlias}
             roleName={accessRoleForm.roleName}
             onBack={() => setAccessRoleForm({ mode: "idle" })}
+            authToken={authToken}
           />
         ) : accessRoleForm.mode !== "idle" ? (
           <RoleFormPage
@@ -1283,15 +1274,16 @@ export function EStoreApp({
             roleAlias={accessRoleForm.mode === "edit" ? accessRoleForm.roleAlias : undefined}
             onSave={() => setAccessRoleForm({ mode: "idle" })}
             onCancel={() => setAccessRoleForm({ mode: "idle" })}
+            authToken={authToken}
           />
         ) : (
           <RolesPage
             onAddRole={() => setAccessRoleForm({ mode: "add" })}
             onEditRole={(roleAlias) => setAccessRoleForm({ mode: "edit", roleAlias })}
-            onManageModules={(roleAlias) => {
-              const roleName = accessRoles.find((r) => r.alias === roleAlias)?.name ?? roleAlias;
-              setAccessRoleForm({ mode: "manage-modules", roleAlias, roleName });
-            }}
+            onManageModules={(row) =>
+              setAccessRoleForm({ mode: "manage-modules", roleAlias: row.alias, roleName: row.name })
+            }
+            authToken={authToken}
           />
         ))}
 
@@ -1300,14 +1292,16 @@ export function EStoreApp({
         (accessTenantForm.mode !== "idle" ? (
           <TenantFormPage
             mode={accessTenantForm.mode === "add" ? "add" : "edit"}
-            tenantId={accessTenantForm.mode === "edit" ? accessTenantForm.tenantId : undefined}
+            tenant={accessTenantForm.mode === "edit" ? accessTenantForm.row : undefined}
+            authToken={authToken}
             onSave={() => setAccessTenantForm({ mode: "idle" })}
             onCancel={() => setAccessTenantForm({ mode: "idle" })}
           />
         ) : (
           <TenantsPage
             onAddTenant={() => setAccessTenantForm({ mode: "add" })}
-            onEditTenant={(tenantId) => setAccessTenantForm({ mode: "edit", tenantId })}
+            onEditTenant={(row) => setAccessTenantForm({ mode: "edit", row })}
+            authToken={authToken}
           />
         ))}
     </EStoreLayout>

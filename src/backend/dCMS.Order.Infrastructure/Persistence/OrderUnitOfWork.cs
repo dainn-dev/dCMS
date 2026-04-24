@@ -726,8 +726,8 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
             throw new ArgumentException("refundStatus is required.", nameof(refundStatus));
 
         var remark = (refundRemark ?? "").Trim();
-        if (remark.Length > 512)
-            remark = remark[..512];
+        if (remark.Length > 1000)
+            remark = remark[..1000];
 
         const string sql = """
             UPDATE "Orders"
@@ -736,7 +736,7 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
                 "RefundedAt" = @RefundedAt,
                 "UpdatedAt" = @Now
             WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
-              AND "Status" = 'Cancelled'
+              AND "Status" IN ('Cancelled', 'AdminCancelled', 'UserCancelled')
             """;
 
         return await conn.ExecuteAsync(new CommandDefinition(
@@ -755,6 +755,27 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
                 cancellationToken: cancellationToken))
             .ConfigureAwait(false);
     }
+
+    /// <summary>DAI-653 — alias for <see cref="UpdateRefundTrackingAsync"/> (refund-case naming).</summary>
+    /// <remarks>Orders and payment transactions may use separate databases; composed reads use <c>OrderQueryStore</c> + <c>PaymentTransactionQueryStore</c>.</remarks>
+    public Task<int> UpdateRefundCaseStatusAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        string refundStatus,
+        string refundRemark,
+        DateTimeOffset? refundedAt,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default) =>
+        UpdateRefundTrackingAsync(
+            tenantId,
+            storeId,
+            orderId,
+            refundStatus,
+            refundRemark,
+            refundedAt,
+            occurredAt,
+            cancellationToken);
 
     public async ValueTask DisposeAsync()
     {

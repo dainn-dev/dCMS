@@ -52,4 +52,36 @@ public static class MultilangJson
             throw new ArgumentException("Description must be valid JSON object of locale → string.", nameof(descriptionJson), ex);
         }
     }
+
+    /// <summary>Pick a display string from name JSON (vi → en → first non-empty).</summary>
+    public static string PickDisplayName(string nameJson)
+    {
+        if (string.IsNullOrWhiteSpace(nameJson))
+            return "";
+
+        try
+        {
+            var map = JsonSerializer.Deserialize<Dictionary<string, string>>(nameJson, JsonOptions);
+            if (map is null || map.Count == 0)
+                return nameJson;
+
+            foreach (var key in new[] { "vi", "en" })
+            {
+                if (map.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
+                    return v;
+            }
+
+            foreach (var v in map.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(v))
+                    return v;
+            }
+        }
+        catch (JsonException)
+        {
+            // not JSON — return raw
+        }
+
+        return nameJson;
+    }
 }

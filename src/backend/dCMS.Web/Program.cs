@@ -16,6 +16,36 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
 });
 
+// ── YARP: forward /gateway/** → dCMS.Gateway ─────────────────────────────────
+// GatewayUrl defaults to http://localhost:5100 (local Docker publish).
+// Override via Dcms:GatewayUrl in appsettings or environment variable.
+var gatewayUrl = builder.Configuration["Dcms:GatewayUrl"] ?? "http://localhost:5100";
+builder.Services.AddReverseProxy()
+    .LoadFromMemory(
+        routes:
+        [
+            new Yarp.ReverseProxy.Configuration.RouteConfig
+            {
+                RouteId = "gateway-route",
+                ClusterId = "gateway-cluster",
+                Match = new Yarp.ReverseProxy.Configuration.RouteMatch { Path = "/gateway/{**catch-all}" },
+            }
+        ],
+        clusters:
+        [
+            new Yarp.ReverseProxy.Configuration.ClusterConfig
+            {
+                ClusterId = "gateway-cluster",
+                Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig>
+                {
+                    ["primary"] = new Yarp.ReverseProxy.Configuration.DestinationConfig
+                    {
+                        Address = gatewayUrl,
+                    }
+                }
+            }
+        ]);
+
 builder.CreateUmbracoBuilder()
     .AddBackOffice()
     .AddWebsite()
@@ -38,6 +68,9 @@ app.MapGet(
                 error = (object?)null,
             }));
 
+// ── Map YARP proxy BEFORE Umbraco so /gateway/** is intercepted first ─────────
+app.MapReverseProxy();
+
 await app.BootUmbracoAsync();
 
 app.UseUmbraco()
@@ -53,3 +86,4 @@ app.UseUmbraco()
     });
 
 await app.RunAsync();
+

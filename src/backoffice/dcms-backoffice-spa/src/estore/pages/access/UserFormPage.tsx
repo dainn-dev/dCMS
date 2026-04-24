@@ -1,15 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   IconArrowBack,
   IconCheckCircle,
   IconChevronDown,
   IconSave,
 } from "../../../orders/icons";
-
-// TODO: Replace with real API calls:
-//   GET  /umbraco/dcms/api/access/users/{userId}  (edit mode)
-//   POST /umbraco/dcms/api/access/users            (add mode)
-//   PUT  /umbraco/dcms/api/access/users/{userId}   (edit mode)
+import { createUser, getUser, updateUser } from "../../api/usersApi";
 
 const ROLES = [
   "IT Administrator",
@@ -60,16 +56,17 @@ function validatePassword(password: string, confirm: string): PasswordError {
 export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPageProps) {
   const isAdd = mode === "add";
 
-  // General fields
-  const [username, setUsername] = useState(isAdd ? "" : `user-${userId ?? ""}`);
-  const [email, setEmail] = useState(isAdd ? "" : "user@dcms.io");
-  const [fullName, setFullName] = useState(isAdd ? "" : "Demo User");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [role, setRole] = useState(ROLES[0]);
   const [active, setActive] = useState(true);
   const [passwordNeverExpires, setPasswordNeverExpires] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState<PasswordError>({});
+  const [saving, setSaving] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Send notifications
   const [sendNotifOpen, setSendNotifOpen] = useState(false);
@@ -88,8 +85,21 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
   const [recvFulfillmentUpdate, setRecvFulfillmentUpdate] = useState(false);
   const [tenantInput, setTenantInput] = useState("");
   const [tenants, setTenants] = useState<string[]>([]);
-
   const [showSuccess, setShowSuccess] = useState(false);
+
+  // Load existing user in edit mode
+  useEffect(() => {
+    if (isAdd || !userId) return;
+    getUser(Number(userId))
+      .then((dto) => {
+        setUsername(dto.username);
+        setEmail(dto.email);
+        setFullName(dto.name);
+        setRole(dto.groupAliases[0] ?? ROLES[0]);
+        setActive(dto.isApproved);
+      })
+      .catch(() => { /* prefill silently fails → user sees empty form */ });
+  }, [isAdd, userId]);
 
   function addTenant() {
     const v = tenantInput.trim();
@@ -109,7 +119,15 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
       setPasswordErrors(errs);
       if (Object.keys(errs).length > 0) return;
     }
-    setShowSuccess(true);
+    setSaving(true);
+    setApiError(null);
+    const call = isAdd
+      ? createUser({ username, email, name: fullName, groupAlias: role, password })
+      : updateUser(Number(userId), { name: fullName, email, groupAlias: role, isApproved: active });
+    call
+      .then(() => setShowSuccess(true))
+      .catch((e: unknown) => setApiError(e instanceof Error ? e.message : "Save failed"))
+      .finally(() => setSaving(false));
   }
 
   return (

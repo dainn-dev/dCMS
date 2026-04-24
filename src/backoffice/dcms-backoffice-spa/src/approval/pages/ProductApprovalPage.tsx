@@ -2,6 +2,7 @@ import type { RowSelectionState } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
 import { IconBox, IconCheckCircle } from "../../orders/icons";
+import { approveProduct, fetchPendingProducts, rejectProduct } from "../api/approvalApi";
 import { ApprovalOkConfirmModal } from "../components/ApprovalOkConfirmModal";
 import { RejectionReasonModal } from "../components/RejectionReasonModal";
 import {
@@ -9,60 +10,17 @@ import {
   createProductApprovalColumns,
 } from "../product-approval-columns";
 
-const MOCK_PENDING: ProductApprovalRow[] = [
-  {
-    id: "pa-1",
-    productName: "Organic whole milk 2L",
-    brand: "GreenFields",
-    category: "Dairy / Milk",
-    submittedBy: "merchant@greenfields.example",
-    submittedDate: "2026-04-14",
-    status: "pending",
-  },
-  {
-    id: "pa-2",
-    productName: "Dark roast beans 500g",
-    brand: "RoastCo",
-    category: "Beverages / Coffee",
-    submittedBy: "ops@roastco.example",
-    submittedDate: "2026-04-15",
-    status: "pending",
-  },
-  {
-    id: "pa-3",
-    productName: "Kids multivitamin gummies",
-    brand: "WellNest",
-    category: "Health / Supplements",
-    submittedBy: "listing@wellnest.example",
-    submittedDate: "2026-04-16",
-    status: "pending",
-  },
-  {
-    id: "pa-4",
-    productName: "Recycled tote bag",
-    brand: "EcoLine",
-    category: "Home / Accessories",
-    submittedBy: "catalog@ecline.example",
-    submittedDate: "2026-04-17",
-    status: "pending",
-  },
-  {
-    id: "pa-5",
-    productName: "Gluten-free pasta 400g",
-    brand: "PastaPrima",
-    category: "Pantry / Pasta",
-    submittedBy: "admin@pastaprima.example",
-    submittedDate: "2026-04-17",
-    status: "pending",
-  },
-];
-
 type Props = {
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
   onPendingCountChange?: (count: number) => void;
 };
 
-export function ProductApprovalPage({ onPendingCountChange }: Props) {
-  const [rows, setRows] = useState<ProductApprovalRow[]>(() => [...MOCK_PENDING]);
+export function ProductApprovalPage({ tenantId, storeId, authToken, onPendingCountChange }: Props) {
+  const [rows, setRows] = useState<ProductApprovalRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [toast, setToast] = useState<string | null>(null);
   const [confirmApprove, setConfirmApprove] = useState<string[] | null>(null);
@@ -70,23 +28,36 @@ export function ProductApprovalPage({ onPendingCountChange }: Props) {
 
   const pendingRows = useMemo(() => rows.filter((r) => r.status === "pending"), [rows]);
 
+  const loadList = useCallback(async () => {
+    if (!tenantId || !storeId) {
+      setRows([]);
+      onPendingCountChange?.(0);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const { items, total } = await fetchPendingProducts(tenantId, storeId, { limit: 100 }, authToken);
+      setRows(items);
+      onPendingCountChange?.(total);
+    } catch (e: unknown) {
+      setRows([]);
+      setLoadError(e instanceof Error ? e.message : "Failed to load pending products");
+      onPendingCountChange?.(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId, storeId, authToken, onPendingCountChange]);
+
   useEffect(() => {
-    onPendingCountChange?.(pendingRows.length);
-  }, [pendingRows.length, onPendingCountChange]);
+    void loadList();
+  }, [loadList]);
 
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(t);
   }, [toast]);
-
-  const showDemoEmailToast = useCallback((action: "approved" | "rejected", detail?: string) => {
-    const base =
-      action === "approved"
-        ? "Product(s) approved. Notification email sent to requestor(s) (demo)."
-        : `Product(s) rejected${detail ? `: ${detail}` : ""}. Notification email sent to requestor(s) (demo).`;
-    setToast(base);
-  }, []);
 
   const clearSelectionFor = useCallback((ids: string[]) => {
     setRowSelection((prev) => {
@@ -97,39 +68,53 @@ export function ProductApprovalPage({ onPendingCountChange }: Props) {
   }, []);
 
   const applyApprove = useCallback(
-    (ids: string[]) => {
-      if (ids.length === 0) return;
-      setRows((prev) =>
-        prev.map((r) => (ids.includes(r.id) ? { ...r, status: "approved" as const } : r))
-      );
+    async (ids: string[]) => {
+      if (!tenantId || !storeId || ids.length === 0) return;
+      const prev = rows;
+      setRows((r) => r.filter((x) => !ids.includes(x.id)));
       clearSelectionFor(ids);
       setConfirmApprove(null);
-      showDemoEmailToast("approved");
+      try {
+        await Promise.all(ids.map((id) => approveProduct(tenantId, storeId, id, authToken)));
+        setToast(ids.length > 1 ? `Approved ${ids.length} products.` : "Approved.");
+        await loadList();
+      } catch (e: unknown) {
+        setRows(prev);
+        setToast(e instanceof Error ? e.message : "Approve failed");
+        await loadList();
+      }
     },
-    [clearSelectionFor, showDemoEmailToast]
+    [tenantId, storeId, authToken, rows, clearSelectionFor, loadList]
   );
 
   const applyReject = useCallback(
-    (ids: string[], reason: string) => {
-      if (ids.length === 0) return;
-      setRows((prev) =>
-        prev.map((r) => (ids.includes(r.id) ? { ...r, status: "rejected" as const } : r))
-      );
+    async (ids: string[], reason: string) => {
+      if (!tenantId || !storeId || ids.length === 0) return;
+      const prev = rows;
+      const shortReason = reason.length > 80 ? `${reason.slice(0, 80)}…` : reason;
+      setRows((r) => r.filter((x) => !ids.includes(x.id)));
       clearSelectionFor(ids);
       setRejectTargetIds(null);
-      const shortReason = reason.length > 80 ? `${reason.slice(0, 80)}…` : reason;
-      showDemoEmailToast("rejected", shortReason);
+      try {
+        await Promise.all(ids.map((id) => rejectProduct(tenantId, storeId, id, reason, authToken)));
+        setToast(`Rejected: ${shortReason}`);
+        await loadList();
+      } catch (e: unknown) {
+        setRows(prev);
+        setToast(e instanceof Error ? e.message : "Reject failed");
+        await loadList();
+      }
     },
-    [clearSelectionFor, showDemoEmailToast]
+    [tenantId, storeId, authToken, rows, clearSelectionFor, loadList]
   );
 
   const onViewPage = useCallback((row: ProductApprovalRow) => {
-    setToast(`Opening live product page for “${row.productName}” (demo).`);
+    setToast(`Opening live product page for “${row.productName}”.`);
   }, []);
 
   const onPreview = useCallback((row: ProductApprovalRow) => {
     window.open(`about:blank#preview=${encodeURIComponent(row.id)}`, "_blank", "noopener,noreferrer");
-    setToast(`Preview opened in a new tab (demo) — ${row.productName}.`);
+    setToast(`Preview opened in a new tab — ${row.productName}.`);
   }, []);
 
   const onApproveRow = useCallback((row: ProductApprovalRow) => {
@@ -170,6 +155,8 @@ export function ProductApprovalPage({ onPendingCountChange }: Props) {
         ? "Reject this product?"
         : undefined;
 
+  const missingContext = !tenantId || !storeId;
+
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Product approval">
       <header className="flex shrink-0 flex-col gap-2 border-b border-outline-variant/15 bg-surface px-6 py-4">
@@ -183,21 +170,36 @@ export function ProductApprovalPage({ onPendingCountChange }: Props) {
           <div>
             <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Product approval</h1>
             <p className="mt-0.5 max-w-2xl text-sm text-on-surface-variant">
-              Review pending submissions. Approve or reject with a required reason; requestors receive a notification (demo toast until the API is available).
+              Review pending submissions. Approve or reject with a required reason.
             </p>
           </div>
         </div>
       </header>
 
       <div className="w-full flex-1 space-y-4 p-6">
-        <DataTable
-          columns={columns}
-          data={pendingRows}
-          globalFilterPlaceholder="Search by product, brand, category, submitter…"
-          getRowId={(row) => row.id}
-          rowSelection={rowSelection}
-          onRowSelectionChange={setRowSelection}
-        />
+        {missingContext && (
+          <div className="rounded-xl border border-error/25 bg-error/5 px-4 py-3 text-sm text-error">
+            Missing tenantId or storeId — configure <code className="text-xs">Dcms:Estore</code> in Umbraco appsettings or pass mount options.
+          </div>
+        )}
+        {loadError && (
+          <div className="rounded-xl border border-error/25 bg-error/5 px-4 py-3 text-sm text-error">{loadError}</div>
+        )}
+        {loading && (
+          <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-6 text-center text-sm text-on-surface-variant">
+            Loading pending products…
+          </div>
+        )}
+        {!loading && !missingContext && (
+          <DataTable
+            columns={columns}
+            data={pendingRows}
+            globalFilterPlaceholder="Search by product, brand, category, submitter…"
+            getRowId={(row) => row.id}
+            rowSelection={rowSelection}
+            onRowSelectionChange={setRowSelection}
+          />
+        )}
 
         {selectedCount > 0 && (
           <div className="sticky bottom-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-3 shadow-lg ring-1 ring-black/5">
@@ -242,14 +244,14 @@ export function ProductApprovalPage({ onPendingCountChange }: Props) {
         message={approveModalMessage}
         confirmLabel="Ok"
         onCancel={() => setConfirmApprove(null)}
-        onConfirm={() => confirmApprove && applyApprove(confirmApprove)}
+        onConfirm={() => confirmApprove && void applyApprove(confirmApprove)}
       />
 
       <RejectionReasonModal
         open={Boolean(rejectTargetIds?.length)}
         subtitle={rejectSubtitle}
         onCancel={() => setRejectTargetIds(null)}
-        onConfirm={(reason) => rejectTargetIds && applyReject(rejectTargetIds, reason)}
+        onConfirm={(reason) => rejectTargetIds && void applyReject(rejectTargetIds, reason)}
       />
 
       {toast && (

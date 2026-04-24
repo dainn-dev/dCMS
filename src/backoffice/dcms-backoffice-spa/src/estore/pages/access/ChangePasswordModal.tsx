@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { IconCheckCircle, IconClose, IconKey, IconWarning } from "../../../orders/icons";
-
-// TODO: Wire to POST /umbraco/dcms/api/access/users/{userId}/change-password
+import { changePassword } from "../../api/usersApi";
 
 type ChangePasswordModalProps = {
   userId: string;
@@ -34,11 +33,13 @@ function validate(newPassword: string, confirm: string): PasswordErrors {
   return errs;
 }
 
-export function ChangePasswordModal({ userId: _userId, userName, onSave, onClose }: ChangePasswordModalProps) {
+export function ChangePasswordModal({ userId, userName, onSave, onClose }: ChangePasswordModalProps) {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState<PasswordErrors>({});
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   function handleSave() {
     const errs = validate(newPassword, confirm);
@@ -46,8 +47,12 @@ export function ChangePasswordModal({ userId: _userId, userName, onSave, onClose
       setErrors(errs);
       return;
     }
-    // TODO: POST /umbraco/dcms/api/access/users/{_userId}/change-password
-    setSaved(true);
+    setSaving(true);
+    setApiError(null);
+    changePassword(Number(userId), "", newPassword)
+      .then(() => setSaved(true))
+      .catch((e: unknown) => setApiError(e instanceof Error ? e.message : "Failed to change password"))
+      .finally(() => setSaving(false));
   }
 
   if (saved) {
@@ -144,6 +149,9 @@ export function ChangePasswordModal({ userId: _userId, userName, onSave, onClose
           <p className="text-[10px] text-on-surface-variant leading-relaxed">
             Password requirements: minimum 8 characters, at least one uppercase letter, one lowercase letter, and one digit.
           </p>
+          {apiError && (
+            <p className="rounded border border-error/30 bg-error/5 px-3 py-2 text-[11px] text-error">{apiError}</p>
+          )}
         </div>
 
         {/* Footer */}
@@ -158,7 +166,7 @@ export function ChangePasswordModal({ userId: _userId, userName, onSave, onClose
           <button
             type="button"
             className="flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 text-xs font-bold uppercase tracking-widest text-on-primary shadow-lg shadow-primary/20 transition-all hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
-            disabled={!newPassword || !confirm}
+            disabled={!newPassword || !confirm || saving}
             onClick={handleSave}
           >
             <IconCheckCircle className="h-4 w-4 shrink-0" />

@@ -23,7 +23,10 @@ public sealed record CampaignRow(
     string          Audience,
     int             Conversions,
     DateTimeOffset  CreatedAt,
-    DateTimeOffset  UpdatedAt)
+    DateTimeOffset  UpdatedAt,
+    /// <summary>Populated on list when <c>WorkflowState</c> is <c>pending_approval</c>: actor who last transitioned to pending (submit).</summary>
+    string?         SubmittedByUserId = null,
+    DateTimeOffset? SubmittedAt       = null)
 {
     // ── Valid domain values ───────────────────────────────────────────────────
 

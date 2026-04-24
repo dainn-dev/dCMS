@@ -61,6 +61,14 @@ Authorization: Bearer {{token}}
 
 ###
 
+### Store-scoped — pending approvals (DAI-658; catalog:approval when auth on)
+
+GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/pending-approvals?limit=50
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
 ### Store-scoped — get product
 
 GET {{dCMS.Catalog.Api_HostAddress}}/api/v1/tenants/{{tenantId}}/stores/{{storeId}}/products/{{productId}}

@@ -61,3 +61,8 @@ src/backend/dCMS.Promotions.Api/bin/
 src/backend/dCMS.Promotions.Api/obj/
 src/backend/dCMS.Fulfillment.Api/bin/
 src/backend/dCMS.Fulfillment.Api/obj/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
+.mempalace/

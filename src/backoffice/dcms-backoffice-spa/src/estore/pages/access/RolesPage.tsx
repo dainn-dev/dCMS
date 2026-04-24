@@ -10,40 +10,41 @@ import {
   IconShare,
   IconWarning,
 } from "../../../orders/icons";
+import { deleteRole, fetchRoles } from "../../api/rolesApi";
+import type { RoleRow } from "../../api/rolesApi";
 
-// TODO: Replace with real API call to GET /umbraco/dcms/api/access/roles
-
-export type RoleRow = {
-  alias: string;
-  name: string;
-  description: string;
-  isTenantRole: boolean;
-  memberCount: number;
-};
-
-const DEMO_ROLES: RoleRow[] = [
-  { alias: "it-admin", name: "IT Administrator", description: "Full system access including infrastructure and deployment.", isTenantRole: false, memberCount: 2 },
-  { alias: "sys-admin", name: "System Administrator", description: "Platform-wide configuration and user management.", isTenantRole: false, memberCount: 3 },
-  { alias: "ecom-mgr", name: "Ecommerce Manager", description: "Manages products, campaigns and promotions across all brands.", isTenantRole: false, memberCount: 5 },
-  { alias: "tenant-pm", name: "Tenant Product Manager", description: "Product catalogue management scoped to assigned tenants.", isTenantRole: true, memberCount: 12 },
-  { alias: "tenant-inv-mgr", name: "Tenant Inventory Manager", description: "Inventory and stock management for tenant-owned products.", isTenantRole: true, memberCount: 8 },
-  { alias: "operations", name: "Operations", description: "Order fulfilment, logistics and dispatch operations.", isTenantRole: false, memberCount: 7 },
-  { alias: "finance", name: "Finance", description: "Financial reporting, invoicing and payment reconciliation.", isTenantRole: false, memberCount: 4 },
-  { alias: "brand-mgr", name: "Brand Manager", description: "Brand profile management and marketing content publishing.", isTenantRole: true, memberCount: 15 },
-  { alias: "product-upload", name: "Product Upload", description: "Bulk product data import and catalogue upload operations.", isTenantRole: true, memberCount: 10 },
-  { alias: "guest", name: "Guest", description: "Read-only access for external reviewers and auditors.", isTenantRole: false, memberCount: 3 },
-];
+export type { RoleRow };
 
 type RolesPageProps = {
   onAddRole?: () => void;
   onEditRole?: (roleAlias: string) => void;
-  onManageModules?: (roleAlias: string) => void;
+  onManageModules?: (row: RoleRow) => void;
+  authToken?: string;
 };
 
-export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageProps) {
-  const [rows, setRows] = useState<RoleRow[]>(DEMO_ROLES);
+export function RolesPage({ onAddRole, onEditRole, onManageModules, authToken }: RolesPageProps) {
+  const [rows, setRows] = useState<RoleRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RoleRow | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: "", visible: false });
+
+  const loadRoles = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetchRoles(authToken)
+      .then(setRows)
+      .catch((e: unknown) => {
+        setRows([]);
+        setError(e instanceof Error ? e.message : "Failed to load roles");
+      })
+      .finally(() => setLoading(false));
+  }, [authToken]);
+
+  useEffect(() => {
+    loadRoles();
+  }, [loadRoles]);
 
   useEffect(() => {
     if (!toast.visible) return;
@@ -59,11 +60,22 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
     [rows],
   );
 
-  function handleDeleteConfirm() {
+  async function handleDeleteConfirm() {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.alias !== deleteTarget.alias));
-    setToast({ message: `Role "${deleteTarget.name}" removed.`, visible: true });
-    setDeleteTarget(null);
+    setDeleteSubmitting(true);
+    try {
+      await deleteRole(deleteTarget.alias, authToken);
+      setToast({ message: `Role "${deleteTarget.name}" deleted.`, visible: true });
+      setDeleteTarget(null);
+      loadRoles();
+    } catch (e: unknown) {
+      setToast({
+        message: e instanceof Error ? e.message : "Delete failed",
+        visible: true,
+      });
+    } finally {
+      setDeleteSubmitting(false);
+    }
   }
 
   function exportToCSV() {
@@ -138,7 +150,7 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
               type="button"
               title="Manage modules"
               className="rounded p-2 text-on-surface-variant hover:bg-primary/10 hover:text-primary transition-colors"
-              onClick={() => onManageModules?.(row.original.alias)}
+              onClick={() => onManageModules?.(row.original)}
             >
               <IconAdminPanel className="h-4 w-4" />
             </button>
@@ -158,7 +170,12 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
   );
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Roles management">
+    <div className="-m-6 relative flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Roles management">
+      {loading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -170,12 +187,18 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
           </nav>
           <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Roles</h1>
           <p className="text-sm text-on-surface-variant">Manage user groups and access right configurations.</p>
+          {error && (
+            <p className="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs font-medium text-error" role="alert">
+              {error}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-variant"
+            className="flex items-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-variant disabled:opacity-50"
             onClick={exportToCSV}
+            disabled={rows.length === 0}
           >
             <IconShare className="h-4 w-4 shrink-0" />
             Export
@@ -195,7 +218,6 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
         <DataTable columns={columns} data={rows} globalFilterPlaceholder="Search by role name…" />
       </div>
 
-      {/* Delete confirmation modal */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-[400px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
@@ -206,8 +228,9 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
               <div>
                 <h3 className="text-sm font-bold text-on-surface">Delete role</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
-                  Remove <span className="font-semibold text-on-surface">{deleteTarget.name}</span> from the system?
-                  Users assigned to this role will lose their associated permissions.
+                  Remove <span className="font-semibold text-on-surface">{deleteTarget.name}</span> (
+                  <span className="font-mono">{deleteTarget.alias}</span>)? You cannot delete a role that still has
+                  members.
                 </p>
               </div>
             </div>
@@ -216,13 +239,15 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
                 type="button"
                 className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
                 onClick={() => setDeleteTarget(null)}
+                disabled={deleteSubmitting}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
-                onClick={handleDeleteConfirm}
+                className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity disabled:opacity-50"
+                onClick={() => void handleDeleteConfirm()}
+                disabled={deleteSubmitting}
               >
                 <IconDelete className="h-4 w-4 shrink-0" />
                 Delete
@@ -232,7 +257,6 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules }: RolesPageP
         </div>
       )}
 
-      {/* Toast */}
       <div
         aria-live="polite"
         className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 transition-all duration-300 ${

@@ -10,7 +10,6 @@
  */
 
 import type { Order } from "../types";
-import type { RefundCase, RefundStatus } from "../types";
 import { GATEWAY } from "../../estore/api/gatewayConfig";
 
 const BASE = GATEWAY.orders;
@@ -445,89 +444,3 @@ export async function getShipment(
   if (!s) return null;
   return { status: s.status ?? null, carrier: s.carrier ?? null, trackingNumber: s.trackingNumber ?? null };
 }
-
-// ── DAI-651 Refund cases ─────────────────────────────────────────────────────
-
-type RefundCaseListItemDto = {
-  refundNo: string;
-  referenceHash: string;
-  orderId: string;
-  customerName: string;
-  customerPhone: string;
-  customerEmail: string;
-  amount: number;
-  currency: string;
-  paymentMethod: string;
-  paymentReferenceNo: string;
-  requestDate: string;
-  refundDate: string | null;
-  status: RefundStatus;
-  remark: string;
-};
-
-function refundCaseFromDto(dto: RefundCaseListItemDto): RefundCase {
-  return {
-    refundNo: String(dto.refundNo ?? ""),
-    referenceHash: String(dto.referenceHash ?? ""),
-    returnNo: "—",
-    doNumber: "—",
-    orderId: String(dto.orderId ?? ""),
-    customerName: String(dto.customerName ?? ""),
-    customerPhone: String(dto.customerPhone ?? ""),
-    customerEmail: String(dto.customerEmail ?? ""),
-    amount: Number(dto.amount ?? 0),
-    currency: String(dto.currency ?? "USD"),
-    paymentMethod: String(dto.paymentMethod ?? ""),
-    paymentDetail: "",
-    paymentReferenceNo: String(dto.paymentReferenceNo ?? ""),
-    requestDate: String(dto.requestDate ?? ""),
-    refundDate: dto.refundDate ? String(dto.refundDate) : null,
-    status: (dto.status ?? "Pending Refund") as RefundStatus,
-    remark: String(dto.remark ?? ""),
-    paymentGatewayMessage: "",
-    isPaymentGatewayCase: true,
-    doCancelledItems: [],
-    refundBreakdown: [],
-    changeHistory: [],
-  };
-}
-
-export async function fetchRefundCases(
-  tenantId: string,
-  storeId: string,
-  paging: { cursor?: string | null; limit?: number } | undefined,
-  token?: string
-): Promise<{ rows: RefundCase[]; nextCursor: string | null }> {
-  const params = new URLSearchParams();
-  if (paging?.cursor) params.set("cursor", paging.cursor);
-  if (paging?.limit) params.set("limit", String(paging.limit));
-  const qs = params.toString() ? `?${params.toString()}` : "";
-
-  const res = await fetch(`${BASE}/refund-cases${qs}`, {
-    credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
-  });
-  await throwIfApiError(res);
-  const body = (await res.json()) as { items: RefundCaseListItemDto[]; nextCursor: string | null };
-  return {
-    rows: (body.items ?? []).map(refundCaseFromDto),
-    nextCursor: body.nextCursor ?? null,
-  };
-}
-
-export async function updateRefundCaseStatus(
-  tenantId: string,
-  storeId: string,
-  orderId: string,
-  patch: { status: RefundStatus; remark: string },
-  token?: string
-): Promise<void> {
-  const res = await fetch(`${BASE}/refund-cases/${encodeURIComponent(orderId)}`, {
-    method: "PATCH",
-    credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
-    body: JSON.stringify({ status: patch.status, remark: patch.remark }),
-  });
-  await throwIfApiError(res);
-}
-

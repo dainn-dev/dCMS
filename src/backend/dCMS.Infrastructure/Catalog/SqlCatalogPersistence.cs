@@ -786,6 +786,89 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<PendingApprovalListRow> Items, int TotalCount, string? NextCursor)>
+        ListPendingApprovalsForStoreAsync(string tenantId, string storeId, int limit, string? afterProductId,
+            CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeId);
+        if (limit < 1) limit = 50;
+        if (limit > 100) limit = 100;
+        var after = string.IsNullOrWhiteSpace(afterProductId) ? null : afterProductId.Trim();
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+
+        const string countSql = """
+            SELECT COUNT(*)::int
+            FROM "Products" p
+            WHERE p."TenantId" = @TenantId AND p."StoreId" = @StoreId
+              AND p."Status" = 'pending_approval'
+            """;
+
+        var total = await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(countSql, new { TenantId = tenantId, StoreId = storeId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT p."Id", p."Name", ''::text AS "BrandName",
+                   cat."Name" AS "CategoryPath",
+                   c."UserId"    AS "SubmittedByUserId",
+                   c."CreatedAt" AS "SubmittedAt",
+                   p."Status"
+            FROM "Products" p
+            LEFT JOIN LATERAL (
+                SELECT ac."UserId", ac."CreatedAt"
+                FROM "ApprovalComments" ac
+                WHERE ac."ProductId" = p."Id" AND ac."Type" = 'submitted'
+                ORDER BY ac."CreatedAt" DESC, ac."Id" DESC
+                LIMIT 1
+            ) c ON TRUE
+            LEFT JOIN "Categories" cat ON cat."Id" = p."CategoryId" AND cat."TenantId" = p."TenantId"
+            WHERE p."TenantId" = @TenantId AND p."StoreId" = @StoreId
+              AND p."Status" = 'pending_approval'
+              AND (@AfterProductId IS NULL OR p."Id" > @AfterProductId)
+            ORDER BY p."Id"
+            LIMIT @LimitPlusOne
+            """;
+
+        var dbRows = (await connection.QueryAsync<PendingApprovalDbRow>(
+                new CommandDefinition(sql,
+                    new { TenantId = tenantId, StoreId = storeId, AfterProductId = after, LimitPlusOne = limit + 1 },
+                    cancellationToken: cancellationToken))
+            .ConfigureAwait(false)).ToList();
+
+        var rows = dbRows.Select(static r => new PendingApprovalListRow(
+            r.Id,
+            r.Name,
+            r.BrandName,
+            r.CategoryPath,
+            r.SubmittedByUserId,
+            r.SubmittedAt is null ? null : new DateTimeOffset(r.SubmittedAt.Value, TimeSpan.Zero),
+            r.Status)).ToList();
+
+        string? nextCursor = null;
+        if (rows.Count > limit)
+        {
+            nextCursor = rows[limit - 1].Id;
+            rows = rows.Take(limit).ToList();
+        }
+
+        return (rows, total, nextCursor);
+    }
+
+    /// <summary>Dapper materialization row — avoids record ctor mismatch with <see cref="DateTime"/> vs <see cref="DateTimeOffset"/>.</summary>
+    private sealed class PendingApprovalDbRow
+    {
+        public string Id { get; init; } = "";
+        public string Name { get; init; } = "";
+        public string BrandName { get; init; } = "";
+        public string CategoryPath { get; init; } = "";
+        public string? SubmittedByUserId { get; init; }
+        public DateTime? SubmittedAt { get; init; }
+        public string Status { get; init; } = "";
+    }
+
     private sealed class AxisFlatRow
     {
         public int AttrId { get; init; }

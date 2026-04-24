@@ -52,6 +52,8 @@ public static class CampaignRoutes
         promotionDetailsJson = c.PromotionDetailsJson,
         budget = c.Budget, audience = c.Audience, conversions = c.Conversions,
         createdAt = c.CreatedAt, updatedAt = c.UpdatedAt,
+        submittedByUserId = c.SubmittedByUserId,
+        submittedAt = c.SubmittedAt,
     };
 
     private static object ToHistoryDto(CampaignWorkflowHistoryRow h) => new
@@ -195,7 +197,13 @@ public static class CampaignRoutes
 
     private static Task<IResult> Submit(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct) => DoTransition(tenantId, id, "pending_approval", body, campaigns, ctx, ct);
     private static Task<IResult> Approve(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct) => DoTransition(tenantId, id, "approved", body, campaigns, ctx, ct);
-    private static Task<IResult> Reject(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct) => DoTransition(tenantId, id, "rejected", body, campaigns, ctx, ct);
+    private static Task<IResult> Reject(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Comment))
+            return Task.FromResult<IResult>(ApiEnvelope.Error("validation_error",
+                "Comment is required when rejecting a campaign.", StatusCodes.Status400BadRequest));
+        return DoTransition(tenantId, id, "rejected", body, campaigns, ctx, ct);
+    }
     private static Task<IResult> Activate(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct) => DoTransition(tenantId, id, "active", body, campaigns, ctx, ct);
     private static Task<IResult> Pause(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct) => DoTransition(tenantId, id, "deactivated", body, campaigns, ctx, ct);
     private static Task<IResult> Archive(string tenantId, string id, [FromBody] WorkflowActionRequest? body, ICampaignPersistence campaigns, HttpContext ctx, CancellationToken ct) => DoTransition(tenantId, id, "archived", body, campaigns, ctx, ct);

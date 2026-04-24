@@ -12,10 +12,32 @@ function resolveUrl(path) {
   }
 }
 
+/**
+ * Same bootstrap as eStore SPA: tenant/store from Dcms:Estore (GET /umbraco/dcms/api/estore/context).
+ * @returns {Promise<{ tenantId?: string, storeId?: string }>}
+ */
+async function fetchEstoreContext() {
+  try {
+    const res = await fetch("/umbraco/dcms/api/estore/context", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return {};
+    const json = await res.json();
+    const out = {};
+    if (json.tenantId) out.tenantId = String(json.tenantId);
+    if (json.storeId) out.storeId = String(json.storeId);
+    if (json.authToken) out.authToken = String(json.authToken);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export default class DcmsApprovalSectionElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
-  /** @type {{ mount?: (el: HTMLElement) => void, unmount?: (el: HTMLElement) => void } | null} */
+  /** @type {{ mount?: (el: HTMLElement, opts?: object) => void, unmount?: (el: HTMLElement) => void } | null} */
   #spa = null;
 
   constructor() {
@@ -31,6 +53,8 @@ export default class DcmsApprovalSectionElement extends UmbElementMixin(HTMLElem
     this.innerHTML = `<div data-react-root style="position:absolute;inset:0"></div>`;
     this.#host = this.querySelector("[data-react-root]");
     if (!this.#host) return;
+
+    const estoreContext = await fetchEstoreContext();
 
     try {
       const cssUrl = resolveUrl(SPA_CSS);
@@ -48,7 +72,7 @@ export default class DcmsApprovalSectionElement extends UmbElementMixin(HTMLElem
       if (!jsRes.ok) throw new Error(`GET ${jsUrl} -> ${jsRes.status} ${jsRes.statusText}`);
 
       this.#spa = await import(/* @vite-ignore */ SPA_JS);
-      this.#spa?.mount?.(this.#host);
+      this.#spa?.mount?.(this.#host, estoreContext);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (this.#host) {

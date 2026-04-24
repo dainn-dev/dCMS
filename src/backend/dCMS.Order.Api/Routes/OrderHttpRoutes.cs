@@ -61,6 +61,19 @@ public static class OrderHttpRoutes
             .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
 
+        // DAI-654 Refund case by order (detail + privileged update)
+        app.MapGet("/api/orders/{orderId}/refund-case", GetRefundCaseForOrder)
+            .WithName("GetRefundCaseForOrder")
+            .WithTags("refunds")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        app.MapPut("/api/orders/{orderId}/refund-case", PutRefundCaseForOrder)
+            .WithName("PutRefundCaseForOrder")
+            .WithTags("refunds")
+            .RequireAuthorization(DcmsPolicies.OrderFailureManage)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
         // DAI-637 Failed-order recovery transitions
         app.MapPost("/api/orders/{orderId}/retry-failure", RetryFailure)
             .WithName("RetryOrderFailure")
@@ -81,156 +94,163 @@ public static class OrderHttpRoutes
             .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
 
-        app.MapPatch("/api/refund-cases/{orderId}", UpdateRefundCase)
-            .WithName("UpdateRefundCase")
+        app.MapPatch("/api/refund-cases/{orderId}", PatchRefundCaseLegacy)
+            .WithName("PatchRefundCaseLegacy")
             .WithTags("refunds")
-            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .RequireAuthorization(DcmsPolicies.OrderFailureManage)
             .WithTenantStoreHeaderAccess(app.Configuration);
     }
 
+    private static IResult RefundEnvelopeOk(object data, object? meta = null) =>
+        Results.Json(new { data, meta, error = (object?)null }, JsonCamel);
+
+    private static IResult RefundEnvelopeError(int statusCode, string code, string message) =>
+        Results.Json(
+            new { data = (object?)null, meta = (object?)null, error = new { code, message } },
+            JsonCamel,
+            statusCode: statusCode);
+
+    private static IResult MissingRefundTenantStore() =>
+        RefundEnvelopeError(StatusCodes.Status400BadRequest, "MISSING_TENANT_OR_STORE",
+            "X-Tenant-Id and X-Store-Id headers are required.");
+
     private static async Task<IResult> ListRefundCases(
         HttpContext http,
-        [FromServices] OrderQueryStore orders,
-        [FromServices] PaymentTransactionQueryStore payments,
+        [FromServices] IOrderService orders,
+        [FromQuery] string? status,
         [FromQuery] string? cursor,
         [FromQuery] int? limit,
         CancellationToken cancellationToken)
     {
         if (!TryGetTenantStore(http, out var tenantId, out var storeId))
-            return MissingTenantStore();
+            return MissingRefundTenantStore();
 
         var lim = !limit.HasValue || limit.Value < 1 ? 20 : Math.Clamp(limit.Value, 1, 100);
 
         try
         {
-            var page = await orders.ListCancelledOrdersForRefundCasesAsync(tenantId, storeId, cursor, lim, cancellationToken)
+            var page = await orders
+                .ListRefundCasesAsync(tenantId, storeId, status, cursor, lim, cancellationToken)
                 .ConfigureAwait(false);
 
-            // Enrich with latest payment transactions in a single round-trip to the Payment DB.
-            var orderIds = page.Items.Select(x => x.Id).ToList();
-            var txByOrder = await payments.GetLatestByOrderIdsAsync(orderIds, cancellationToken).ConfigureAwait(false);
-
-            var items = new List<RefundCaseListItemDto>(page.Items.Count);
-            foreach (var o in page.Items)
-            {
-                if (!txByOrder.TryGetValue(o.Id, out var tx))
-                    continue; // not a refund case per US definition
-
-                var status = MapRefundStatusToUi(o.RefundStatus);
-                var requestDate = o.UpdatedAt.ToString("yyyy-MM-dd");
-                var refundDate = o.RefundedAt?.ToString("yyyy-MM-dd");
-
-                items.Add(new RefundCaseListItemDto(
-                    RefundNo: BuildRefundNo(o.Id),
-                    ReferenceHash: BuildReferenceHash(o.Id),
-                    OrderId: o.Id.ToString(),
-                    CustomerName: "",
-                    CustomerPhone: "",
-                    CustomerEmail: "",
-                    Amount: tx.Amount,
-                    Currency: tx.Currency ?? o.Currency ?? "USD",
-                    PaymentMethod: string.IsNullOrWhiteSpace(tx.PaymentMethod) ? "unknown" : tx.PaymentMethod,
-                    PaymentReferenceNo: string.IsNullOrWhiteSpace(tx.PaymentIntentId) ? (o.PaymentIntentId ?? "") : tx.PaymentIntentId,
-                    RequestDate: requestDate,
-                    RefundDate: refundDate,
-                    Status: status,
-                    Remark: o.RefundRemark ?? ""));
-            }
-
-            return Results.Json(new { items, nextCursor = page.NextCursor });
+            var items = page.Items.Select(ToRefundCaseListItemDto).ToList();
+            return RefundEnvelopeOk(new { items, nextCursor = page.NextCursor });
         }
         catch (ArgumentException ex)
         {
-            return Results.Json(
-                new { error = new { code = "INVALID_QUERY", message = ex.Message } },
-                statusCode: StatusCodes.Status400BadRequest);
+            return RefundEnvelopeError(StatusCodes.Status400BadRequest, "INVALID_QUERY", ex.Message);
         }
     }
 
-    private static async Task<IResult> UpdateRefundCase(
+    private static Task<IResult> PatchRefundCaseLegacy(
         string orderId,
         UpdateRefundCaseRequest body,
         HttpContext http,
-        [FromServices] IConfiguration configuration,
+        [FromServices] IOrderService orders,
+        CancellationToken cancellationToken) =>
+        ApplyRefundCaseUpdate(orderId, body, http, orders, cancellationToken);
+
+    private static Task<IResult> PutRefundCaseForOrder(
+        string orderId,
+        UpdateRefundCaseRequest body,
+        HttpContext http,
+        [FromServices] IOrderService orders,
+        CancellationToken cancellationToken) =>
+        ApplyRefundCaseUpdate(orderId, body, http, orders, cancellationToken);
+
+    private static async Task<IResult> GetRefundCaseForOrder(
+        string orderId,
+        HttpContext http,
+        [FromServices] IOrderService orders,
         CancellationToken cancellationToken)
     {
         if (!TryGetTenantStore(http, out var tenantId, out var storeId))
-            return MissingTenantStore();
+            return MissingRefundTenantStore();
 
         if (!Guid.TryParse(orderId, out _))
+            return RefundEnvelopeError(StatusCodes.Status400BadRequest, "INVALID_ORDER_ID", "orderId must be a UUID.");
+
+        var detail = await orders.GetRefundCaseAsync(orderId, tenantId, storeId, cancellationToken).ConfigureAwait(false);
+        if (detail is null)
+            return RefundEnvelopeError(StatusCodes.Status404NotFound, "NOT_FOUND", "Refund case not found for this order.");
+
+        return RefundEnvelopeOk(ToRefundCaseListItemDto(detail));
+    }
+
+    private static async Task<IResult> ApplyRefundCaseUpdate(
+        string orderId,
+        UpdateRefundCaseRequest body,
+        HttpContext http,
+        IOrderService orders,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingRefundTenantStore();
+
+        if (!Guid.TryParse(orderId, out _))
+            return RefundEnvelopeError(StatusCodes.Status400BadRequest, "INVALID_ORDER_ID", "orderId must be a UUID.");
+
+        if (string.IsNullOrWhiteSpace(body.Status) || !RefundCaseStatusMaps.IsCanonicalUiStatus(body.Status))
         {
-            return Results.Json(
-                new { error = new { code = "INVALID_ORDER_ID", message = "orderId must be a UUID." } },
-                statusCode: StatusCodes.Status400BadRequest);
+            return RefundEnvelopeError(StatusCodes.Status422UnprocessableEntity, "INVALID_STATUS",
+                "status must be one of: Pending, Processing, Success, Rejected.");
         }
 
-        var mapped = MapUiRefundStatusToDb(body.Status);
-        if (mapped is null)
+        if (RefundCaseStatusMaps.UiPatchToDb(body.Status) is null)
         {
-            return Results.Json(
-                new { error = new { code = "INVALID_STATUS", message = "Invalid refund status." } },
-                statusCode: StatusCodes.Status400BadRequest);
+            return RefundEnvelopeError(StatusCodes.Status422UnprocessableEntity, "INVALID_STATUS", "Invalid refund status.");
         }
 
-        var refundedAt = mapped == "success" ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
+        var remark = body.Remark ?? "";
+        if (remark.Length > 1000)
+        {
+            return RefundEnvelopeError(StatusCodes.Status400BadRequest, "INVALID_REMARK",
+                "remark must be at most 1000 characters.");
+        }
 
-        var cs = configuration.GetConnectionString("Order")
-                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
-
-        await using var uow = new OrderUnitOfWork(cs);
-        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var rows = await uow.UpdateRefundTrackingAsync(
-                tenantId,
-                storeId,
-                orderId,
-                mapped,
-                body.Remark ?? "",
-                refundedAt,
-                DateTimeOffset.UtcNow,
-                cancellationToken).ConfigureAwait(false);
-
-            if (rows == 0)
-            {
-                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                return Results.Json(
-                    new { error = new { code = "NOT_FOUND", message = "Cancelled order not found, or not cancellable for refunds." } },
-                    statusCode: StatusCodes.Status404NotFound);
-            }
-
-            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return Results.Json(new { orderId, status = body.Status });
+            await orders
+                .UpdateRefundCaseStatusAsync(orderId, tenantId, storeId, body.Status!, remark, cancellationToken)
+                .ConfigureAwait(false);
+            return RefundEnvelopeOk(new { orderId, status = body.Status, remark });
         }
-        catch
+        catch (KeyNotFoundException ex)
         {
-            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
-            throw;
+            return RefundEnvelopeError(StatusCodes.Status422UnprocessableEntity, "ORDER_NOT_ELIGIBLE_FOR_REFUND",
+                ex.Message);
+        }
+        catch (ArgumentException ex)
+        {
+            return RefundEnvelopeError(StatusCodes.Status400BadRequest, "INVALID_REQUEST", ex.Message);
         }
     }
 
     private static string BuildRefundNo(Guid orderId) => $"REF-{orderId.ToString("N")[..12].ToUpperInvariant()}";
     private static string BuildReferenceHash(Guid orderId) => $"#{orderId.ToString("N")[..6].ToUpperInvariant()}";
 
-    private static string MapRefundStatusToUi(string? raw) =>
-        (raw ?? "").Trim().ToLowerInvariant() switch
-        {
-            "success" => "Success",
-            "failed" => "Failed",
-            "pending_refund" or "pending" => "Pending Refund",
-            "" => "Pending Refund",
-            _ => "Pending Refund",
-        };
-
-    private static string? MapUiRefundStatusToDb(string? ui) =>
-        (ui ?? "").Trim().ToLowerInvariant() switch
-        {
-            "success" => "success",
-            "failed" => "failed",
-            "pending refund" => "pending_refund",
-            "pending_refund" => "pending_refund",
-            _ => null,
-        };
+    private static RefundCaseListItemDto ToRefundCaseListItemDto(RefundCaseDetail d)
+    {
+        var oid = Guid.Parse(d.OrderId);
+        var status = RefundCaseStatusMaps.UiToDisplay(d.RefundCaseStatus);
+        var requestDate = d.OrderCancelledAt.ToUniversalTime().ToString("yyyy-MM-dd");
+        var refundDate = d.RefundedAt?.ToUniversalTime().ToString("yyyy-MM-dd");
+        return new RefundCaseListItemDto(
+            RefundNo: BuildRefundNo(oid),
+            ReferenceHash: BuildReferenceHash(oid),
+            OrderId: d.OrderId,
+            CustomerName: "",
+            CustomerPhone: "",
+            CustomerEmail: "",
+            Amount: d.Amount,
+            Currency: d.Currency,
+            PaymentMethod: d.PaymentMethod,
+            PaymentReferenceNo: d.PaymentIntentId,
+            RequestDate: requestDate,
+            RefundDate: refundDate,
+            Status: status,
+            Remark: d.RefundCaseRemark);
+    }
 
     private static async Task<IResult> GetOrderById(
         string orderId,

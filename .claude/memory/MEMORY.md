@@ -1,14 +1,15 @@
 # dCMS — Memory
 
-**Stack:** Umbraco CMS (ASP.NET Core) + Next.js | **DB:** PostgreSQL (Catalog + Inventory Dapper services) | **Users:** Super Admin / Store Owners / End Customers
+**Stack:** Umbraco CMS (ASP.NET Core) + Next.js (Phase 2) | **DB:** PostgreSQL (Catalog + Inventory + Order via Dapper); SQL Server (Umbraco) | **Users:** Super Admin / Chain Admin / Brand / Store Manager / Staff / End Customers
 
 **Luôn nhớ:**
-- Hierarchy 4 cấp: **Siêu thị (Tenant) → Brands[] → Stores[] → Storefront (Next.js)**
-- **Tenant = Siêu thị** — 1 Umbraco instance + isolated DB per Siêu thị (Umbraco); Catalog/Inventory services dùng PostgreSQL (schema hiện tại single-tenant scripts + `TenantId` columns)
+- Hierarchy 4 cấp: **Siêu thị (Tenant) → Brands[] → Stores[] → Storefront (Next.js, Phase 2)**
+- **Tenant = Siêu thị** — 1 Umbraco instance + isolated DB per Siêu thị; Catalog/Inventory/Order services dùng PostgreSQL với cột `TenantId`
 - Brand = layer tổ chức trong Siêu thị. Store = đơn vị bán (có storefront riêng)
-- Mọi DB query scope theo **TenantId** (Siêu thị); filter thêm BrandId/StoreId khi cần
+- Mọi DB query scope theo **TenantId**; filter thêm BrandId/StoreId khi cần
 - Elasticsearch: `dcms-{tenantId}-*`, filter brandId/storeId trong query
-- RBAC: Super Admin → Chain Admin → Brand Manager → Store Manager → Store Staff
+- RBAC: SuperAdmin → ChainAdmin → BrandManager → StoreManager → StoreStaff
+- Hai lớp auth: Umbraco UserGroups + AllowedSections (shell backoffice) vs Platform JWT + ASP.NET policies (API business scope)
 - Rate limiting + CORS bắt buộc trên mọi API endpoint
 - 2000 CCU target — tránh N+1, tránh in-memory state
 - Multi-language + multi-currency từ đầu
@@ -20,33 +21,73 @@
 
 ## Current State
 
-- Status: Planning phase + **US-1 … US-13 (scaffold)** trong `src/backend/` (2026-04-12). **US-5 (DAI-234):** Catalog worker — index ES + MediatR + `ProductDocument` pipeline + Redis invalidation. **US-6 (DAI-235):** **GET** `…/stores/{storeId}/products` — Elasticsearch search cơ bản. **US-7 (DAI-236):** filters/facets/sort/cache Redis + `ElasticsearchProductSearchService`. **US-8 (DAI-237):** ES product index **versioned** (`…-v{N}`) + stable **alias** = `ElasticsearchIndexNames.Products`; `ProductSearchIndexAliasBootstrap` (greenfield hoặc legacy concrete cùng tên → reindex → alias write); bump `ProductSearchIndexVersion` khi đổi mapping. Testcontainers ES + `ElasticsearchClientFactory` `configureSettings`. Catalog API yêu cầu `Elasticsearch:Url`. **US-9 (DAI-252):** Store Manager catalog write — **POST/PUT** `…/products/bulk` (≤100), **PUT** `…/products/{id}` (full update), **DELETE** → archive, **PUT** `…/products/{id}/variants/{variantId}` (SKU/status/sortOrder, duplicate SKU → 409), `DuplicateVariantSkuException`; **idempotency** `IdempotencyMiddleware` (Redis, POST/PUT/PATCH trên path có `/api/v1/` + `/products`, TTL 24h). **Auth (riêng):** JWT + RBAC.
-- **US-10 (DAI-255):** Public storefront API — **GET** `/api/v1/products?tenantId=&storeId=` (ES search + Redis 30s + `Cache-Control: public, max-age=30`), **GET** `/api/v1/products/{slug}` (SQL + variantMatrix, Redis cache-aside 10m, ETag `W/"product-{id}-v{unix}"`, `public, max-age=60`), **GET** `/api/v1/products/slug-check` (20 req/min/IP). Migration `010_AddCombinationCanonical` + `ProductVariant.CombinationCanonical` cho matrix keys; invalidate search/detail cache đã có từ indexer (`RedisCatalogSearchCacheInvalidator`).
-- **US-11 (DAI-253):** Middleware stack — **HostTenantRoutingMiddleware** (Redis `dcms:host:{host}` → `HttpContext.Items`); **TenantStoreAccess**: **ChainAdmin**/**BrandManager** bỏ qua khớp `store_id` với route (vẫn khớp tenant); **rate limit** global partition theo tenant + tier Redis `dcms:tenant:plan:{tenantId}` (`starter` 200 / `pro` 500 / `enterprise` 1000 per `RateLimiting:WindowSeconds`, anonymous `anon:{ip}`); **AuditMiddleware** + **AuditLogChannel** + **AuditLogBackgroundService** + **SqlAuditLogPersistence** → bảng `AuditLogs` (mutating `/api/v1/tenants/...`, không log public `/api/v1/products`); **IPriceChangeAlerter** noop. Inventory.Api: `ConnectionStrings:Audit` (Compose → catalog DB); Redis trên inventory compose cho tier/host.
-- **US-13 (DAI-276):** Umbraco 13 — **section** `dCMSCatalog` + wizard: Step 1–3; **Step 4 (DAI-285)** preview Cartesian client-side (`axesJson` → `combinationCount`, bảng tối đa 80 dòng, cảnh báo khi count rất lớn, map tên từ `variant-axes`); **Step 5** grid (DAI-286) + **review/publish (DAI-287):** `GET products/{id}` summary (status, variant count, active/inactive từ grid; price/stock ghi *n/a* do API/BFF); Save draft (variants); Submit/Publish; Hide (`POST …/hide` khi `active`); URL template mở tab sau publish/submit; workflow preference localStorage; BFF validator thêm `publish` / `submit-for-approval` / `hide` / `unhide` / `archive`; `forward` có `preserveError`. **DAI-281** grant admin/editor. **Linear:** parent **DAI-276** (US-13 epic) + **DAI-281–287** Done.
-- **US-12 (DAI-254):** Inventory **POST** `…/stock/bulk` (≤100 items, `op`: adjust / reserve / release — partial success `succeeded`/`failed` như catalog bulk). **GET** `…/stock/variants/{variantId}` (stock theo warehouse). **GET/POST** `…/warehouses` (list + create, duplicate id → 409). **Internal** `POST /internal/inventory/{check|reserve|release}` + header **`X-Internal-Api-Key`** (SHA-256 fixed-time compare; `InternalInventory:ApiKey` empty → 503; rate limit off). Policy **`inventory:read`** (GET) / **`inventory:write`**. **IdempotencyMiddleware** + **IdempotencyOptions** chung trong `dCMS.Infrastructure`; Catalog `PathSubstrings = ["/products"]`, Inventory `["/stock"]`. Linear **Done** + comment API; integration **`WebApplicationFactory`** + Testcontainers PG: `dCMS.Tests/Integration/Inventory/` (marker `InventoryApiAssemblyMarker`).
-- Active branch: main
-- Last task: **DAI-276 (2026-04-12):** Linear epic US-13 → **Done**. **§8 Access Module (2026-04-18):** Implemented full Access module backend in `dCMS.Web` — `DcmsSectionAliases.Access`, 10 default user groups, Umbraco DB migration (SQL Server T-SQL), `IPermissionService`/`PermissionService` (NPoco), `RequirePermissionAttribute`/`PermissionFilter`, `DcmsUserController`, `DcmsRoleController`, `DcmsTenantController` (stub), `DcmsAccessComposer`. Also SQL migration `015_AccessModule.sql` (PostgreSQL) + EF entities in `dCMS.Persistence.Ef`. Build: 0 errors 0 warnings.
+Status: Planning + scaffold US-1…US-13 trong `src/backend/` (2026-04-12) + Backoffice SPA + Access module + Order/Promotions mở rộng.
 
-## Key Components (Proposed)
+**M1 Catalog (US-1…US-13) — done (2026-04-12):**
+- **US-5** `DAI-234` Catalog worker ES indexing + MediatR + `ProductDocument` + Redis invalidation
+- **US-6/7** `DAI-235/236` GET `/stores/{storeId}/products` ES search + facets/sort + Redis cache + `ElasticsearchProductSearchService`
+- **US-8** `DAI-237` ES index versioned (`…-v{N}`) + alias = `ElasticsearchIndexNames.Products`; `ProductSearchIndexAliasBootstrap` (greenfield / legacy concrete → reindex → alias); bump `ProductSearchIndexVersion` khi đổi mapping; Testcontainers ES + `ElasticsearchClientFactory`
+- **US-9** `DAI-252` Store Manager writes — POST/PUT `/products/bulk` (≤100), PUT `/products/{id}`, DELETE→archive, PUT variants (SKU/status/sortOrder, dup SKU → 409), `DuplicateVariantSkuException`, **IdempotencyMiddleware** (Redis, path `/api/v1/` + `/products`, 24h)
+- **US-10** `DAI-255` Public storefront API — GET `/api/v1/products` (ES + Redis 30s), GET `/products/{slug}` (SQL + `variantMatrix`, 10m + ETag `W/"product-{id}-v{unix}"`), slug-check (20/min/IP); migration `010_AddCombinationCanonical`
+- **US-11** `DAI-253` Middleware — **HostTenantRoutingMiddleware** (Redis `dcms:host:{host}`), TenantStoreAccess (Chain/Brand bỏ qua store match), rate limit tier theo tenant (`starter/pro/enterprise`), **AuditMiddleware + AuditLogBackgroundService + SqlAuditLogPersistence** → `AuditLogs`
+- **US-12** `DAI-254` Inventory — POST `/stock/bulk` (≤100, adjust/reserve/release, partial success), GET `/stock/variants/{id}`, GET/POST `/warehouses`, **internal** `POST /internal/inventory/{check|reserve|release}` + header `X-Internal-Api-Key` (SHA-256 fixed-time; empty → 503); policies `inventory:read`/`write`; idempotency path `/stock`
+- **US-13** `DAI-276` Umbraco 13 section `dCMSCatalog` + wizard Step 1–5 + review/publish (`DAI-281…287`); workflow preference localStorage
 
-- `src/backend/dCMS.AspNetCore.Auth/` — JWT + RBAC policies + tenant/store route filter (auth layer; không phải US-5 ES indexing)
-- `src/backend/dCMS.Core/` — Domain (Product SPU, events, `ProductService`, `ICatalogPersistence`, shared inventory exceptions)
-- `src/backend/dCMS.Infrastructure/` — Dapper `SqlCatalogPersistence`, outbox relay, **search** (`ElasticsearchProductIndexer`, `ProductSearchIndexAliasBootstrap`, `SqlProductSearchRepository`, `ElasticsearchClientFactory`, Redis invalidator), SQL migrations (`001`–`004`, `008` DLQ, `009` audit/notifications)
-- `src/backend/dCMS.Inventory.Core/` — `VariantStock`, `StockService`, `IInventoryStockPersistence`
-- `src/backend/dCMS.Inventory.Infrastructure/` — `SqlStockPersistence`, migration `007_CreateInventory.sql`
-- `src/backend/dCMS.Tests/` — xUnit + FluentAssertions + Moq + SkippableFact + Testcontainers.PostgreSql + Testcontainers.Elasticsearch
-- `src/backend/dCMS.Catalog.Api/` — ASP.NET Core minimal APIs Catalog service (:5001 dev), envelope `{ data, meta, error }`, **product search (ES)**
-- `src/backend/dCMS.Inventory.Api/` — Inventory REST (:5002 dev), stock adjust/reserve/release + bulk + idempotency (Redis)
-- `src/backend/dCMS.Catalog.Worker/` — Outbox → RabbitMQ; **MediatR** product index notifications; ES + optional Redis
-- `src/backend/dCMS.Web/` — **Umbraco 13** web host (`Umbraco.Cms` 13.13.1): `CreateUmbracoBuilder` + Delivery API + SQLite dev DB (`umbraco/Data/`), `ForwardedHeaders` trước pipeline Umbraco; Docker `infra/docker/Dockerfile.dcms-web` + compose service `umbraco-web` (:5000)
-- `src/frontend/` — Next.js storefront (App Router)
-- `infra/docker-compose.yml` + `infra/docker/*` — PostgreSQL, RabbitMQ, ES, Catalog/Inventory API, Worker; profile `test` → `m1-domain-tests` (xem `infra/README.md`)
+**M2 Orders — Order.Api (port TBD):**
+- `DAI-637` Failed-order recovery — POST `/api/orders/{id}/retry-failure` + `/resolve-failure`; failure states `PaymentFailed|AuthFailed|AddressError|StockError|SystemError` trên `Orders.Status`; migrations `010_CreateOrderFailures.sql` + `011_AddOrderFailureContextColumns.sql`
+- `DAI-651/652/653/654/656` **Refund Cases** (2026-04-23/24):
+  - Persistence: migration `012_AddOrderRefundTrackingColumns.sql` (cột `RefundStatus`, `RefundRemark`, `RefundedAt` trên `Orders`) — **không** có bảng `RefundCases` riêng; view = Cancelled order + latest qualifying PaymentTransaction
+  - Core: `RefundCaseReadModels.cs` (`RefundCaseDetail`, `RefundCasePage`), `RefundCaseStatusMaps.cs` (UI↔DB: `Pending|Processing|Success|Rejected` → `pending_refund|Processing|success|failed`), `RefundCasePaymentRules.cs`, `OrderListCursorCodec.cs`, `PaymentTransactionQueryStore.cs`
+  - Routes (policy `OrderAccess` read / `OrderFailureManage` write): GET `/api/refund-cases` (keyset cursor, limit 1–100, status filter), PATCH `/api/refund-cases/{orderId}` (legacy), GET/PUT `/api/orders/{orderId}/refund-case` — envelope `{data, meta, error}` camelCase; Headers `X-Tenant-Id`, `X-Store-Id` bắt buộc
+  - Update flow (`UpdateRefundCaseStatusAsync`): status canonical (4 labels) + remark ≤1000; mapping UI→DB via `UiPatchToDb`; `KeyNotFoundException` → 422 `ORDER_NOT_ELIGIBLE_FOR_REFUND`
+  - SPA: `orders/api/refundCasesApi.ts`; `RefundCasesPage` + `RefundCaseDialogs` wired (mock `refundCasesMock.ts` deleted)
+
+**M2 Promotions — `dCMS.Promotions.Api` (service mới):**
+- `DAI-659` / `DAI-664` **Promo codes** (2026-04-24):
+  - Migrations `022_CreatePromoCodes.sql` (`PromoCodes` + `PromoCodeWorkflowHistory`; unique `(TenantId,Code)`) + `023_ExtendPromoCodes.sql` (optional label, minSpend, startDate/endDate)
+  - Core: `PromoCodeRow` (workflow states `draft→pending_approval→approved|rejected|archived`, valid types `percentage|fixed|free_shipping`, code regex shared với `CampaignRow`), `IPromoCodePersistence`, `SqlPromoCodePersistence`
+  - Routes `/api/v1/tenants/{tenantId}/promo-codes` — GET list (status filter, page ≤200), GET by id, POST/PUT CRUD (UPPER code, 409 on dup), POST `/{id}/submit|archive|approve|reject` (approve/reject cần `CatalogApproval`; reject yêu cầu comment); tenant access middleware áp dụng
+  - Wired vào `dCMS.Promotions.Api/Program.cs` cạnh campaigns (`MapCampaignRoutes` + `MapPromoCodeRoutes`)
+
+**M2 Approvals (cross-service):**
+- `DAI-658` Catalog `GET /api/v1/tenants/{tenantId}/products/pending-approvals` (policy `CatalogApproval`) + `PendingApprovalListRow`
+- `DAI-660` Approval SPA — `approval/api/approvalApi.ts` gom products/campaigns/promo-codes qua `GATEWAY.catalog`/`gateway.promotions` (YARP); pages `ProductApprovalPage` / `CampaignApprovalPage` / `PromoCodeApprovalPage`; `ContentApprovalPage` + `content-approval-columns` đã xoá
+
+**Access module (Umbraco backoffice) — §8 + DAI-668…670:**
+- Umbraco migration plan `dCMS.Access` (`AccessModuleMigrationPlan`): `access-v1.0` → `access-v1.1` (`AccessModuleTenantsAndRolesMetaMigration`) tạo `dcms_tenants` + `dcms_roles_meta`, seed 10 default role aliases (`dcmsItAdministrator`, `dcmsSysAdministrator`, `dcmsEcommerceManager`, `dcmsTenantProductManager`, `dcmsTenantInventoryManager`, `dcmsOperations`, `dcmsFinance`, `dcmsBrandManager`, `dcmsProductUpload`, `dcmsGuest`; `isTenantRole` flag)
+- PG side: migration `015_AccessModule.sql` (2026-04-20) + EF entities (`dCMS.Persistence.Ef`); `IPermissionService`/`PermissionService` (NPoco), `RequirePermissionAttribute`, `DcmsAccessComposer`, `DcmsUserController`, `DcmsRoleController`, `DcmsTenantController`
+- `DAI-668` `DcmsTenantController` — `/umbraco/dcms/api/tenants` CRUD (code regex `^[A-Za-z0-9][A-Za-z0-9_-]{0,18}$`, DELETE = soft deactivate `active=0`, 409 on dup code)
+- `DAI-669` **Tenants + Users** SPA (2026-04-24) — `tenantsApi.ts`, `usersApi.ts` (cookie session, `credentials:"include"`, Umbraco `BackOfficeAccess` policy, no Bearer), `TenantsPage` / `TenantFormPage` / `UsersPage` / `UserFormPage` / `ChangePasswordModal` wired. Extra form fields (branding, categories…) UI-only cho đến khi API mở rộng
+- `DAI-670` **Roles** SPA (2026-04-24) — `rolesApi.ts` (`/umbraco/dcms/api/roles` GET/POST/PUT/DELETE + permissions GET + PUT per module); `RolesPage` / `RoleFormPage` / `ManageModulesPage` dùng `authToken` (demo `accessRoles` bỏ); module matrix = fixed template merged với API rows
+
+**Active branch:** main
+
+---
+
+## Key Components
+
+- `src/backend/dCMS.AspNetCore.Auth/` — JWT + RBAC policies (`CatalogRead|Write|Approval`, `OrderAccess|FailureManage`, `inventory:read|write`), tenant/store route filter
+- `src/backend/dCMS.Core/` — Domain (Product SPU, `ProductService`, shared inventory exceptions, `PromoCodeRow`, `CampaignRow`, `PendingApprovalListRow`), persistence interfaces
+- `src/backend/dCMS.Infrastructure/` — Dapper `SqlCatalogPersistence` / `SqlCampaignPersistence` / `SqlPromoCodePersistence`, outbox relay, search (ES indexer + alias bootstrap + `SqlProductSearchRepository` + Redis invalidator), SQL migrations `001`–`023`, `IdempotencyMiddleware`
+- `src/backend/dCMS.Inventory.Core` / `Infrastructure` — `VariantStock`, `StockService`, `SqlStockPersistence`, migration `007`
+- `src/backend/dCMS.Order.Core/Ordering/` — `CreateOrder`/`CancelOrder`, `RefundCase*`, `OrderListCursorCodec`, `RefundCasePaymentRules`, `RefundCaseStatusMaps`
+- `src/backend/dCMS.Order.Infrastructure/Persistence/` — `OrderUnitOfWork`, `OrderQueryStore`, `PaymentTransactionQueryStore`, migrations `001`–`012`
+- `src/backend/dCMS.Catalog.Api/` — minimal API (:5001), envelope `{data, meta, error}`, product search (ES) + pending-approvals
+- `src/backend/dCMS.Inventory.Api/` — Inventory REST (:5002) + internal endpoints
+- `src/backend/dCMS.Promotions.Api/` — Campaigns + Promo codes routes (tenant-scoped)
+- `src/backend/dCMS.Order.Api/` — Orders REST + refund cases + failure recovery
+- `src/backend/dCMS.Catalog.Worker/` — Outbox → RabbitMQ; MediatR index + Redis invalidation
+- `src/backend/dCMS.Web/` — **Umbraco 13** host (`Umbraco.Cms` 13.13.1): sections `dCMSCatalog`, Access controllers (`DcmsUser|Role|Tenant`), SPA dist (`App_Plugins/DcmsV16/dist/{approval|estore|orders|reports|dashboard}-spa.{js,css,map}`), Access migrations (SQL Server)
+- `src/backend/dCMS.Tests/` — xUnit + FluentAssertions + Moq + SkippableFact + Testcontainers (PG/ES); `Integration/Catalog/PendingApprovalsPersistenceIntegrationTests.cs`
+- `src/backend/dCMS.Order.Tests/` — `Unit/OrderListCursorCodecTests.cs`, `Unit/RefundCasePaymentRulesTests.cs`, `Unit/RefundCaseStatusMapsTests.cs`, `Integration/RefundCasesApiIntegrationTests.cs`, `Integration/OrderServicePostgresIntegrationTests.cs`
+- `src/backoffice/dcms-backoffice-spa/` — React SPA (build → `dCMS.Web/App_Plugins/DcmsV16/dist/`): `estore` (catalog mgmt + promotions + access), `approval` (products/campaigns/promo-codes), `orders` (orders + refund cases), `reports`, `dashboard`; `estore/api/gatewayConfig.ts` centralised gateway base URLs
+- `infra/docker-compose.yml` + `infra/docker/*` — PostgreSQL, RabbitMQ, ES, Catalog/Inventory/Order/Promotions APIs, Worker, umbraco-web (:5000); profile `test` → `m1-domain-tests`
 
 ## In Progress
 
-- Catalog API: `ProductAttributeValues` / dynamic attributes persistence (post US-5)
-- Worker hardening: DbUp migrations, dequeue locking, DLQ dedupe; ES **explicit mappings** + `StockUpdated` debounce; DB fields (`brandId`, prices, snapshot version) cho `ProductDocument`
+- Catalog API: `ProductAttributeValues` / dynamic attributes persistence
+- Worker hardening: DbUp migrations, dequeue locking, DLQ dedupe; ES explicit mappings; `StockUpdated` debounce; `ProductDocument` fields (`brandId`, prices, snapshot version)
+- Refund cases: enriching list with customer name/phone/email (hiện để empty trong DTO)
 
 ## Recent Decisions
 

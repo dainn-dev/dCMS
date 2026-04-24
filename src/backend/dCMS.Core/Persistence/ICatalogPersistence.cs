@@ -140,4 +140,15 @@ public interface ICatalogPersistence
     /// <summary>Latest <c>ApprovalComments.UserId</c> for product/type (e.g. <c>submitted</c> submitter).</summary>
     Task<string?> GetLatestApprovalCommentUserIdAsync(string productId, string tenantId, string storeId, string type,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Products in <c>pending_approval</c> for tenant/store, with submitter from latest <c>submitted</c> comment.
+    /// Cursor: <paramref name="afterProductId"/> — return rows with <c>Id &gt; afterProductId</c> (lexicographic).
+    /// </summary>
+    Task<(IReadOnlyList<PendingApprovalListRow> Items, int TotalCount, string? NextCursor)> ListPendingApprovalsForStoreAsync(
+        string tenantId,
+        string storeId,
+        int limit,
+        string? afterProductId,
+        CancellationToken cancellationToken = default);
 }

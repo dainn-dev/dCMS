@@ -2,6 +2,7 @@ import type { RowSelectionState } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
 import { IconBolt, IconCheckCircle } from "../../orders/icons";
+import { approveCampaign, fetchPendingCampaigns, rejectCampaign } from "../api/approvalApi";
 import { ApprovalOkConfirmModal } from "../components/ApprovalOkConfirmModal";
 import { RejectionReasonModal } from "../components/RejectionReasonModal";
 import {
@@ -9,45 +10,16 @@ import {
   createCampaignApprovalColumns,
 } from "../campaign-approval-columns";
 
-const MOCK_PENDING: CampaignApprovalRow[] = [
-  {
-    id: "cpa-1",
-    campaignName: "Spring bundle — kitchen essentials",
-    campaignCode: "SPRING-KIT-26",
-    campaignType: "Bundled promo",
-    validPeriod: "Apr 1, 2026 — Apr 30, 2026",
-    submittedBy: "promo@brand.example",
-    submittedDate: "2026-03-28",
-    status: "pending",
-  },
-  {
-    id: "cpa-2",
-    campaignName: "PWP coffee grinder",
-    campaignCode: "PWP-GRINDER-Q2",
-    campaignType: "Purchase with purchase",
-    validPeriod: "Apr 10, 2026 — Jun 30, 2026",
-    submittedBy: "growth@roastco.example",
-    submittedDate: "2026-04-08",
-    status: "pending",
-  },
-  {
-    id: "cpa-3",
-    campaignName: "Member weekend double points",
-    campaignCode: "PTS-WKND-04",
-    campaignType: "Loyalty",
-    validPeriod: "Apr 18, 2026 — Apr 20, 2026",
-    submittedBy: "crm@brand.example",
-    submittedDate: "2026-04-16",
-    status: "pending",
-  },
-];
-
 type Props = {
+  tenantId?: string;
+  authToken?: string;
   onPendingCountChange?: (count: number) => void;
 };
 
-export function CampaignApprovalPage({ onPendingCountChange }: Props) {
-  const [rows, setRows] = useState<CampaignApprovalRow[]>(() => [...MOCK_PENDING]);
+export function CampaignApprovalPage({ tenantId, authToken, onPendingCountChange }: Props) {
+  const [rows, setRows] = useState<CampaignApprovalRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [toast, setToast] = useState<string | null>(null);
   const [confirmApprove, setConfirmApprove] = useState<string[] | null>(null);
@@ -55,23 +27,36 @@ export function CampaignApprovalPage({ onPendingCountChange }: Props) {
 
   const pendingRows = useMemo(() => rows.filter((r) => r.status === "pending"), [rows]);
 
+  const loadList = useCallback(async () => {
+    if (!tenantId) {
+      setRows([]);
+      onPendingCountChange?.(0);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const { items, total } = await fetchPendingCampaigns(tenantId, { page: 1, pageSize: 100 }, authToken);
+      setRows(items);
+      onPendingCountChange?.(total);
+    } catch (e: unknown) {
+      setRows([]);
+      setLoadError(e instanceof Error ? e.message : "Failed to load pending campaigns");
+      onPendingCountChange?.(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId, authToken, onPendingCountChange]);
+
   useEffect(() => {
-    onPendingCountChange?.(pendingRows.length);
-  }, [pendingRows.length, onPendingCountChange]);
+    void loadList();
+  }, [loadList]);
 
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(t);
   }, [toast]);
-
-  const showDemoEmailToast = useCallback((action: "approved" | "rejected", detail?: string) => {
-    const base =
-      action === "approved"
-        ? "Campaign(s) approved. Notification email sent to requestor(s) (demo)."
-        : `Campaign(s) rejected${detail ? `: ${detail}` : ""}. Notification email sent to requestor(s) (demo).`;
-    setToast(base);
-  }, []);
 
   const clearSelectionFor = useCallback((ids: string[]) => {
     setRowSelection((prev) => {
@@ -82,39 +67,53 @@ export function CampaignApprovalPage({ onPendingCountChange }: Props) {
   }, []);
 
   const applyApprove = useCallback(
-    (ids: string[]) => {
-      if (ids.length === 0) return;
-      setRows((prev) =>
-        prev.map((r) => (ids.includes(r.id) ? { ...r, status: "approved" as const } : r))
-      );
+    async (ids: string[]) => {
+      if (!tenantId || ids.length === 0) return;
+      const prev = rows;
+      setRows((r) => r.filter((x) => !ids.includes(x.id)));
       clearSelectionFor(ids);
       setConfirmApprove(null);
-      showDemoEmailToast("approved");
+      try {
+        await Promise.all(ids.map((id) => approveCampaign(tenantId, id, authToken)));
+        setToast(ids.length > 1 ? `Approved ${ids.length} campaigns.` : "Approved.");
+        await loadList();
+      } catch (e: unknown) {
+        setRows(prev);
+        setToast(e instanceof Error ? e.message : "Approve failed");
+        await loadList();
+      }
     },
-    [clearSelectionFor, showDemoEmailToast]
+    [tenantId, authToken, rows, clearSelectionFor, loadList]
   );
 
   const applyReject = useCallback(
-    (ids: string[], reason: string) => {
-      if (ids.length === 0) return;
-      setRows((prev) =>
-        prev.map((r) => (ids.includes(r.id) ? { ...r, status: "rejected" as const } : r))
-      );
+    async (ids: string[], reason: string) => {
+      if (!tenantId || ids.length === 0) return;
+      const prev = rows;
+      const shortReason = reason.length > 80 ? `${reason.slice(0, 80)}…` : reason;
+      setRows((r) => r.filter((x) => !ids.includes(x.id)));
       clearSelectionFor(ids);
       setRejectTargetIds(null);
-      const shortReason = reason.length > 80 ? `${reason.slice(0, 80)}…` : reason;
-      showDemoEmailToast("rejected", shortReason);
+      try {
+        await Promise.all(ids.map((id) => rejectCampaign(tenantId, id, reason, authToken)));
+        setToast(`Rejected: ${shortReason}`);
+        await loadList();
+      } catch (e: unknown) {
+        setRows(prev);
+        setToast(e instanceof Error ? e.message : "Reject failed");
+        await loadList();
+      }
     },
-    [clearSelectionFor, showDemoEmailToast]
+    [tenantId, authToken, rows, clearSelectionFor, loadList]
   );
 
   const onViewPage = useCallback((row: CampaignApprovalRow) => {
-    setToast(`Opening storefront view for “${row.campaignName}” (demo).`);
+    setToast(`Opening storefront view for “${row.campaignName}”.`);
   }, []);
 
   const onPreview = useCallback((row: CampaignApprovalRow) => {
     window.open(`about:blank#campaign-preview=${encodeURIComponent(row.id)}`, "_blank", "noopener,noreferrer");
-    setToast(`Campaign preview opened in a new tab (demo) — ${row.campaignName}.`);
+    setToast(`Campaign preview opened in a new tab — ${row.campaignName}.`);
   }, []);
 
   const onApproveRow = useCallback((row: CampaignApprovalRow) => {
@@ -155,6 +154,8 @@ export function CampaignApprovalPage({ onPendingCountChange }: Props) {
         ? "Reject this campaign?"
         : undefined;
 
+  const missingTenant = !tenantId;
+
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Campaign approval">
       <header className="flex shrink-0 flex-col gap-2 border-b border-outline-variant/15 bg-surface px-6 py-4">
@@ -168,21 +169,36 @@ export function CampaignApprovalPage({ onPendingCountChange }: Props) {
           <div>
             <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Campaign approval</h1>
             <p className="mt-0.5 max-w-2xl text-sm text-on-surface-variant">
-              Review pending campaigns (spec 6.3). Approve or reject with a required reason; requestors receive a notification (demo toast until the API is available).
+              Review pending campaigns (spec 6.3). Approve or reject with a required reason.
             </p>
           </div>
         </div>
       </header>
 
       <div className="w-full flex-1 space-y-4 p-6">
-        <DataTable
-          columns={columns}
-          data={pendingRows}
-          globalFilterPlaceholder="Search by name, code, type, submitter…"
-          getRowId={(row) => row.id}
-          rowSelection={rowSelection}
-          onRowSelectionChange={setRowSelection}
-        />
+        {missingTenant && (
+          <div className="rounded-xl border border-error/25 bg-error/5 px-4 py-3 text-sm text-error">
+            Missing tenantId — configure <code className="text-xs">Dcms:Estore</code> in Umbraco appsettings or pass mount options.
+          </div>
+        )}
+        {loadError && (
+          <div className="rounded-xl border border-error/25 bg-error/5 px-4 py-3 text-sm text-error">{loadError}</div>
+        )}
+        {loading && (
+          <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-6 text-center text-sm text-on-surface-variant">
+            Loading pending campaigns…
+          </div>
+        )}
+        {!loading && !missingTenant && (
+          <DataTable
+            columns={columns}
+            data={pendingRows}
+            globalFilterPlaceholder="Search by name, code, type, submitter…"
+            getRowId={(row) => row.id}
+            rowSelection={rowSelection}
+            onRowSelectionChange={setRowSelection}
+          />
+        )}
 
         {selectedCount > 0 && (
           <div className="sticky bottom-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-3 shadow-lg ring-1 ring-black/5">
@@ -227,14 +243,14 @@ export function CampaignApprovalPage({ onPendingCountChange }: Props) {
         message={approveModalMessage}
         confirmLabel="Ok"
         onCancel={() => setConfirmApprove(null)}
-        onConfirm={() => confirmApprove && applyApprove(confirmApprove)}
+        onConfirm={() => confirmApprove && void applyApprove(confirmApprove)}
       />
 
       <RejectionReasonModal
         open={Boolean(rejectTargetIds?.length)}
         subtitle={rejectSubtitle}
         onCancel={() => setRejectTargetIds(null)}
-        onConfirm={(reason) => rejectTargetIds && applyReject(rejectTargetIds, reason)}
+        onConfirm={(reason) => rejectTargetIds && void applyReject(rejectTargetIds, reason)}
       />
 
       {toast && (

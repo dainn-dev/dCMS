@@ -9,7 +9,7 @@ import { DataTable } from "../components/DataTable";
 import { exportRefundCasesToCsv } from "../exportRefundCases";
 import { IconDownload } from "../icons";
 import { REFUND_CASE_COLUMN_LABELS, createRefundCaseColumns } from "../refund-cases-columns";
-import { fetchRefundCases, updateRefundCaseStatus } from "../api/ordersApi";
+import { fetchAllRefundCasesForExport, fetchRefundCases, updateRefundCaseStatus } from "../api/refundCasesApi";
 import type { RefundCase, RefundCaseHistoryEntry, RefundStatus } from "../types";
 
 function findCase(refundNo: string, list: RefundCase[]): RefundCase | null {
@@ -26,7 +26,10 @@ export function RefundCasesPage({
   authToken?: string;
 }) {
   const [cases, setCases] = useState<RefundCase[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [apiLoading, setApiLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [saveToast, setSaveToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [doModal, setDoModal] = useState<RefundCase | null>(null);
@@ -62,28 +65,78 @@ export function RefundCasesPage({
     return () => clearTimeout(t);
   }, [saveToast]);
 
-  useEffect(() => {
-    if (!tenantId || !storeId) return;
-    let cancelled = false;
+  const refresh = useCallback(async () => {
+    if (!tenantId || !storeId) {
+      setCases([]);
+      setNextCursor(null);
+      return;
+    }
     setApiLoading(true);
     setApiError(null);
-    fetchRefundCases(tenantId, storeId, { limit: 100 }, authToken)
-      .then(({ rows }) => {
-        if (!cancelled) setCases(rows);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : "Failed to load refund cases";
-        setApiError(msg);
-        setCases([]);
-      })
-      .finally(() => {
-        if (!cancelled) setApiLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const { cases: page, nextCursor: nc } = await fetchRefundCases(tenantId, storeId, { limit: 50 }, authToken);
+      setCases(page);
+      setNextCursor(nc);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load refund cases";
+      setApiError(msg);
+      setCases([]);
+      setNextCursor(null);
+    } finally {
+      setApiLoading(false);
+    }
   }, [tenantId, storeId, authToken]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function loadMore() {
+    if (!tenantId || !storeId || !nextCursor) return;
+    setLoadingMore(true);
+    setApiError(null);
+    try {
+      const { cases: more, nextCursor: nc } = await fetchRefundCases(
+        tenantId,
+        storeId,
+        { cursor: nextCursor ?? undefined, limit: 50 },
+        authToken
+      );
+      setCases((prev) => [...prev, ...more]);
+      setNextCursor(nc);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load more refund cases";
+      setApiError(msg);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  async function handleExport() {
+    if (!tenantId || !storeId) return;
+    setExportBusy(true);
+    setApiError(null);
+    try {
+      const { cases: exportRows, limited } = await fetchAllRefundCasesForExport(tenantId, storeId, authToken, {
+        limit: 5000,
+        pageSize: 100,
+      });
+      exportRefundCasesToCsv(exportRows);
+      if (limited) {
+        setSaveToast({
+          kind: "success",
+          message: `Exported ${exportRows.length} refund case(s) (capped at 5000; refine filters if you need the rest).`,
+        });
+      } else {
+        setSaveToast({ kind: "success", message: `Exported ${exportRows.length} refund case(s)` });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Export failed";
+      setSaveToast({ kind: "error", message: msg });
+    } finally {
+      setExportBusy(false);
+    }
+  }
 
   const handleSave = useCallback(
     async (refundNo: string, patch: { status: RefundStatus; remark: string }) => {
@@ -150,11 +203,11 @@ export function RefundCasesPage({
           <button
             type="button"
             className="px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors rounded-lg flex items-center gap-2 disabled:opacity-40"
-            onClick={() => exportRefundCasesToCsv(cases)}
-            disabled={cases.length === 0}
+            onClick={() => void handleExport()}
+            disabled={!tenantId || !storeId || exportBusy}
           >
             <IconDownload className="h-4 w-4" />
-            Export
+            {exportBusy ? "Exporting…" : "Export"}
           </button>
         </div>
       </div>
@@ -177,7 +230,14 @@ export function RefundCasesPage({
               data={cases}
               globalFilterPlaceholder="Search by refund no., customer, order…"
               columnLabels={REFUND_CASE_COLUMN_LABELS}
-              loading={apiLoading}
+              getRowId={(row) => row.refundNo}
+              loading={apiLoading || loadingMore}
+              footerMode="loadMore"
+              loadMore={{
+                disabled: apiLoading || loadingMore || nextCursor === null,
+                label: nextCursor ? (loadingMore ? "Loading…" : "Load more") : "No more",
+                onClick: () => void loadMore(),
+              }}
             />
           </div>
         </>

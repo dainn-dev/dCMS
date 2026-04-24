@@ -16,10 +16,13 @@ namespace dCMS.Order.Tests.Integration;
 ///
 /// Endpoints:
 ///   GET   /api/refund-cases
-///   PATCH /api/refund-cases/{orderId}
+///   GET   /api/orders/{orderId}/refund-case
+///   PUT   /api/orders/{orderId}/refund-case
+///   PATCH /api/refund-cases/{orderId} (legacy; same body as PUT)
 ///
-/// Refund case definition: Order.Status = 'Cancelled' AND PaymentIntentId IS NOT NULL
-/// AND a PaymentTransaction row exists (any status).
+/// Refund case definition: Order.Status in cancelled family (Cancelled, AdminCancelled, UserCancelled),
+/// PaymentIntentId IS NOT NULL, and latest *qualifying* PaymentTransaction (by CreatedAt among
+/// succeeded, refunded, initiated, completed) exists for the order.
 /// </summary>
 [CollectionDefinition("RefundCasesApi", DisableParallelization = true)]
 public sealed class RefundCasesApiCollection : ICollectionFixture<RefundCasesApiFixture>
@@ -61,11 +64,52 @@ public sealed class RefundCasesApiIntegrationTests(RefundCasesApiFixture fx)
         Assert.True(res.IsSuccessStatusCode, $"Status={(int)res.StatusCode} Body={body}");
 
         using var doc = JsonDocument.Parse(body);
-        var items = doc.RootElement.GetProperty("items").EnumerateArray().ToList();
+        var data = doc.RootElement.GetProperty("data");
+        var items = data.GetProperty("items").EnumerateArray().ToList();
 
         Assert.Contains(items, e => e.GetProperty("orderId").GetString() == include.ToString());
         Assert.DoesNotContain(items, e => e.GetProperty("orderId").GetString() == noPayment.ToString());
         Assert.DoesNotContain(items, e => e.GetProperty("orderId").GetString() == active.ToString());
+    }
+
+    [Fact]
+    public async Task ListRefundCases_excludes_cancelled_order_when_latest_payment_is_failed()
+    {
+        var oid = Guid.NewGuid();
+        await fx.SeedOrderAsync(oid, status: "Cancelled", paymentIntentId: "pi_fail");
+        await fx.SeedPaymentTxnAsync(oid, status: "failed");
+
+        var client = fx.Factory.CreateClient();
+        fx.AddHeaders(client);
+        var res = await client.GetAsync("/api/refund-cases?limit=20");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var ids = doc.RootElement.GetProperty("data").GetProperty("items").EnumerateArray()
+            .Select(e => e.GetProperty("orderId").GetString()).ToList();
+        Assert.DoesNotContain(oid.ToString(), ids);
+    }
+
+    [Fact]
+    public async Task ListRefundCases_uses_latest_qualifying_payment_when_newer_txn_is_failed()
+    {
+        var oid = Guid.NewGuid();
+        var t = DateTimeOffset.UtcNow;
+        await fx.SeedOrderAsync(oid, status: "Cancelled", paymentIntentId: "pi_qual");
+        // Older qualifying row vs newer failed row — list must use latest *qualifying* (succeeded), not the failed row's amount.
+        await fx.SeedPaymentTxnAsync(oid, status: "succeeded", amount: 10m, createdAt: t.AddHours(-2));
+        await fx.SeedPaymentTxnAsync(oid, status: "failed", amount: 99m, createdAt: t);
+
+        var client = fx.Factory.CreateClient();
+        fx.AddHeaders(client);
+        var res = await client.GetAsync("/api/refund-cases?limit=20");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var matches = doc.RootElement.GetProperty("data").GetProperty("items").EnumerateArray()
+            .Where(e => e.GetProperty("orderId").GetString() == oid.ToString()).ToList();
+        Assert.Single(matches);
+        Assert.Equal(10m, matches[0].GetProperty("amount").GetDecimal());
     }
 
     [Fact]
@@ -88,7 +132,7 @@ public sealed class RefundCasesApiIntegrationTests(RefundCasesApiFixture fx)
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        var items = doc.RootElement.GetProperty("items").EnumerateArray().Select(e => e.GetProperty("orderId").GetString()).ToList();
+        var items = doc.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().Select(e => e.GetProperty("orderId").GetString()).ToList();
 
         Assert.Contains(mine.ToString(), items);
         Assert.DoesNotContain(foreign.ToString(), items);
@@ -113,17 +157,18 @@ public sealed class RefundCasesApiIntegrationTests(RefundCasesApiFixture fx)
         var res1 = await client.GetAsync("/api/refund-cases?limit=2");
         res1.EnsureSuccessStatusCode();
         using var doc1 = JsonDocument.Parse(await res1.Content.ReadAsStringAsync());
-        Assert.Equal(2, doc1.RootElement.GetProperty("items").GetArrayLength());
+        var data1 = doc1.RootElement.GetProperty("data");
+        Assert.Equal(2, data1.GetProperty("items").GetArrayLength());
 
-        var nextCursor = doc1.RootElement.GetProperty("nextCursor").GetString();
+        var nextCursor = data1.GetProperty("nextCursor").GetString();
         Assert.False(string.IsNullOrWhiteSpace(nextCursor));
 
         var res2 = await client.GetAsync($"/api/refund-cases?limit=2&cursor={Uri.EscapeDataString(nextCursor!)}");
         res2.EnsureSuccessStatusCode();
         using var doc2 = JsonDocument.Parse(await res2.Content.ReadAsStringAsync());
-        var page2 = doc2.RootElement.GetProperty("items").EnumerateArray().Select(e => e.GetProperty("orderId").GetString()).ToList();
+        var page2 = doc2.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().Select(e => e.GetProperty("orderId").GetString()).ToList();
 
-        var page1 = doc1.RootElement.GetProperty("items").EnumerateArray().Select(e => e.GetProperty("orderId").GetString()).ToList();
+        var page1 = data1.GetProperty("items").EnumerateArray().Select(e => e.GetProperty("orderId").GetString()).ToList();
         Assert.False(page2.Any(x => page1.Contains(x)), "page2 must not overlap page1");
     }
 
@@ -137,9 +182,17 @@ public sealed class RefundCasesApiIntegrationTests(RefundCasesApiFixture fx)
         var client = fx.Factory.CreateClient();
         fx.AddHeaders(client);
 
-        var res = await client.PatchAsJsonAsync($"/api/refund-cases/{oid:D}",
+        var res = await client.PutAsJsonAsync($"/api/orders/{oid:D}/refund-case",
             new { status = "Processing", remark = "contacted gateway" });
         res.EnsureSuccessStatusCode();
+
+        var getRes = await client.GetAsync($"/api/orders/{oid:D}/refund-case");
+        getRes.EnsureSuccessStatusCode();
+        using (var doc = JsonDocument.Parse(await getRes.Content.ReadAsStringAsync()))
+        {
+            Assert.Equal("Processing",
+                doc.RootElement.GetProperty("data").GetProperty("status").GetString());
+        }
 
         // verify columns persisted
         await using var conn = new NpgsqlConnection(fx.OrderConnectionString);
@@ -151,14 +204,61 @@ public sealed class RefundCasesApiIntegrationTests(RefundCasesApiFixture fx)
     }
 
     [Fact]
+    public async Task ListRefundCases_returns_empty_for_unused_tenant_store()
+    {
+        var client = fx.Factory.CreateClient();
+        client.DefaultRequestHeaders.Remove("X-Tenant-Id");
+        client.DefaultRequestHeaders.Remove("X-Store-Id");
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", "t-no-rows");
+        client.DefaultRequestHeaders.Add("X-Store-Id", "s-no-rows");
+
+        var res = await client.GetAsync("/api/refund-cases?limit=20");
+        var body = await res.Content.ReadAsStringAsync();
+        Assert.True(res.IsSuccessStatusCode, $"Status={(int)res.StatusCode} Body={body}");
+        using var doc = JsonDocument.Parse(body);
+        var items = doc.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().ToList();
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public async Task UpdateRefundCase_rejects_invalid_status()
+    {
+        var oid = Guid.NewGuid();
+        await fx.SeedOrderAsync(oid, status: "Cancelled", paymentIntentId: "pi_badstat");
+        await fx.SeedPaymentTxnAsync(oid, status: "succeeded");
+
+        var client = fx.Factory.CreateClient();
+        fx.AddHeaders(client);
+
+        var res = await client.PutAsJsonAsync($"/api/orders/{oid:D}/refund-case",
+            new { status = "NotAStatus", remark = "" });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, res.StatusCode);
+    }
+
+    [Fact]
     public async Task UpdateRefundCase_rejects_invalid_orderId()
     {
         var client = fx.Factory.CreateClient();
         fx.AddHeaders(client);
 
-        var res = await client.PatchAsJsonAsync("/api/refund-cases/not-a-uuid",
+        var res = await client.PutAsJsonAsync("/api/orders/not-a-uuid/refund-case",
             new { status = "Processing", remark = "x" });
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetRefundCaseForOrder_returns_detail()
+    {
+        var oid = Guid.NewGuid();
+        await fx.SeedOrderAsync(oid, status: "Cancelled", paymentIntentId: "pi_get");
+        await fx.SeedPaymentTxnAsync(oid, status: "succeeded");
+
+        var client = fx.Factory.CreateClient();
+        fx.AddHeaders(client);
+        var res = await client.GetAsync($"/api/orders/{oid:D}/refund-case");
+        res.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        Assert.Equal(oid.ToString(), doc.RootElement.GetProperty("data").GetProperty("orderId").GetString());
     }
 
     [Fact]
@@ -170,13 +270,9 @@ public sealed class RefundCasesApiIntegrationTests(RefundCasesApiFixture fx)
         var client = fx.Factory.CreateClient();
         fx.AddHeaders(client);
 
-        // Endpoint accepts the call but the SQL UPDATE filters Status='Cancelled', so 0 rows are affected.
-        // The response is still 200 (idempotent semantics) — what matters is the column is NOT mutated.
-        var res = await client.PatchAsJsonAsync($"/api/refund-cases/{oid:D}",
+        var res = await client.PutAsJsonAsync($"/api/orders/{oid:D}/refund-case",
             new { status = "Processing", remark = "should not apply" });
-        // Either 200 OK with 0 changes, or 404 — both acceptable. Test the side effect.
-        Assert.True(res.StatusCode == HttpStatusCode.OK || res.StatusCode == HttpStatusCode.NotFound,
-            $"Unexpected status {(int)res.StatusCode}");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, res.StatusCode);
 
         await using var conn = new NpgsqlConnection(fx.OrderConnectionString);
         var status = await conn.QuerySingleOrDefaultAsync<string?>(
@@ -345,15 +441,17 @@ public sealed class RefundCasesApiFixture : IAsyncLifetime
         string currency = "USD",
         string method = "card",
         Guid? tenantId = null,
-        Guid? storeId = null)
+        Guid? storeId = null,
+        DateTimeOffset? createdAt = null)
     {
         await using var conn = new NpgsqlConnection(PaymentConnectionString);
         await conn.OpenAsync();
+        var at = createdAt ?? DateTimeOffset.UtcNow;
         await conn.ExecuteAsync("""
             INSERT INTO "PaymentTransactions"
                 ("Id","OrderId","TenantId","StoreId","CustomerId","PaymentMethod","PaymentIntentId","Amount","Currency","Status","Provider","CreatedAt")
             VALUES
-                (@Id,@OrderId,@TenantId,@StoreId,@CustomerId,@Method,@Pi,@Amount,@Currency,@Status,@Provider,NOW())
+                (@Id,@OrderId,@TenantId,@StoreId,@CustomerId,@Method,@Pi,@Amount,@Currency,@Status,@Provider,@CreatedAt)
             """, new
         {
             Id = Guid.NewGuid(),
@@ -366,7 +464,8 @@ public sealed class RefundCasesApiFixture : IAsyncLifetime
             Amount = amount,
             Currency = currency,
             Status = status,
-            Provider = "stub"
+            Provider = "stub",
+            CreatedAt = at.UtcDateTime
         });
     }
 }

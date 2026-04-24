@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { IconClose } from "../icons";
-import { REFUND_STATUS_OPTIONS } from "../refundCasesMock";
+import { REFUND_STATUS_OPTIONS } from "../types";
 import type { RefundCase, RefundCaseHistoryEntry, RefundStatus } from "../types";
 
 function formatMoney(amount: number, currency: string): string {

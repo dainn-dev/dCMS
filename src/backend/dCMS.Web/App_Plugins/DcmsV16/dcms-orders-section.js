@@ -27,6 +27,7 @@ async function fetchOrdersContext() {
     const out = {};
     if (json.tenantId) out.tenantId = String(json.tenantId);
     if (json.storeId) out.storeId = String(json.storeId);
+    if (json.authToken) out.authToken = String(json.authToken);
     return out;
   } catch {
     return {};

@@ -29,6 +29,7 @@ public sealed class CatalogVariantPgFixture : IAsyncLifetime
         foreach (var name in new[]
                  {
                      "001_CreateCategories.sql", "003_CreateProducts.sql", "004_CreateVariants.sql",
+                     "009_CreateAuditAndNotifications.sql",
                      "010_AddCombinationCanonical.sql", "012_AddVariantBasePriceAndProductImages.sql"
                  })
         {

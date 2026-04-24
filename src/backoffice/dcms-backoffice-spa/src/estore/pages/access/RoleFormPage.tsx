@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   IconArrowBack,
   IconCheckCircle,
   IconSave,
 } from "../../../orders/icons";
-
-// TODO: Replace with real API calls:
-//   GET  /umbraco/dcms/api/access/roles/{roleAlias}  (edit mode)
-//   POST /umbraco/dcms/api/access/roles               (add mode)
-//   PUT  /umbraco/dcms/api/access/roles/{roleAlias}   (edit mode)
+import {
+  createRole,
+  fetchRoles,
+  updateRole,
+  validateRoleAlias,
+} from "../../api/rolesApi";
 
 const labelBase =
   "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider mb-1";
@@ -22,26 +23,102 @@ export type RoleFormPageProps = {
   roleAlias?: string;
   onSave?: () => void;
   onCancel?: () => void;
+  authToken?: string;
 };
 
-export function RoleFormPage({ mode, roleAlias, onSave, onCancel }: RoleFormPageProps) {
+export function RoleFormPage({ mode, roleAlias, onSave, onCancel, authToken }: RoleFormPageProps) {
   const isAdd = mode === "add";
 
-  const [name, setName] = useState(isAdd ? "" : `Role ${roleAlias ?? ""}`);
-  const [description, setDescription] = useState(
-    isAdd ? "" : "Sample role description for editing.",
-  );
+  const [alias, setAlias] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [isTenantRole, setIsTenantRole] = useState(false);
   const [enableCacheRefresh, setEnableCacheRefresh] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(!isAdd);
+  const [saving, setSaving] = useState(false);
 
-  function handleSave() {
+  useEffect(() => {
+    if (isAdd || !roleAlias) {
+      setDetailLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    setLoadError(null);
+    fetchRoles(authToken)
+      .then((rows) => {
+        if (cancelled) return;
+        const row = rows.find((r) => r.alias === roleAlias);
+        if (!row) {
+          setLoadError(`Role "${roleAlias}" not found.`);
+          return;
+        }
+        setName(row.name);
+        setDescription(row.description);
+        setIsTenantRole(row.isTenantRole);
+        setAlias(row.alias);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to load role");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdd, roleAlias, authToken]);
+
+  async function handleSave() {
     if (!name.trim()) return;
-    setShowSuccess(true);
+    if (isAdd) {
+      const err = validateRoleAlias(alias);
+      if (err) {
+        setLoadError(err);
+        return;
+      }
+    }
+    setSaving(true);
+    setLoadError(null);
+    try {
+      if (isAdd) {
+        await createRole(
+          {
+            name: name.trim(),
+            alias: alias.trim().toLowerCase(),
+            description: description.trim(),
+            isTenantRole,
+          },
+          authToken,
+        );
+      } else if (roleAlias) {
+        await updateRole(
+          roleAlias,
+          {
+            name: name.trim(),
+            description: description.trim(),
+            isTenantRole,
+          },
+          authToken,
+        );
+      }
+      setShowSuccess(true);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+    <div className="-m-6 relative flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+      {(detailLoading || saving) && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
@@ -71,7 +148,7 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel }: RoleFormPage
             Back to Roles
           </button>
           <h2 className="text-2xl font-bold tracking-tight text-on-surface">
-            {isAdd ? "Create New Role" : `Edit Role: ${name}`}
+            {isAdd ? "Create New Role" : `Edit Role: ${name || roleAlias}`}
           </h2>
         </div>
         <div className="flex items-center gap-3">
@@ -84,9 +161,9 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel }: RoleFormPage
           </button>
           <button
             type="button"
-            disabled={!name.trim()}
+            disabled={saving || detailLoading || !name.trim() || (isAdd && !alias.trim())}
             className="flex items-center gap-2 rounded-md bg-primary px-6 py-2 text-xs font-bold uppercase tracking-widest text-on-primary shadow-lg shadow-primary/20 transition-all hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
           >
             <IconSave className="h-4 w-4 shrink-0" />
             {isAdd ? "Create Role" : "Save Changes"}
@@ -96,11 +173,36 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel }: RoleFormPage
 
       {/* Body */}
       <div className="flex-1 p-6 max-w-2xl">
+        {loadError && (
+          <p className="mb-4 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs font-medium text-error" role="alert">
+            {loadError}
+          </p>
+        )}
         <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm overflow-hidden">
           <div className="border-b border-outline-variant/10 px-6 py-4">
             <h3 className={sectionTitleRow}>Role Details</h3>
           </div>
           <div className="px-6 py-6 space-y-5">
+            {isAdd && (
+              <div>
+                <label className={labelBase}>
+                  Role Alias <span className="text-error">*</span>
+                </label>
+                <input
+                  className={`${inputBase} font-mono`}
+                  value={alias}
+                  onChange={(e) => setAlias(e.target.value.toLowerCase())}
+                  placeholder="e.g. brand-manager"
+                />
+                <p className="mt-1 text-[10px] text-on-surface-variant">Lowercase identifier stored in Umbraco (cannot be changed later).</p>
+              </div>
+            )}
+            {!isAdd && (
+              <div>
+                <label className={labelBase}>Role Alias</label>
+                <input className={`${inputBase} font-mono bg-surface-container-high/50`} value={alias} readOnly />
+              </div>
+            )}
             <div>
               <label className={labelBase}>
                 Role Name <span className="text-error">*</span>
@@ -156,7 +258,6 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel }: RoleFormPage
         </section>
       </div>
 
-      {/* Success modal */}
       {showSuccess && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 backdrop-blur-sm"

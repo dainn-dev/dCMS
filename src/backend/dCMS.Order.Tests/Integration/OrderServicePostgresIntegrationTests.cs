@@ -40,6 +40,7 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Order"] = connectionString,
+                ["ConnectionStrings:Payment"] = connectionString,
             })
             .Build();
 
@@ -53,6 +54,7 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton<IInventoryClient, NoOpInventoryClient>();
         services.AddSingleton<OrderQueryStore>();
+        services.AddSingleton<PaymentTransactionQueryStore>();
         services.AddSingleton<IOrderDetailCache, NullOrderDetailCache>();
         services.AddSingleton(_busMock.Object);
         services.AddSingleton<IOrderService, OrderService>();

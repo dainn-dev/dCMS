@@ -69,6 +69,9 @@ export type FailedOrder = {
 
 export type RefundStatus = "Pending Refund" | "Success" | "Failed";
 
+/** UI status options for the refund case status dropdown (DAI-651). */
+export const REFUND_STATUS_OPTIONS: RefundStatus[] = ["Pending Refund", "Success", "Failed"];
+
 export type RefundCaseDoLine = {
   sku: string;
   name: string;

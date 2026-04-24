@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
 import {
   IconAddCircle,
@@ -11,6 +11,7 @@ import {
 import { createPromotionColumns } from "../promotions-columns";
 import type { PromoListRow } from "../promotions-columns";
 import { exportPromoCodesToXlsx } from "../exportPromoCodesXlsx";
+import { archivePromoCode, fetchAllPromoCodesForExport, fetchPromoCodes } from "../api/promoCodesApi";
 
 type PromoType = "standard" | "shareable" | "account-bound";
 
@@ -19,107 +20,9 @@ type PromotionsPageProps = {
   onEditPromo?: (row: PromoListRow) => void;
   onViewCodes?: (row: PromoListRow) => void;
   onOpenExclusionList?: () => void;
+  tenantId?: string;
+  authToken?: string;
 };
-
-const LS_KEY = "dcms.estore.promoCodesList.v1";
-
-const INITIAL_PROMO_ROWS: PromoListRow[] = [
-  {
-    id: "1",
-    promoType: "Flash Sale",
-    discount: "Percentage",
-    value: "25%",
-    minSpend: "$120.00",
-    code: "FLASH25OFF",
-    scheduleStart: "May 12, 10:00",
-    scheduleEnd: "to May 14, 23:59",
-    activeDot: "live",
-    status: "approved",
-    usedPct: 64,
-  },
-  {
-    id: "2",
-    promoType: "Seasonal",
-    discount: "Fixed",
-    value: "$50.00",
-    minSpend: "$250.00",
-    code: "SUMMER50",
-    scheduleStart: "Jun 01, 00:00",
-    scheduleEnd: "to Aug 31, 23:59",
-    activeDot: "warning",
-    status: "pending",
-    usedPct: 0,
-  },
-  {
-    id: "3",
-    promoType: "Loyalty",
-    discount: "Fixed",
-    value: "$15.00",
-    minSpend: "$50.00",
-    code: "WELCOME15",
-    scheduleStart: "Jan 01, 00:00",
-    scheduleEnd: "Permanent",
-    activeDot: "live",
-    status: "approved",
-    usedPct: 92,
-  },
-  {
-    id: "4",
-    promoType: "Special Event",
-    discount: "Shipping",
-    value: "Free",
-    minSpend: "$30.00",
-    code: "FREESHIP",
-    scheduleStart: "Apr 01, 10:00",
-    scheduleEnd: "to Apr 15, 23:59",
-    activeDot: "off",
-    status: "expired",
-    usedPct: 100,
-  },
-];
-
-const ACTIVE_DOTS = new Set<PromoListRow["activeDot"]>(["live", "warning", "off"]);
-const STATUSES = new Set<PromoListRow["status"]>(["approved", "pending", "expired"]);
-
-function loadPromoRows(): PromoListRow[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return [...INITIAL_PROMO_ROWS];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [...INITIAL_PROMO_ROWS];
-    const out = parsed
-      .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
-      .map((r) => {
-        const ad = r.activeDot as string;
-        const st = r.status as string;
-        return {
-          id: String(r.id ?? ""),
-          promoType: String(r.promoType ?? ""),
-          discount: String(r.discount ?? ""),
-          value: String(r.value ?? ""),
-          minSpend: String(r.minSpend ?? ""),
-          code: String(r.code ?? ""),
-          scheduleStart: String(r.scheduleStart ?? ""),
-          scheduleEnd: String(r.scheduleEnd ?? ""),
-          activeDot: ACTIVE_DOTS.has(ad as PromoListRow["activeDot"]) ? (ad as PromoListRow["activeDot"]) : "off",
-          status: STATUSES.has(st as PromoListRow["status"]) ? (st as PromoListRow["status"]) : "pending",
-          usedPct: typeof r.usedPct === "number" && !Number.isNaN(r.usedPct) ? r.usedPct : 0,
-        };
-      })
-      .filter((r) => r.id && r.code);
-    return out.length > 0 ? out : [...INITIAL_PROMO_ROWS];
-  } catch {
-    return [...INITIAL_PROMO_ROWS];
-  }
-}
-
-function persistPromoRows(rows: PromoListRow[]) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(rows));
-  } catch {
-    /* ignore */
-  }
-}
 
 const PROMO_TYPES: { value: PromoType; label: string; description: string }[] = [
   {
@@ -139,9 +42,67 @@ const PROMO_TYPES: { value: PromoType; label: string; description: string }[] = 
   },
 ];
 
-export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpenExclusionList }: PromotionsPageProps) {
-  const [rows, setRows] = useState<PromoListRow[]>(() => loadPromoRows());
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+export function PromotionsPage({
+  onCreatePromo,
+  onEditPromo,
+  onViewCodes,
+  onOpenExclusionList,
+  tenantId,
+  authToken,
+}: PromotionsPageProps) {
+  const [rows, setRows] = useState<PromoListRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [archiveTargetId, setArchiveTargetId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const refetch = useCallback(() => {
+    if (!tenantId) return;
+    setLoading(true);
+    setError(null);
+    fetchPromoCodes(tenantId, { page: 1, pageSize: 200 }, authToken)
+      .then(({ rows: next }) => setRows(next))
+      .catch((err: unknown) => {
+        setRows([]);
+        setError(err instanceof Error ? err.message : "Failed to load promo codes");
+      })
+      .finally(() => setLoading(false));
+  }, [tenantId, authToken]);
+
+  useEffect(() => {
+    if (!tenantId) {
+      setRows([]);
+      setError("Missing tenantId for Promotions API.");
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchPromoCodes(tenantId, { page: 1, pageSize: 200 }, authToken)
+      .then(({ rows: next }) => {
+        if (!cancelled) setRows(next);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setRows([]);
+          setError(err instanceof Error ? err.message : "Failed to load promo codes");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, authToken]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3200);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const columns = useMemo(
     () =>
@@ -150,7 +111,7 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
           const row = rows.find((r) => r.id === id);
           if (row) onEditPromo?.(row);
         },
-        (id) => setDeleteTargetId(id),
+        (id) => setArchiveTargetId(id),
         (id) => {
           const row = rows.find((r) => r.id === id);
           if (row) onViewCodes?.(row);
@@ -159,16 +120,39 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
     [onEditPromo, onViewCodes, rows]
   );
 
-  const deleteTarget = rows.find((r) => r.id === deleteTargetId);
+  const archiveTarget = rows.find((r) => r.id === archiveTargetId);
 
-  function confirmDeletePromo() {
-    if (!deleteTargetId) return;
-    setRows((prev) => {
-      const next = prev.filter((r) => r.id !== deleteTargetId);
-      persistPromoRows(next);
-      return next;
-    });
-    setDeleteTargetId(null);
+  async function confirmArchivePromo() {
+    if (!tenantId || !archiveTargetId) return;
+    try {
+      await archivePromoCode(tenantId, archiveTargetId, authToken);
+      setArchiveTargetId(null);
+      setToast("Promo code archived.");
+      refetch();
+    } catch (e: unknown) {
+      setToast(e instanceof Error ? e.message : "Archive failed");
+    }
+  }
+
+  async function handleExport() {
+    if (!tenantId) {
+      setToast("Missing tenantId for export.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const { rows: exportRows, limited } = await fetchAllPromoCodesForExport(tenantId, {}, authToken);
+      await exportPromoCodesToXlsx(exportRows);
+      if (limited) {
+        setToast("Export includes up to 1000 rows. Download again after filters are available if you need more.");
+      } else {
+        setToast("Export started.");
+      }
+    } catch (e: unknown) {
+      setToast(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
   }
 
   // ── Actions dropdown ──────────────────────────────────────────────────────
@@ -202,7 +186,12 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
   }
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Promotion code">
+    <div className="-m-6 relative flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Promotion code">
+      {loading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       <header className="relative z-20 flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -214,13 +203,19 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
           <p className="text-sm text-on-surface-variant">
             Create, schedule, and audit promotion codes across your storefront campaigns.
           </p>
+          {error && (
+            <p className="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs font-medium text-error" role="alert">
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="relative" ref={actionsRef}>
           <button
             type="button"
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-on-primary shadow-sm transition-all hover:opacity-90"
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-on-primary shadow-sm transition-all hover:opacity-90 disabled:opacity-50"
             onClick={() => setActionsOpen((o) => !o)}
+            disabled={!tenantId}
           >
             <IconAddCircle className="h-4 w-4 shrink-0" />
             Actions
@@ -242,14 +237,15 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
               <div className="my-1 border-t border-outline-variant/10" />
               <button
                 type="button"
-                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                disabled={exporting || !tenantId}
+                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors disabled:opacity-50"
                 onClick={() => {
                   setActionsOpen(false);
-                  void exportPromoCodesToXlsx(rows);
+                  void handleExport();
                 }}
               >
                 <IconDownload className="h-4 w-4 shrink-0 text-secondary" />
-                Export to Excel
+                {exporting ? "Exporting…" : "Export to Excel"}
               </button>
               <div className="my-1 border-t border-outline-variant/10" />
               <button
@@ -331,7 +327,7 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
         </div>
       )}
 
-      {deleteTargetId && (
+      {archiveTargetId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-[400px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
             <div className="flex items-start gap-4 p-6">
@@ -339,11 +335,11 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
                 <IconWarning className="h-5 w-5 text-error" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-on-surface">Delete promo code</h3>
+                <h3 className="text-sm font-bold text-on-surface">Archive promo code</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
-                  Delete <strong className="text-on-surface">{deleteTarget?.code ?? deleteTargetId}</strong> (
-                  {deleteTarget?.promoType ?? "promotion"})? This cannot be undone. The list is stored in the browser for
-                  this demo.
+                  Archive <strong className="text-on-surface">{archiveTarget?.code ?? archiveTargetId}</strong> (
+                  {archiveTarget?.promoType ?? "promotion"})? Archived codes are kept for audit but no longer apply at
+                  checkout.
                 </p>
               </div>
             </div>
@@ -351,20 +347,26 @@ export function PromotionsPage({ onCreatePromo, onEditPromo, onViewCodes, onOpen
               <button
                 type="button"
                 className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                onClick={() => setDeleteTargetId(null)}
+                onClick={() => setArchiveTargetId(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
-                onClick={confirmDeletePromo}
+                onClick={() => void confirmArchivePromo()}
               >
                 <IconDelete className="h-4 w-4 shrink-0" />
-                Delete
+                Archive
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 flex items-center gap-3 rounded-full border border-secondary/20 bg-surface-container-lowest px-6 py-3 shadow-2xl">
+          <p className="text-sm font-semibold text-on-surface">{toast}</p>
         </div>
       )}
     </div>

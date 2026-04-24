@@ -7,6 +7,7 @@ using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.RateLimiting;
 using dCMS.Promotions.Api.Campaigns;
+using dCMS.Promotions.Api.PromoCodes;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
@@ -19,6 +20,7 @@ if (string.IsNullOrWhiteSpace(catalogCs))
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ICampaignPersistence>(_ => new SqlCampaignPersistence(catalogCs));
+builder.Services.AddSingleton<IPromoCodePersistence>(_ => new SqlPromoCodePersistence(catalogCs));
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
@@ -78,7 +80,7 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "dCMS Promotions API",
         Version = "v1",
-        Description = "Campaign management: CRUD, workflow transitions, and history.",
+        Description = "Campaigns and promo codes: CRUD, workflow transitions, and history.",
     });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
@@ -122,6 +124,7 @@ app.UseRateLimiter();
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.MapCampaignRoutes(builder.Configuration);
+app.MapPromoCodeRoutes(builder.Configuration);
 
 app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))
     .WithTags("health")

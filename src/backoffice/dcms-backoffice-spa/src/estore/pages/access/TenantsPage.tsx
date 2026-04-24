@@ -10,38 +10,39 @@ import {
   IconShare,
   IconWarning,
 } from "../../../orders/icons";
+import { archiveTenant, fetchTenants, type TenantRow } from "../../api/tenantsApi";
 
-// TODO: Replace with real API call to GET /umbraco/dcms/api/access/tenants
-
-export type TenantRow = {
-  id: string;
-  code: string;
-  name: string;
-  contactName: string;
-  contactEmail: string;
-  brandCount: number;
-  active: boolean;
-};
-
-const DEMO_TENANTS: TenantRow[] = [
-  { id: "t-001", code: "GES", name: "Global Enterprise Solutions", contactName: "Marcus Chen", contactEmail: "marcus.chen@ges.com", brandCount: 4, active: true },
-  { id: "t-002", code: "EMEA", name: "EMEA Retail Group", contactName: "Sophie Laurent", contactEmail: "sophie.laurent@emea-retail.com", brandCount: 6, active: true },
-  { id: "t-003", code: "NABD", name: "North America Brand Div", contactName: "James Williams", contactEmail: "james.w@nabd.io", brandCount: 3, active: true },
-  { id: "t-004", code: "APAC", name: "APAC Commerce Hub", contactName: "Yuki Tanaka", contactEmail: "yuki.tanaka@apac-hub.com", brandCount: 8, active: true },
-  { id: "t-005", code: "LATAM", name: "LatAm Online Marketplace", contactName: "Carlos Mendez", contactEmail: "c.mendez@latam-market.co", brandCount: 5, active: false },
-  { id: "t-006", code: "MEA", name: "Middle East & Africa Retail", contactName: "Amira Hassan", contactEmail: "amira.hassan@mea-retail.ae", brandCount: 2, active: true },
-];
+export type { TenantRow };
 
 type TenantsPageProps = {
   onAddTenant?: () => void;
-  onEditTenant?: (tenantId: string) => void;
+  onEditTenant?: (row: TenantRow) => void;
+  authToken?: string;
 };
 
-export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
-  const [rows, setRows] = useState<TenantRow[]>(DEMO_TENANTS);
+export function TenantsPage({ onAddTenant, onEditTenant, authToken }: TenantsPageProps) {
+  const [rows, setRows] = useState<TenantRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<TenantRow | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<TenantRow | null>(null);
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: "", visible: false });
+
+  const refetch = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    fetchTenants(authToken)
+      .then(setRows)
+      .catch((e: unknown) => {
+        setRows([]);
+        setLoadError(e instanceof Error ? e.message : "Failed to load tenants");
+      })
+      .finally(() => setLoading(false));
+  }, [authToken]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   useEffect(() => {
     if (!toast.visible) return;
@@ -61,19 +62,24 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
     );
   }, [rows, search]);
 
-  const requestDelete = useCallback(
+  const requestDeactivate = useCallback(
     (id: string) => {
       const row = rows.find((r) => r.id === id);
-      if (row) setDeleteTarget(row);
+      if (row) setDeactivateTarget(row);
     },
     [rows],
   );
 
-  function handleDeleteConfirm() {
-    if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    setToast({ message: `Tenant "${deleteTarget.name}" removed.`, visible: true });
-    setDeleteTarget(null);
+  async function handleDeactivateConfirm() {
+    if (!deactivateTarget) return;
+    try {
+      await archiveTenant(deactivateTarget.id, authToken);
+      setToast({ message: `Tenant "${deactivateTarget.name}" deactivated.`, visible: true });
+      setDeactivateTarget(null);
+      refetch();
+    } catch (e: unknown) {
+      setToast({ message: e instanceof Error ? e.message : "Deactivate failed", visible: true });
+    }
   }
 
   function exportToCSV() {
@@ -145,15 +151,15 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
               type="button"
               title="Edit tenant"
               className="rounded p-2 text-on-surface-variant hover:bg-primary/10 hover:text-primary transition-colors"
-              onClick={() => onEditTenant?.(row.original.id)}
+              onClick={() => onEditTenant?.(row.original)}
             >
               <IconEdit className="h-4 w-4" />
             </button>
             <button
               type="button"
-              title="Delete tenant"
+              title="Deactivate tenant"
               className="rounded p-2 text-on-surface-variant hover:bg-error/10 hover:text-error transition-colors"
-              onClick={() => requestDelete(row.original.id)}
+              onClick={() => requestDeactivate(row.original.id)}
             >
               <IconDelete className="h-4 w-4" />
             </button>
@@ -161,11 +167,16 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
         ),
       },
     ],
-    [onEditTenant, requestDelete],
+    [onEditTenant, requestDeactivate],
   );
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Tenants management">
+    <div className="relative -m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low" aria-label="Tenants management">
+      {loading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       <header className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
           <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -177,6 +188,11 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
           </nav>
           <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Tenants</h1>
           <p className="text-sm text-on-surface-variant">Manage platform tenants (Siêu thị) and their brand portfolios.</p>
+          {loadError && (
+            <p className="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs font-medium text-error" role="alert">
+              {loadError}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-3 py-2">
@@ -211,8 +227,8 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
         <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search tenants…" />
       </div>
 
-      {/* Delete confirmation modal */}
-      {deleteTarget && (
+      {/* Deactivate confirmation modal (API: soft-delete, active = 0) */}
+      {deactivateTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-[400px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
             <div className="flex items-start gap-4 p-6">
@@ -220,10 +236,11 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
                 <IconWarning className="h-5 w-5 text-error" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-on-surface">Delete tenant</h3>
+                <h3 className="text-sm font-bold text-on-surface">Deactivate tenant</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
-                  Remove <span className="font-semibold text-on-surface">{deleteTarget.name}</span> (
-                  {deleteTarget.code}) from the platform? All associated brands and stores will be affected.
+                  Deactivate <span className="font-semibold text-on-surface">{deactivateTarget.name}</span> (
+                  {deactivateTarget.code})? The tenant row is kept for audit; set inactive so it no longer operates as
+                  an active Siêu thị.
                 </p>
               </div>
             </div>
@@ -231,17 +248,17 @@ export function TenantsPage({ onAddTenant, onEditTenant }: TenantsPageProps) {
               <button
                 type="button"
                 className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                onClick={() => setDeleteTarget(null)}
+                onClick={() => setDeactivateTarget(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
-                onClick={handleDeleteConfirm}
+                onClick={() => void handleDeactivateConfirm()}
               >
                 <IconDelete className="h-4 w-4 shrink-0" />
-                Delete
+                Deactivate
               </button>
             </div>
           </div>

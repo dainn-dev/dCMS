@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Dapper;
 using dCMS.Order.Core.Ordering;
@@ -123,7 +122,7 @@ public sealed class OrderQueryStore
         var limit = Math.Clamp(query.Limit, 1, 100);
         var take = limit + 1;
 
-        if (!TryDecodeCursor(query.Cursor, out var cursorCreated, out var cursorId))
+        if (!OrderListCursorCodec.TryDecode(query.Cursor, out var cursorCreated, out var cursorId))
             throw new ArgumentException("Invalid cursor.", nameof(OrderListQuery.Cursor));
 
         string[]? dbStatuses = null;
@@ -230,7 +229,7 @@ public sealed class OrderQueryStore
         if (hasMore)
         {
             var last = timed[^1];
-            next = EncodeCursor(last.CreatedAt, Guid.Parse(last.Order.Id));
+            next = OrderListCursorCodec.Encode(last.CreatedAt, Guid.Parse(last.Order.Id));
         }
 
         return new OrderListPage(timed, next);
@@ -239,10 +238,12 @@ public sealed class OrderQueryStore
     /// <summary>
     /// DAI-651 — Refund cases are cancelled orders that have a PaymentTransaction.
     /// This returns the raw cancelled orders page; callers should enrich with payment info and filter if needed.
+    /// DAI-653 — optional <paramref name="refundStatusFilter"/> narrows by <c>Orders.RefundStatus</c>.
     /// </summary>
     public async Task<RefundCaseOrderPage> ListCancelledOrdersForRefundCasesAsync(
         string tenantId,
         string storeId,
+        RefundStatusListFilter? refundStatusFilter,
         string? cursor,
         int limit,
         CancellationToken cancellationToken = default)
@@ -250,7 +251,7 @@ public sealed class OrderQueryStore
         var lim = Math.Clamp(limit, 1, 100);
         var take = lim + 1;
 
-        if (!TryDecodeCursor(cursor, out var cursorCreated, out var cursorId))
+        if (!OrderListCursorCodec.TryDecode(cursor, out var cursorCreated, out var cursorId))
             throw new ArgumentException("Invalid cursor.", nameof(cursor));
 
         await using var connection = new NpgsqlConnection(_connectionString);
@@ -259,6 +260,9 @@ public sealed class OrderQueryStore
         const string sql = """
             SELECT
                 "Id"::uuid AS Id,
+                "TenantId" AS TenantId,
+                "StoreId" AS StoreId,
+                "CustomerId" AS CustomerId,
                 "PaymentIntentId" AS PaymentIntentId,
                 "Total" AS Total,
                 "Currency" AS Currency,
@@ -269,8 +273,19 @@ public sealed class OrderQueryStore
                 "CreatedAt" AS CreatedAt
             FROM "Orders"
             WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId
-              AND "Status" = 'Cancelled'
+              AND "Status" IN ('Cancelled', 'AdminCancelled', 'UserCancelled')
               AND "PaymentIntentId" IS NOT NULL
+              AND (
+                  @FilterNone = TRUE
+                  OR (
+                      @FilterPending = TRUE AND (
+                          "RefundStatus" IS NULL
+                          OR TRIM(COALESCE("RefundStatus", '')) = ''
+                          OR LOWER(TRIM("RefundStatus")) IN ('pending_refund', 'pending')
+                      )
+                  )
+                  OR (@FilterExact IS NOT NULL AND "RefundStatus" = @FilterExact)
+              )
               AND (
                   @HasCursor = FALSE
                   OR ("CreatedAt", "Id") < (@CursorCreated::timestamptz, @CursorId::uuid)
@@ -284,6 +299,9 @@ public sealed class OrderQueryStore
             {
                 TenantId = tenantId,
                 StoreId = storeId,
+                FilterNone = refundStatusFilter is null,
+                FilterPending = refundStatusFilter?.MatchPending == true,
+                FilterExact = refundStatusFilter?.ExactDbValue,
                 HasCursor = cursorCreated.HasValue && cursorId.HasValue,
                 CursorCreated = cursorCreated,
                 CursorId = cursorId,
@@ -298,11 +316,51 @@ public sealed class OrderQueryStore
         if (hasMore && rows.Count > 0)
         {
             var last = rows[^1];
-            next = EncodeCursor(last.CreatedAt, last.Id);
+            next = OrderListCursorCodec.Encode(AsUtcOffset(last.CreatedAt), last.Id);
         }
 
         return new RefundCaseOrderPage(rows, next);
     }
+
+    /// <summary>DAI-653 — single cancelled order row suitable for refund-case read, or <see langword="null"/>.</summary>
+    public async Task<RefundCaseOrderRow?> TryGetRefundCaseOrderAsync(
+        string tenantId,
+        string storeId,
+        Guid orderId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT
+                "Id"::uuid AS Id,
+                "TenantId" AS TenantId,
+                "StoreId" AS StoreId,
+                "CustomerId" AS CustomerId,
+                "PaymentIntentId" AS PaymentIntentId,
+                "Total" AS Total,
+                "Currency" AS Currency,
+                "RefundStatus" AS RefundStatus,
+                "RefundRemark" AS RefundRemark,
+                "RefundedAt" AS RefundedAt,
+                "UpdatedAt" AS UpdatedAt,
+                "CreatedAt" AS CreatedAt
+            FROM "Orders"
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
+              AND "Status" IN ('Cancelled', 'AdminCancelled', 'UserCancelled')
+              AND "PaymentIntentId" IS NOT NULL
+            """;
+
+        return await connection.QuerySingleOrDefaultAsync<RefundCaseOrderRow>(
+            new CommandDefinition(sql, new { Id = orderId, TenantId = tenantId, StoreId = storeId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    private static DateTimeOffset AsUtcOffset(DateTime utcOrUnspecified) =>
+        utcOrUnspecified.Kind == DateTimeKind.Unspecified
+            ? new DateTimeOffset(DateTime.SpecifyKind(utcOrUnspecified, DateTimeKind.Utc))
+            : new DateTimeOffset(utcOrUnspecified.ToUniversalTime());
 
     private static bool TryMapApiStatusToDb(string api, out string db)
     {
@@ -323,48 +381,6 @@ public sealed class OrderQueryStore
             _ => "",
         };
         return db.Length > 0;
-    }
-
-    private static string EncodeCursor(DateTimeOffset createdAt, Guid id)
-    {
-        var raw = $"{createdAt:O}|{id:D}";
-        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(raw));
-        return b64.TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
-
-    private static bool TryDecodeCursor(string? cursor, out DateTimeOffset? createdAt, out Guid? id)
-    {
-        createdAt = null;
-        id = null;
-        if (string.IsNullOrWhiteSpace(cursor))
-            return true;
-
-        try
-        {
-            var padded = cursor.Replace('-', '+').Replace('_', '/');
-            switch (padded.Length % 4)
-            {
-                case 2: padded += "=="; break;
-                case 3: padded += "="; break;
-            }
-
-            var bytes = Convert.FromBase64String(padded);
-            var s = Encoding.UTF8.GetString(bytes);
-            var pipe = s.IndexOf('|', StringComparison.Ordinal);
-            if (pipe <= 0 || pipe >= s.Length - 1)
-                return false;
-            if (!DateTimeOffset.TryParse(s.AsSpan(0, pipe), null, System.Globalization.DateTimeStyles.RoundtripKind, out var ca))
-                return false;
-            if (!Guid.TryParse(s.AsSpan(pipe + 1), out var gid))
-                return false;
-            createdAt = ca;
-            id = gid;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static DateTimeOffset ToUtcOffset(DateTime createdAt) =>
@@ -446,14 +462,20 @@ public sealed class OrderQueryStore
 
     public sealed record RefundCaseOrderPage(IReadOnlyList<RefundCaseOrderRow> Items, string? NextCursor);
 
-    public sealed record RefundCaseOrderRow(
-        Guid Id,
-        string? PaymentIntentId,
-        decimal Total,
-        string Currency,
-        string? RefundStatus,
-        string RefundRemark,
-        DateTimeOffset? RefundedAt,
-        DateTimeOffset UpdatedAt,
-        DateTimeOffset CreatedAt);
+    /// <summary>Row for refund-case list query — <see cref="DateTime"/> fields match Dapper/Npgsql reader types.</summary>
+    public sealed class RefundCaseOrderRow
+    {
+        public Guid Id { get; set; }
+        public string TenantId { get; set; } = "";
+        public string StoreId { get; set; } = "";
+        public string CustomerId { get; set; } = "";
+        public string? PaymentIntentId { get; set; }
+        public decimal Total { get; set; }
+        public string Currency { get; set; } = "";
+        public string? RefundStatus { get; set; }
+        public string RefundRemark { get; set; } = "";
+        public DateTime? RefundedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
 }

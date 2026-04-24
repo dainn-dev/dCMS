@@ -226,8 +226,8 @@ export function createPromotionColumns(
           <button
             type="button"
             className="rounded p-1.5 text-on-surface-variant transition-all hover:bg-white hover:text-error"
-            aria-label="Delete"
-            title="Delete promo code"
+            aria-label="Archive"
+            title="Archive promo code"
             onClick={() => onDelete?.(row.original.id)}
           >
             <IconDelete className="h-[18px] w-[18px]" />

@@ -37,6 +37,8 @@ public sealed class SqlCampaignPersistence(string connectionString) : ICampaignP
         public int       Conversions          { get; init; }
         public DateTime  CreatedAt            { get; init; }
         public DateTime  UpdatedAt            { get; init; }
+        public string?   SubmittedByUserId    { get; init; }
+        public DateTime? SubmittedAt          { get; init; }
 
         public CampaignRow ToModel() => new(
             Id, TenantId, Code, NameJson, EditorKind, WorkflowState, Channel,
@@ -46,7 +48,9 @@ public sealed class SqlCampaignPersistence(string connectionString) : ICampaignP
             QualifiersJson, MechanicsJson, PromotionDetailsJson,
             Budget, Audience, Conversions,
             new DateTimeOffset(CreatedAt, TimeSpan.Zero),
-            new DateTimeOffset(UpdatedAt, TimeSpan.Zero));
+            new DateTimeOffset(UpdatedAt, TimeSpan.Zero),
+            SubmittedByUserId,
+            SubmittedAt.HasValue ? new DateTimeOffset(SubmittedAt.Value, TimeSpan.Zero) : null);
     }
 
     private const string CampaignCols = """
@@ -54,6 +58,13 @@ public sealed class SqlCampaignPersistence(string connectionString) : ICampaignP
         "StartDate","EndDate","ActiveDaysJson","ActiveMonthsJson",
         "QualifiersJson","MechanicsJson","PromotionDetailsJson",
         "Budget","Audience","Conversions","CreatedAt","UpdatedAt"
+        """;
+
+    private const string CampaignColsAliased = """
+        c."Id",c."TenantId",c."Code",c."NameJson",c."EditorKind",c."WorkflowState",c."Channel",
+        c."StartDate",c."EndDate",c."ActiveDaysJson",c."ActiveMonthsJson",
+        c."QualifiersJson",c."MechanicsJson",c."PromotionDetailsJson",
+        c."Budget",c."Audience",c."Conversions",c."CreatedAt",c."UpdatedAt"
         """;
 
     // ── List ──────────────────────────────────────────────────────────────────
@@ -64,32 +75,58 @@ public sealed class SqlCampaignPersistence(string connectionString) : ICampaignP
     {
         var p = new DynamicParameters();
         p.Add("TenantId", tenantId);
-        var clauses = new List<string> { "\"TenantId\" = @TenantId" };
+        var clauses = new List<string> { "c.\"TenantId\" = @TenantId" };
 
-        if (!string.IsNullOrWhiteSpace(status))  { clauses.Add("\"WorkflowState\" = @Status");  p.Add("Status",  status); }
-        if (!string.IsNullOrWhiteSpace(channel)) { clauses.Add("\"Channel\" = @Channel");        p.Add("Channel", channel); }
+        if (!string.IsNullOrWhiteSpace(status))  { clauses.Add("c.\"WorkflowState\" = @Status");  p.Add("Status",  status); }
+        if (!string.IsNullOrWhiteSpace(channel)) { clauses.Add("c.\"Channel\" = @Channel");        p.Add("Channel", channel); }
         if (!string.IsNullOrWhiteSpace(search))
         {
-            clauses.Add("(\"Code\" ILIKE @Search OR \"NameJson\" ILIKE @Search OR \"Audience\" ILIKE @Search)");
+            clauses.Add("(c.\"Code\" ILIKE @Search OR c.\"NameJson\" ILIKE @Search OR c.\"Audience\" ILIKE @Search)");
             p.Add("Search", $"%{search.Trim()}%");
         }
 
         var where = "WHERE " + string.Join(" AND ", clauses);
+        var pendingApproval = string.Equals(status, "pending_approval", StringComparison.OrdinalIgnoreCase);
         await using var conn = new NpgsqlConnection(_cs);
 
         var total = await conn.ExecuteScalarAsync<int>(
-            new CommandDefinition($"""SELECT COUNT(*)::INT FROM "Campaigns" {where}""", p,
+            new CommandDefinition($"""SELECT COUNT(*)::INT FROM "Campaigns" c {where}""", p,
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         p.Add("PageSize", pageSize);
         p.Add("Offset", Math.Max(0, page - 1) * pageSize);
 
+        var listSql = pendingApproval
+            ? $"""
+              SELECT {CampaignColsAliased},
+                     h."ActorUserId" AS "SubmittedByUserId",
+                     h."CreatedAt"   AS "SubmittedAt"
+              FROM "Campaigns" c
+              LEFT JOIN LATERAL (
+                  SELECT "ActorUserId", "CreatedAt"
+                  FROM "CampaignWorkflowHistory"
+                  WHERE "CampaignId" = c."Id"
+                    AND "TenantId"   = c."TenantId"
+                    AND "ToState"    = 'pending_approval'
+                  ORDER BY "CreatedAt" DESC
+                  LIMIT 1
+              ) h ON TRUE
+              {where}
+              ORDER BY c."UpdatedAt" DESC
+              LIMIT @PageSize OFFSET @Offset
+              """
+            : $"""
+              SELECT {CampaignColsAliased},
+                     NULL::TEXT AS "SubmittedByUserId",
+                     NULL::TIMESTAMPTZ AS "SubmittedAt"
+              FROM "Campaigns" c
+              {where}
+              ORDER BY c."UpdatedAt" DESC
+              LIMIT @PageSize OFFSET @Offset
+              """;
+
         var rows = await conn.QueryAsync<CampaignDapperRow>(
-            new CommandDefinition($"""
-                SELECT {CampaignCols} FROM "Campaigns" {where}
-                ORDER BY "UpdatedAt" DESC
-                LIMIT @PageSize OFFSET @Offset
-                """, p, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            new CommandDefinition(listSql, p, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return (rows.Select(r => r.ToModel()).ToList(), total);
     }

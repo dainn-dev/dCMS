@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode } from "react";
-import { IconBolt, IconBox, IconEditNote, IconHelp, IconLocalOffer } from "../../orders/icons";
+import { IconBolt, IconBox, IconHelp, IconLocalOffer } from "../../orders/icons";
 
-export type ApprovalPageId = "product-approval" | "content-approval" | "campaign-approval" | "promo-approval";
+export type ApprovalPageId = "product-approval" | "campaign-approval" | "promo-approval";
 
 type NavItem = {
   id: ApprovalPageId;
@@ -12,7 +12,6 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { id: "product-approval", label: "Product Approval", Icon: IconBox, pendingCount: 5 },
-  { id: "content-approval", label: "Content Approval", Icon: IconEditNote, pendingCount: 2 },
   { id: "campaign-approval", label: "Campaign Approval", Icon: IconBolt, pendingCount: 3 },
   { id: "promo-approval", label: "Promotion Approval", Icon: IconLocalOffer, pendingCount: 4 },
 ];
@@ -25,8 +24,6 @@ type Props = {
   children: ReactNode;
   /** Live pending count for product approval (sidebar badge). Falls back to demo value when unset. */
   productApprovalPendingCount?: number;
-  /** Live pending count for content approval (sidebar badge). Falls back to demo value when unset. */
-  contentApprovalPendingCount?: number;
   /** Live pending count for campaign approval (sidebar badge). Falls back to demo value when unset. */
   campaignApprovalPendingCount?: number;
   /** Live pending count for promotion / promo code approval (sidebar badge). Falls back to demo value when unset. */
@@ -38,7 +35,6 @@ export function ApprovalLayout({
   onPageChange,
   children,
   productApprovalPendingCount,
-  contentApprovalPendingCount,
   campaignApprovalPendingCount,
   promoApprovalPendingCount,
 }: Props) {
@@ -58,8 +54,6 @@ export function ApprovalLayout({
             let pendingCount = item.pendingCount;
             if (item.id === "product-approval" && productApprovalPendingCount !== undefined) {
               pendingCount = productApprovalPendingCount;
-            } else if (item.id === "content-approval" && contentApprovalPendingCount !== undefined) {
-              pendingCount = contentApprovalPendingCount;
             } else if (item.id === "campaign-approval" && campaignApprovalPendingCount !== undefined) {
               pendingCount = campaignApprovalPendingCount;
             } else if (item.id === "promo-approval" && promoApprovalPendingCount !== undefined) {
@@ -84,7 +78,7 @@ export function ApprovalLayout({
                     className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold tabular-nums ${
                       active ? "bg-red-200 text-red-900" : "bg-stone-200 text-stone-700"
                     }`}
-                    title="Pending items (demo)"
+                    title="Pending items"
                   >
                     {pendingCount > 99 ? "99+" : pendingCount}
                   </span>

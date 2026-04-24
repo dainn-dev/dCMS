@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IconArrowBack,
   IconCheckCircle,
@@ -8,22 +8,26 @@ import {
   IconSave,
   IconSearch,
 } from "../../../orders/icons";
-
-// TODO: Replace with real API calls:
-//   GET  /umbraco/dcms/api/access/tenants/{tenantId}  (edit mode)
-//   POST /umbraco/dcms/api/access/tenants              (add mode)
-//   PUT  /umbraco/dcms/api/access/tenants/{tenantId}   (edit mode)
+import {
+  createTenant,
+  updateTenant,
+  validateTenantCode,
+  type TenantRow,
+} from "../../api/tenantsApi";
 
 const labelBase =
   "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider mb-1";
 const inputBase =
   "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-2 px-3 text-xs focus:ring-1 focus:ring-primary outline-none";
+const hintText = "mt-1 text-[10px] text-on-surface-variant leading-relaxed";
 const sectionTitleRow =
   "text-sm font-bold uppercase tracking-widest text-primary border-b border-outline-variant/20 pb-2 mb-5";
 
-type TenantFormPageProps = {
+export type TenantFormPageProps = {
   mode: "add" | "edit";
-  tenantId?: string;
+  /** Set when <c>mode === "edit"</c> — row from list (DAI-668 API). */
+  tenant?: TenantRow;
+  authToken?: string;
   onSave?: () => void;
   onCancel?: () => void;
 };
@@ -102,13 +106,13 @@ function ImageSlot({
 const MOCK_BRANDS = ["Luxe Heritage Group", "Velocity Tech Systems", "Nomad Consulting Ltd.", "Aura Essentials", "Urban Edge Collective"];
 const MOCK_CATEGORIES = ["Electronics", "Fashion", "Beauty", "Home & Living", "Sports", "Food & Beverage"];
 
-export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormPageProps) {
+export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: TenantFormPageProps) {
   const isAdd = mode === "add";
 
   // General
-  const [code, setCode] = useState(isAdd ? "" : `T-${tenantId ?? "001"}`);
-  const [name, setName] = useState(isAdd ? "" : "Sample Tenant");
-  const [description, setDescription] = useState(isAdd ? "" : "A demo tenant for backoffice review.");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [overview, setOverview] = useState("");
   const [additionalInfo, setAdditionalInfo] = useState("");
 
@@ -131,12 +135,51 @@ export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormP
   const [contactNo, setContactNo] = useState("");
   const [address, setAddress] = useState("");
 
+  /** Persisted field — maps to <c>dcms_tenants.brand_count</c>. */
+  const [portfolioBrandCount, setPortfolioBrandCount] = useState(0);
+  const [active, setActive] = useState(true);
+
   // Brands
   const [brandInput, setBrandInput] = useState("");
   const [brandDropOpen, setBrandDropOpen] = useState(false);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
 
   const [showSuccess, setShowSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSaveError(null);
+    if (isAdd) {
+      setCode("");
+      setName("");
+      setDescription("");
+      setOverview("");
+      setAdditionalInfo("");
+      setSelectedCategories([]);
+      setNavStyle("Standard");
+      setDistributionCenter("");
+      setLogoSrc("");
+      setImageSrc("");
+      setOfficeContact1("");
+      setOfficeContact2("");
+      setContactName("");
+      setContactEmail("");
+      setContactNo("");
+      setAddress("");
+      setPortfolioBrandCount(0);
+      setActive(true);
+      setSelectedBrands([]);
+      return;
+    }
+    if (!tenant) return;
+    setCode(tenant.code);
+    setName(tenant.name);
+    setContactName(tenant.contactName);
+    setContactEmail(tenant.contactEmail);
+    setPortfolioBrandCount(tenant.brandCount);
+    setActive(tenant.active);
+  }, [isAdd, tenant?.id]);
 
   const filteredCategories = MOCK_CATEGORIES.filter((c) =>
     c.toLowerCase().includes(categoryInput.toLowerCase()),
@@ -163,13 +206,51 @@ export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormP
     setSelectedBrands((prev) => prev.filter((b) => b !== brand));
   }
 
-  function handleSave() {
-    if (!name.trim()) return;
-    setShowSuccess(true);
+  async function handleSave() {
+    setSaveError(null);
+    const codeErr = validateTenantCode(code);
+    if (codeErr) {
+      setSaveError(codeErr);
+      return;
+    }
+    if (!name.trim()) {
+      setSaveError("Name is required.");
+      return;
+    }
+    if (!isAdd && !tenant?.id) {
+      setSaveError("Missing tenant id.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        code: code.trim(),
+        name: name.trim(),
+        contactName: contactName.trim(),
+        contactEmail: contactEmail.trim(),
+        brandCount: Math.max(0, Math.floor(portfolioBrandCount)),
+        active,
+      };
+      if (isAdd) {
+        await createTenant(payload, authToken);
+      } else {
+        await updateTenant(tenant!.id, payload, authToken);
+      }
+      setShowSuccess(true);
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+    <div className="relative -m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+      {saving && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
@@ -193,6 +274,11 @@ export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormP
           <h2 className="text-2xl font-bold tracking-tight text-on-surface">
             {isAdd ? "Add New Tenant" : `Edit Tenant: ${name}`}
           </h2>
+          {saveError && (
+            <p className="mt-3 max-w-xl rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs font-medium text-error" role="alert">
+              {saveError}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button type="button" className="rounded-md border border-outline-variant/30 px-5 py-2 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high transition-colors" onClick={onCancel}>
@@ -200,9 +286,9 @@ export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormP
           </button>
           <button
             type="button"
-            disabled={!name.trim()}
+            disabled={!name.trim() || saving}
             className="flex items-center gap-2 rounded-md bg-primary px-6 py-2 text-xs font-bold uppercase tracking-widest text-on-primary shadow-lg shadow-primary/20 transition-all hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
           >
             <IconSave className="h-4 w-4 shrink-0" />
             {isAdd ? "Create Tenant" : "Save Changes"}
@@ -232,6 +318,24 @@ export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormP
               <label className={labelBase}>Name <span className="text-error">*</span></label>
               <input className={inputBase} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Global Enterprise Solutions" />
             </div>
+            {!isAdd && (
+              <div className="md:col-span-2">
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/20 bg-surface-container-low p-4 select-none hover:border-primary/30 transition-colors">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-primary shrink-0"
+                    checked={active}
+                    onChange={(e) => setActive(e.target.checked)}
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-on-surface">Active tenant</p>
+                    <p className="mt-0.5 text-[10px] text-on-surface-variant leading-relaxed">
+                      Inactive tenants remain in the database but should not be treated as operational Siêu thị.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
             <div className="md:col-span-2">
               <label className={labelBase}>Description</label>
               <textarea className={`${inputBase} resize-none`} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short tenant description." />
@@ -347,6 +451,21 @@ export function TenantFormPage({ mode, tenantId, onSave, onCancel }: TenantFormP
         {/* Brands */}
         <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm p-6">
           <h3 className={sectionTitleRow}>Brands</h3>
+          <div className="mb-5">
+            <label className={labelBase}>Portfolio brand count (saved to API)</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className={inputBase}
+              value={Number.isNaN(portfolioBrandCount) ? 0 : portfolioBrandCount}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPortfolioBrandCount(v === "" ? 0 : Math.max(0, parseInt(v, 10) || 0));
+              }}
+            />
+            <p className={hintText}>Stored on the tenant row as brand portfolio size (not tied to the mock brand picker below).</p>
+          </div>
           {selectedBrands.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-3">
               {selectedBrands.map((b) => (

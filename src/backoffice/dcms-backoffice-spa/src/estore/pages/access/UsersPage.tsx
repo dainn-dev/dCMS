@@ -11,8 +11,8 @@ import {
   IconShare,
   IconWarning,
 } from "../../../orders/icons";
+import { deleteUser, listUsers } from "../../api/usersApi";
 
-// TODO: Replace with real API call to GET /umbraco/dcms/api/access/users
 export type UserRow = {
   id: string;
   username: string;
@@ -22,19 +22,6 @@ export type UserRow = {
   active: boolean;
 };
 
-const DEMO_USERS: UserRow[] = [
-  { id: "u-001", username: "superadmin", name: "Super Admin", email: "superadmin@dcms.io", role: "IT Administrator", active: true },
-  { id: "u-002", username: "sys.admin", name: "System Administrator", email: "sysadmin@dcms.io", role: "System Administrator", active: true },
-  { id: "u-003", username: "ecom.mgr", name: "Ecommerce Manager", email: "ecom.mgr@dcms.io", role: "Ecommerce Manager", active: true },
-  { id: "u-004", username: "brand.mgr1", name: "Brand Manager One", email: "brand.mgr1@dcms.io", role: "Brand Manager", active: true },
-  { id: "u-005", username: "product.upload1", name: "Product Upload User", email: "product.upload1@dcms.io", role: "Product Upload", active: true },
-  { id: "u-006", username: "finance.user", name: "Finance User", email: "finance@dcms.io", role: "Finance", active: false },
-  { id: "u-007", username: "ops.user1", name: "Operations User", email: "ops1@dcms.io", role: "Operations", active: true },
-  { id: "u-008", username: "tenant.pm1", name: "Tenant Product Manager", email: "tenant.pm1@dcms.io", role: "Tenant Product Manager", active: true },
-  { id: "u-009", username: "guest.user", name: "Guest User", email: "guest@dcms.io", role: "Guest", active: false },
-  { id: "u-010", username: "inv.mgr1", name: "Inventory Manager", email: "inv.mgr1@dcms.io", role: "Tenant Inventory Manager", active: true },
-];
-
 type UsersPageProps = {
   onAddUser?: () => void;
   onEditUser?: (userId: string) => void;
@@ -42,10 +29,27 @@ type UsersPageProps = {
 };
 
 export function UsersPage({ onAddUser, onEditUser, onChangePassword }: UsersPageProps) {
-  const [rows, setRows] = useState<UserRow[]>(DEMO_USERS);
+  const [rows, setRows] = useState<UserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: "", visible: false });
+
+  const loadList = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const { items } = await listUsers({ pageSize: 200 });
+      setRows(items);
+    } catch (e: unknown) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadList(); }, [loadList]);
 
   useEffect(() => {
     if (!toast.visible) return;
@@ -74,9 +78,17 @@ export function UsersPage({ onAddUser, onEditUser, onChangePassword }: UsersPage
 
   function handleDeleteConfirm() {
     if (!deleteTarget) return;
-    setRows((prev) => prev.filter((r) => r.id !== deleteTarget.id));
-    setToast({ message: `User "${deleteTarget.username}" removed.`, visible: true });
+    const id = Number(deleteTarget.id);
+    const username = deleteTarget.username;
     setDeleteTarget(null);
+    deleteUser(id)
+      .then(() => {
+        setToast({ message: `User "${username}" removed.`, visible: true });
+        void loadList();
+      })
+      .catch((e: unknown) => {
+        setToast({ message: e instanceof Error ? e.message : "Delete failed", visible: true });
+      });
   }
 
   function exportToCSV() {
@@ -218,8 +230,17 @@ export function UsersPage({ onAddUser, onEditUser, onChangePassword }: UsersPage
         </div>
       </header>
 
-      <div className="flex-1 p-6">
-        <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search users…" />
+      <div className="flex-1 p-6 space-y-4">
+        {loadError && (
+          <div className="rounded-xl border border-error/25 bg-error/5 px-4 py-3 text-sm text-error">{loadError}</div>
+        )}
+        {loading ? (
+          <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-6 text-center text-sm text-on-surface-variant">
+            Loading users…
+          </div>
+        ) : (
+          <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search users…" />
+        )}
       </div>
 
       {/* Delete confirmation modal */}

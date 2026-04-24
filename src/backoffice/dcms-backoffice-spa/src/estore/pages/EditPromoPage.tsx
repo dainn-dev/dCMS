@@ -11,6 +11,14 @@ import {
 } from "../../orders/icons";
 import type { PromoListRow } from "../promotions-columns";
 import { MultiLangTextarea } from "../components/MultiLangField";
+import {
+  archivePromoCode,
+  createPromoCode,
+  getPromoCode,
+  submitPromoCode,
+  updatePromoCode,
+  type PromoCodePayload,
+} from "../api/promoCodesApi";
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
 const sectionCard = "rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm";
@@ -130,16 +138,41 @@ function promoTypeLabel(t: PromoType) {
   return "Standard Promo Code";
 }
 
+function toDatetimeLocalValue(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`;
+}
+
+function toIsoOrNull(local: string): string | null {
+  const t = local.trim();
+  if (!t) return null;
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function minSpendInputFromApi(s: string): string {
+  return (s || "").replace(/[$,]/g, "").trim();
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 type Props = {
   mode: "add" | "edit";
   promoType: PromoType;
   promo?: PromoListRow;
   onBack: () => void;
+  tenantId?: string;
+  authToken?: string;
 };
 
-export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
+export function EditPromoPage({ mode, promoType, promo, onBack, tenantId, authToken }: Props) {
   const isAdd = mode === "add";
+  const [detailLabel, setDetailLabel] = useState(() => promo?.promoType ?? "");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // ── General ───────────────────────────────────────────────────────────────
   const [promoCode, setPromoCode] = useState(promo?.code ?? "");
@@ -199,10 +232,23 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
   // ── Delete confirmation ───────────────────────────────────────────────────
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  function handleDeleteConfirm() {
+  async function handleDeleteConfirm() {
     setDeleteConfirmOpen(false);
-    setToast("Promo code deleted.");
-    setTimeout(() => onBack(), 1800);
+    if (!tenantId || !promo?.id) {
+      setToast("Nothing to archive.");
+      setTimeout(() => onBack(), 800);
+      return;
+    }
+    setSaving(true);
+    try {
+      await archivePromoCode(tenantId, promo.id, authToken);
+      setToast("Promo code archived.");
+      setTimeout(() => onBack(), 1200);
+    } catch (e: unknown) {
+      setToast(e instanceof Error ? e.message : "Archive failed");
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ── Actions dropdown ──────────────────────────────────────────────────────
@@ -224,16 +270,117 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  function handleSavePublish() {
-    setActionsOpen(false);
-    setToast("Promo code published successfully.");
-    setTimeout(() => onBack(), 1800);
+  useEffect(() => {
+    setDetailLabel(promo?.promoType ?? "");
+  }, [promo?.id, promo?.promoType]);
+
+  useEffect(() => {
+    if (!tenantId || !promo?.id || isAdd) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    getPromoCode(tenantId, promo.id, authToken)
+      .then((dto) => {
+        if (cancelled) return;
+        setPromoCode(dto.code);
+        setStartDate(toDatetimeLocalValue(dto.startDate));
+        setEndDate(toDatetimeLocalValue(dto.endDate));
+        setMinSpend(minSpendInputFromApi(dto.minSpend));
+        setDetailLabel((dto.promoTypeLabel ?? "").trim() || (promo?.promoType ?? ""));
+        const dt = (dto.discountType || "").toLowerCase();
+        if (dt === "percentage") {
+          setDiscountType("percent");
+          setDiscountAmount(dto.discountValue ?? "");
+        } else if (dt === "free_shipping") {
+          setDiscountType("fixed");
+          setDiscountAmount(dto.discountValue || "0");
+        } else {
+          setDiscountType("fixed");
+          setDiscountAmount(dto.discountValue ?? "");
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setToast(e instanceof Error ? e.message : "Failed to load promo");
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, promo?.id, promo?.promoType, isAdd, authToken]);
+
+  function resolveCodeForApi(): string {
+    if (promoType === "standard") return promoCode.trim().toUpperCase();
+    return codePrefix.trim().toUpperCase();
   }
 
-  function handleSaveApproval() {
+  function buildPayload(): PromoCodePayload | null {
+    const code = resolveCodeForApi();
+    if (!code) {
+      setToast(promoType === "standard" ? "Promo code is required." : "Promo code prefix is required.");
+      return null;
+    }
+    if (!startDate.trim()) {
+      setToast("Start date is required.");
+      return null;
+    }
+    const labelOut = isAdd
+      ? promoTypeLabel(promoType)
+      : (detailLabel.trim() || promo?.promoType || promoTypeLabel("standard"));
+    return {
+      code,
+      nameJson: "{}",
+      discountType: discountType === "percent" ? "percentage" : "fixed",
+      discountValue: discountAmount.trim() || null,
+      promoTypeLabel: labelOut,
+      minSpend: minSpendInputFromApi(minSpend),
+      startDate: toIsoOrNull(startDate),
+      endDate: toIsoOrNull(endDate),
+    };
+  }
+
+  async function savePromoCore(): Promise<PromoListRow | null> {
+    if (!tenantId) {
+      setToast("Missing tenantId. Cannot save promo.");
+      return null;
+    }
+    const payload = buildPayload();
+    if (!payload) return null;
+    setSaving(true);
+    try {
+      if (isAdd) return await createPromoCode(tenantId, payload, authToken);
+      if (!promo?.id) return null;
+      return await updatePromoCode(tenantId, promo.id, payload, authToken);
+    } catch (e: unknown) {
+      setToast(e instanceof Error ? e.message : "Save failed");
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSavePublish() {
     setActionsOpen(false);
-    setToast("Promo code sent for approval.");
-    setTimeout(() => onBack(), 1800);
+    const row = await savePromoCore();
+    if (!row) return;
+    setToast("Promo saved.");
+    setTimeout(() => onBack(), 1200);
+  }
+
+  async function handleSaveApproval() {
+    setActionsOpen(false);
+    const row = await savePromoCore();
+    if (!row || !tenantId) return;
+    setSaving(true);
+    try {
+      await submitPromoCode(tenantId, row.id, authToken);
+      setToast("Promo code sent for approval.");
+      setTimeout(() => onBack(), 1200);
+    } catch (e: unknown) {
+      setToast(e instanceof Error ? e.message : "Submit for approval failed");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleChangeHistory() {
@@ -243,7 +390,12 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+    <div className="-m-6 relative flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+      {(detailLoading || saving) && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
 
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center justify-between border-b border-outline-variant/15 bg-surface px-6 py-4">
@@ -279,7 +431,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                onClick={handleSavePublish}
+                onClick={() => void handleSavePublish()}
               >
                 <IconCheckCircle className="h-4 w-4 shrink-0 text-primary" />
                 Save and Publish
@@ -287,7 +439,7 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                onClick={handleSaveApproval}
+                onClick={() => void handleSaveApproval()}
               >
                 <IconCheckCircle className="h-4 w-4 shrink-0 text-secondary" />
                 Save and Request for Approval
@@ -301,15 +453,19 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                 <IconSearch className="h-4 w-4 shrink-0 text-on-surface-variant" />
                 Show Change History
               </button>
-              <div className="my-1 border-t border-outline-variant/10" />
-              <button
-                type="button"
-                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-error hover:bg-error/5 transition-colors"
-                onClick={() => { setActionsOpen(false); setDeleteConfirmOpen(true); }}
-              >
-                <IconDelete className="h-4 w-4 shrink-0 text-error" />
-                Delete
-              </button>
+              {!isAdd && (
+                <>
+                  <div className="my-1 border-t border-outline-variant/10" />
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-error hover:bg-error/5 transition-colors"
+                    onClick={() => { setActionsOpen(false); setDeleteConfirmOpen(true); }}
+                  >
+                    <IconDelete className="h-4 w-4 shrink-0 text-error" />
+                    Archive
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -959,9 +1115,9 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
                 <IconWarning className="h-5 w-5 text-error" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-on-surface">Delete Promo Code</h3>
+                <h3 className="text-sm font-bold text-on-surface">Archive promo code</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
-                  Are you sure you want to delete this promo code? This action cannot be undone.
+                  Archive this promo code? It will no longer apply at checkout but remains in the system for audit.
                 </p>
               </div>
             </div>
@@ -976,10 +1132,10 @@ export function EditPromoPage({ mode, promoType, promo, onBack }: Props) {
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 transition-opacity"
-                onClick={handleDeleteConfirm}
+                onClick={() => void handleDeleteConfirm()}
               >
                 <IconDelete className="h-4 w-4 shrink-0" />
-                Delete
+                Archive
               </button>
             </div>
           </div>

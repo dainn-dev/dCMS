@@ -10,6 +10,7 @@ public sealed class AccessModuleMigrationPlan : MigrationPlan
     public AccessModuleMigrationPlan() : base(PlanName)
     {
         From(string.Empty)
-            .To<AccessModuleMigration>("access-v1.0");
+            .To<AccessModuleMigration>("access-v1.0")
+            .To<AccessModuleTenantsAndRolesMetaMigration>("access-v1.1");
     }
 }

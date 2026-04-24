@@ -7,7 +7,9 @@
 
   <ItemGroup>
     <!-- Umbraco brings Microsoft.Data.SqlClient. appsettings uses localhost:14333 (compose SQL Server publish); in-container compose sets Server=sqlserver,1433. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.*" />
     <PackageReference Include="Umbraco.Cms" Version="16.5.1" />
+    <PackageReference Include="Yarp.ReverseProxy" Version="2.*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -47,9 +49,7 @@
   <Target Name="BuildFrontendSpa" BeforeTargets="BeforeBuild" Condition="'$(SkipFrontendBuild)' != 'true'">
     <Message Text="[dCMS] Building backoffice SPA from $(SpaDir)..." Importance="high" />
     <!-- Install deps only when node_modules is missing -->
-    <Exec Command="npm install --prefer-offline --no-audit --no-fund"
-          WorkingDirectory="$(SpaDir)"
-          Condition="!Exists('$(SpaDir)/node_modules')" />
+    <Exec Command="npm install --prefer-offline --no-audit --no-fund" WorkingDirectory="$(SpaDir)" Condition="!Exists('$(SpaDir)/node_modules')" />
     <Exec Command="npm run build" WorkingDirectory="$(SpaDir)" />
     <!-- npm run build already invokes build:orders + build:estore + build:dashboard via the top-level "build" script -->
 
