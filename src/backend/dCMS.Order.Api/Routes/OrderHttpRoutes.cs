@@ -73,7 +73,164 @@ public static class OrderHttpRoutes
             .WithTags("orders")
             .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
+
+        // DAI-651 Refund cases (Cancelled + PaymentTransaction) — no RefundCases table.
+        app.MapGet("/api/refund-cases", ListRefundCases)
+            .WithName("ListRefundCases")
+            .WithTags("refunds")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        app.MapPatch("/api/refund-cases/{orderId}", UpdateRefundCase)
+            .WithName("UpdateRefundCase")
+            .WithTags("refunds")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
     }
+
+    private static async Task<IResult> ListRefundCases(
+        HttpContext http,
+        [FromServices] OrderQueryStore orders,
+        [FromServices] PaymentTransactionQueryStore payments,
+        [FromQuery] string? cursor,
+        [FromQuery] int? limit,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        var lim = !limit.HasValue || limit.Value < 1 ? 20 : Math.Clamp(limit.Value, 1, 100);
+
+        try
+        {
+            var page = await orders.ListCancelledOrdersForRefundCasesAsync(tenantId, storeId, cursor, lim, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Enrich with latest payment transactions in a single round-trip to the Payment DB.
+            var orderIds = page.Items.Select(x => x.Id).ToList();
+            var txByOrder = await payments.GetLatestByOrderIdsAsync(orderIds, cancellationToken).ConfigureAwait(false);
+
+            var items = new List<RefundCaseListItemDto>(page.Items.Count);
+            foreach (var o in page.Items)
+            {
+                if (!txByOrder.TryGetValue(o.Id, out var tx))
+                    continue; // not a refund case per US definition
+
+                var status = MapRefundStatusToUi(o.RefundStatus);
+                var requestDate = o.UpdatedAt.ToString("yyyy-MM-dd");
+                var refundDate = o.RefundedAt?.ToString("yyyy-MM-dd");
+
+                items.Add(new RefundCaseListItemDto(
+                    RefundNo: BuildRefundNo(o.Id),
+                    ReferenceHash: BuildReferenceHash(o.Id),
+                    OrderId: o.Id.ToString(),
+                    CustomerName: "",
+                    CustomerPhone: "",
+                    CustomerEmail: "",
+                    Amount: tx.Amount,
+                    Currency: tx.Currency ?? o.Currency ?? "USD",
+                    PaymentMethod: string.IsNullOrWhiteSpace(tx.PaymentMethod) ? "unknown" : tx.PaymentMethod,
+                    PaymentReferenceNo: string.IsNullOrWhiteSpace(tx.PaymentIntentId) ? (o.PaymentIntentId ?? "") : tx.PaymentIntentId,
+                    RequestDate: requestDate,
+                    RefundDate: refundDate,
+                    Status: status,
+                    Remark: o.RefundRemark ?? ""));
+            }
+
+            return Results.Json(new { items, nextCursor = page.NextCursor });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_QUERY", message = ex.Message } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> UpdateRefundCase(
+        string orderId,
+        UpdateRefundCaseRequest body,
+        HttpContext http,
+        [FromServices] IConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (!Guid.TryParse(orderId, out _))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ORDER_ID", message = "orderId must be a UUID." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var mapped = MapUiRefundStatusToDb(body.Status);
+        if (mapped is null)
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_STATUS", message = "Invalid refund status." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var refundedAt = mapped == "success" ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
+
+        var cs = configuration.GetConnectionString("Order")
+                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+
+        await using var uow = new OrderUnitOfWork(cs);
+        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rows = await uow.UpdateRefundTrackingAsync(
+                tenantId,
+                storeId,
+                orderId,
+                mapped,
+                body.Remark ?? "",
+                refundedAt,
+                DateTimeOffset.UtcNow,
+                cancellationToken).ConfigureAwait(false);
+
+            if (rows == 0)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "NOT_FOUND", message = "Cancelled order not found, or not cancellable for refunds." } },
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return Results.Json(new { orderId, status = body.Status });
+        }
+        catch
+        {
+            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static string BuildRefundNo(Guid orderId) => $"REF-{orderId.ToString("N")[..12].ToUpperInvariant()}";
+    private static string BuildReferenceHash(Guid orderId) => $"#{orderId.ToString("N")[..6].ToUpperInvariant()}";
+
+    private static string MapRefundStatusToUi(string? raw) =>
+        (raw ?? "").Trim().ToLowerInvariant() switch
+        {
+            "success" => "Success",
+            "failed" => "Failed",
+            "pending_refund" or "pending" => "Pending Refund",
+            "" => "Pending Refund",
+            _ => "Pending Refund",
+        };
+
+    private static string? MapUiRefundStatusToDb(string? ui) =>
+        (ui ?? "").Trim().ToLowerInvariant() switch
+        {
+            "success" => "success",
+            "failed" => "failed",
+            "pending refund" => "pending_refund",
+            "pending_refund" => "pending_refund",
+            _ => null,
+        };
 
     private static async Task<IResult> GetOrderById(
         string orderId,

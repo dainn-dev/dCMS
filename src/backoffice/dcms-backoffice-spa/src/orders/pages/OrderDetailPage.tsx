@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconArrowBack,
   IconBolt,
@@ -14,7 +14,16 @@ import {
   IconShipping,
   IconVisibility,
 } from "../icons";
-import { cancelOrder, deliverOrder, getOrderDetail, mapApiStatusToUiLabel, shipOrder } from "../api/ordersApi";
+import {
+  cancelOrder,
+  deliverOrder,
+  getOrderDetail,
+  isFailureStatus,
+  mapApiStatusToUiLabel,
+  resolveFailedOrder,
+  retryFailedOrder,
+  shipOrder,
+} from "../api/ordersApi";
 
 type OrderMode = "view" | "action";
 
@@ -127,19 +136,14 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
   });
   const [deliveryDraft, setDeliveryDraft] = useState(delivery);
 
-  // Item-level statuses — confirmed values
-  const [itemStatuses, setItemStatuses] = useState<Record<string, OrderStatus>>({
-    "AV-MAX-0019": "Open Order",
-    "WTCH-H-042": "Open Order",
-    "AUD-ZW-100": "Open Order",
-  });
-  // Item-level status drafts — staged (pending Update click)
-  const [itemStatusDrafts, setItemStatusDrafts] = useState<Record<string, OrderStatus>>({
-    "AV-MAX-0019": "Open Order",
-    "WTCH-H-042": "Open Order",
-    "AUD-ZW-100": "Open Order",
-  });
+  // Item-level statuses — keyed by lineId, seeded from detail.lines on load
+  const [itemStatuses, setItemStatuses] = useState<Record<string, OrderStatus>>({});
+  const [itemStatusDrafts, setItemStatusDrafts] = useState<Record<string, OrderStatus>>({});
   const [cancelledItems, setCancelledItems] = useState<Set<string>>(new Set());
+
+  // Failure actions
+  const [resolveNoteModalOpen, setResolveNoteModalOpen] = useState(false);
+  const [resolveNote, setResolveNote] = useState("");
 
   // Remark input
   const [remarkText, setRemarkText] = useState("");
@@ -166,6 +170,14 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
         if (cancelled) return;
         setDetail(dto);
         setOrderStatus(mapApiStatusToUiLabel(dto.status) as OrderStatus);
+
+        // Seed item statuses from real lines
+        const initialStatuses: Record<string, OrderStatus> = {};
+        for (const line of dto.lines ?? []) {
+          initialStatuses[line.lineId] = "Open Order";
+        }
+        setItemStatuses(initialStatuses);
+        setItemStatusDrafts(initialStatuses);
 
         // Hydrate customer (Order API does not return full profile yet)
         const ship = dto.shippingAddress;
@@ -272,6 +284,45 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
     }
   }
 
+  function fmtMoney(amount: number, currency: string): string {
+    try {
+      return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount);
+    } catch {
+      return `${amount} ${currency}`;
+    }
+  }
+
+  // ── Failure actions ────────────────────────────────────────────────────────
+  async function runRetry() {
+    if (!tenantId || !storeId) return;
+    setActionBusy(true);
+    try {
+      await retryFailedOrder(tenantId, storeId, orderId, authToken);
+      setActionToast({ kind: "success", message: `Order ${orderId} queued for retry` });
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Retry failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runResolve() {
+    if (!tenantId || !storeId) return;
+    setActionBusy(true);
+    setResolveNoteModalOpen(false);
+    try {
+      await resolveFailedOrder(tenantId, storeId, orderId, resolveNote.trim() || null, authToken);
+      setActionToast({ kind: "success", message: `Order ${orderId} resolved` });
+      setResolveNote("");
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Resolve failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   function handleGroupStatusChange(status: OrderStatus) {
     setOrderStatus(status);
     setGroupActionsOpen(false);
@@ -323,6 +374,20 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
   }
 
   const canEdit = isAction && !isLocked;
+
+  // ── Derived line items from API ───────────────────────────────────────────
+  const displayedLines = useMemo(() => {
+    if (!detail?.lines?.length) return [];
+    return detail.lines.map((l) => ({
+      lineId:    l.lineId,
+      sku:       l.variantId ?? l.productId,
+      name:      l.productNameSnapshot ?? l.productId,
+      brand:     (l.variantSnapshot?.["brand"] as string | undefined) ?? "—",
+      qty:       l.quantity,
+      unitPrice: fmtMoney(l.unitPrice.amount, l.unitPrice.currency),
+      total:     fmtMoney(l.lineTotal.amount, l.lineTotal.currency),
+    }));
+  }, [detail?.lines]);
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -389,6 +454,27 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
         <div className="flex gap-2 shrink-0 flex-wrap">
           {isAction && (
             <>
+              {/* Failure-state actions */}
+              {detail && isFailureStatus(mapApiStatusToUiLabel(detail.status)) && (
+                <>
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-amber-500 text-white hover:opacity-90 disabled:opacity-40"
+                    disabled={actionBusy || !tenantId || !storeId}
+                    onClick={() => void runRetry()}
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg border border-outline-variant/30 text-on-surface hover:bg-surface-container-high disabled:opacity-40"
+                    disabled={actionBusy || !tenantId || !storeId}
+                    onClick={() => setResolveNoteModalOpen(true)}
+                  >
+                    Resolve
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-error text-on-error hover:opacity-90 disabled:opacity-40"
@@ -532,6 +618,28 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
               Order Locked — No Further Edits
             </span>
           )}
+        </div>
+      )}
+
+      {/* Failure context banner — DAI-648 */}
+      {detail?.failureReason && (
+        <div className="flex items-start gap-3 rounded-xl border border-error/30 bg-error/5 px-5 py-4">
+          <span className="mt-0.5 shrink-0 text-error text-lg leading-none">⚠</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-error">Order Failed</p>
+            <p className="text-xs text-error/80 mt-1">{detail.failureReason}</p>
+            {detail.failureErrorCode && (
+              <p className="mt-0.5 font-mono text-[10px] text-error/60">Code: {detail.failureErrorCode}</p>
+            )}
+            <div className="mt-1 flex flex-wrap gap-4 text-[10px] text-error/60">
+              {detail.failedAt && (
+                <span>Failed: {new Date(detail.failedAt).toLocaleString()}</span>
+              )}
+              {detail.retryCount > 0 && (
+                <span>Retries: {detail.retryCount}</span>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -982,31 +1090,37 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
           <div className="space-y-3">
             <div className="flex justify-between text-xs">
               <span className="opacity-80">Order Amount</span>
-              <span className="font-medium">$1,240.00</span>
+              <span className="font-medium">
+                {detail?.lines?.length
+                  ? fmtMoney(
+                      detail.lines.reduce((s, l) => s + l.lineTotal.amount, 0),
+                      detail.total?.currency ?? "USD"
+                    )
+                  : "—"}
+              </span>
             </div>
             <div className="flex justify-between text-xs">
               <span className="opacity-80">Delivery Fee</span>
-              <span className="font-medium">$25.00</span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="opacity-80">Handling Fee</span>
-              <span className="font-medium">$0.00</span>
+              {/* TODO: expose delivery fee from Order API */}
+              <span className="font-medium opacity-50">—</span>
             </div>
             <div className="flex justify-between text-xs">
               <span className="opacity-80">Promo Code Discount</span>
-              <span className="font-bold text-yellow-300">-$124.00</span>
+              {/* TODO: expose discount from Order API */}
+              <span className="font-bold text-yellow-300 opacity-50">—</span>
             </div>
             <div className="pt-3 mt-3 border-t border-white/20">
               <div className="flex justify-between items-baseline">
                 <span className="text-xs font-bold uppercase">Total Amount Payable</span>
-                <span className="text-xl font-extrabold tracking-tighter">$1,141.00</span>
+                <span className="text-xl font-extrabold tracking-tighter">
+                  {detail?.total
+                    ? fmtMoney(detail.total.amount, detail.total.currency)
+                    : "—"}
+                </span>
               </div>
             </div>
           </div>
-          <div className="mt-6 p-2 bg-white/10 rounded border border-white/10">
-            <p className="text-[10px] uppercase font-bold opacity-70">Promotion Code</p>
-            <p className="text-xs font-mono tracking-widest font-bold">EXECUTIVE-2023-FIRST</p>
-          </div>
+          {/* TODO: expose promo code from Order API */}
         </section>
 
         {/* Order Line Items */}
@@ -1016,7 +1130,9 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
               Order Line Items
             </h3>
             <div className="flex items-center gap-3">
-              <span className="text-[11px] text-on-surface-variant font-medium">3 Items Total</span>
+              <span className="text-[11px] text-on-surface-variant font-medium">
+                {displayedLines.length > 0 ? `${displayedLines.length} Item${displayedLines.length !== 1 ? "s" : ""}` : (loading ? "…" : "0 Items")}
+              </span>
               {canEdit && (
                 <button
                   type="button"
@@ -1044,15 +1160,22 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/10">
-                {lineItems.map((item) => {
-                  const isCancelled = cancelledItems.has(item.sku);
-                  const confirmedStatus = itemStatuses[item.sku];
-                  const draftStatus = itemStatusDrafts[item.sku];
+                {displayedLines.length === 0 && (
+                  <tr>
+                    <td colSpan={isAction ? 7 : 6} className="py-10 text-center text-sm text-on-surface-variant italic">
+                      {loading ? "Loading line items…" : "No line items available."}
+                    </td>
+                  </tr>
+                )}
+                {displayedLines.map((item) => {
+                  const isCancelled = cancelledItems.has(item.lineId);
+                  const confirmedStatus = itemStatuses[item.lineId] ?? "Open Order";
+                  const draftStatus = itemStatusDrafts[item.lineId] ?? "Open Order";
                   const isDirty = draftStatus !== confirmedStatus;
 
                   return (
                     <tr
-                      key={item.sku}
+                      key={item.lineId}
                       className={`hover:bg-surface-container-low transition-colors ${isCancelled ? "opacity-40" : ""}`}
                     >
                       <td className="py-4 px-5">
@@ -1062,7 +1185,7 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                           </div>
                           <div>
                             <p className="text-xs font-bold text-on-surface">{item.name}</p>
-                            <p className="text-[10px] text-on-surface-variant">SKU: {item.sku}</p>
+                            <p className="text-[10px] text-on-surface-variant font-mono">{item.sku}</p>
                           </div>
                         </div>
                       </td>
@@ -1077,7 +1200,7 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                               className="text-[10px] font-bold bg-surface-container-low border border-outline-variant/20 rounded px-2 py-1 focus:ring-1 focus:ring-primary/40 cursor-pointer"
                               value={draftStatus}
                               onChange={(e) =>
-                                handleItemStatusDraftChange(item.sku, e.target.value as OrderStatus)
+                                handleItemStatusDraftChange(item.lineId, e.target.value as OrderStatus)
                               }
                             >
                               {ORDER_STATUSES.map((s) => (
@@ -1088,7 +1211,7 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                               <button
                                 type="button"
                                 className="text-[10px] font-bold text-white bg-primary hover:bg-primary-container px-2 py-0.5 rounded transition-colors"
-                                onClick={() => handleUpdateItemStatus(item.sku)}
+                                onClick={() => handleUpdateItemStatus(item.lineId)}
                               >
                                 Update
                               </button>
@@ -1114,7 +1237,7 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                               className="p-1.5 rounded hover:bg-red-50 text-on-surface-variant hover:text-red-600 transition-all"
                               aria-label="Cancel item"
                               title="Cancel item"
-                              onClick={() => handleCancelItem(item.sku)}
+                              onClick={() => handleCancelItem(item.lineId)}
                             >
                               <IconCancel className="h-4 w-4" />
                             </button>
@@ -1292,7 +1415,9 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
 
             <div className="flex justify-between items-center px-1 pt-1 border-t border-outline-variant/10">
               <span className="text-xs font-bold text-on-surface">Total Paid</span>
-              <span className="text-sm font-extrabold text-primary">$1,141.00</span>
+              <span className="text-sm font-extrabold text-primary">
+                {detail?.total ? fmtMoney(detail.total.amount, detail.total.currency) : "$1,141.00"}
+              </span>
             </div>
 
             <p className="text-[10px] text-on-surface-variant">
@@ -1379,6 +1504,48 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                 disabled={actionBusy}
               >
                 Ship
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resolve Note Modal — DAI-648 */}
+      {resolveNoteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-4">
+            <h2 className="text-sm font-bold text-on-surface">Resolve Failed Order</h2>
+            <p className="text-xs text-on-surface-variant">
+              Mark order <span className="font-mono font-semibold text-on-surface">#{orderId}</span> as
+              resolved (will be cancelled). Optionally add a note.
+            </p>
+            <div className="space-y-1">
+              <label className="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                Resolution Note (optional)
+              </label>
+              <textarea
+                className="w-full bg-surface-container-low border border-outline-variant/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary h-20 resize-none"
+                placeholder="e.g. Customer confirmed refund via phone"
+                value={resolveNote}
+                onChange={(e) => setResolveNote(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:bg-surface-container-low rounded-lg transition-colors"
+                onClick={() => { setResolveNoteModalOpen(false); setResolveNote(""); }}
+                disabled={actionBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-bold bg-error text-on-error rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40"
+                onClick={() => void runResolve()}
+                disabled={actionBusy}
+              >
+                Resolve Order
               </button>
             </div>
           </div>
@@ -1489,9 +1656,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputCls =
   "w-full bg-surface-container-low border border-outline-variant/20 rounded px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary";
-
-const lineItems = [
-  { name: "Air Velocity Max X2", sku: "AV-MAX-0019", brand: "Lumina Sport", qty: 1, unitPrice: "$450.00", total: "$450.00" },
-  { name: "Heritage Chrono Silver", sku: "WTCH-H-042", brand: "Stark & Co.", qty: 1, unitPrice: "$590.00", total: "$590.00" },
-  { name: "Zenith Wireless Audio", sku: "AUD-ZW-100", brand: "AudioZen", qty: 1, unitPrice: "$200.00", total: "$200.00" },
-];

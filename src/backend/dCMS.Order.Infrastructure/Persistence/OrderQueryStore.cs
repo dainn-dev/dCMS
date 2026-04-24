@@ -236,6 +236,74 @@ public sealed class OrderQueryStore
         return new OrderListPage(timed, next);
     }
 
+    /// <summary>
+    /// DAI-651 — Refund cases are cancelled orders that have a PaymentTransaction.
+    /// This returns the raw cancelled orders page; callers should enrich with payment info and filter if needed.
+    /// </summary>
+    public async Task<RefundCaseOrderPage> ListCancelledOrdersForRefundCasesAsync(
+        string tenantId,
+        string storeId,
+        string? cursor,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var lim = Math.Clamp(limit, 1, 100);
+        var take = lim + 1;
+
+        if (!TryDecodeCursor(cursor, out var cursorCreated, out var cursorId))
+            throw new ArgumentException("Invalid cursor.", nameof(cursor));
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        const string sql = """
+            SELECT
+                "Id"::uuid AS Id,
+                "PaymentIntentId" AS PaymentIntentId,
+                "Total" AS Total,
+                "Currency" AS Currency,
+                "RefundStatus" AS RefundStatus,
+                "RefundRemark" AS RefundRemark,
+                "RefundedAt" AS RefundedAt,
+                "UpdatedAt" AS UpdatedAt,
+                "CreatedAt" AS CreatedAt
+            FROM "Orders"
+            WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId
+              AND "Status" = 'Cancelled'
+              AND "PaymentIntentId" IS NOT NULL
+              AND (
+                  @HasCursor = FALSE
+                  OR ("CreatedAt", "Id") < (@CursorCreated::timestamptz, @CursorId::uuid)
+              )
+            ORDER BY "CreatedAt" DESC, "Id" DESC
+            LIMIT @Take
+            """;
+
+        var rows = (await connection.QueryAsync<RefundCaseOrderRow>(
+            new CommandDefinition(sql, new
+            {
+                TenantId = tenantId,
+                StoreId = storeId,
+                HasCursor = cursorCreated.HasValue && cursorId.HasValue,
+                CursorCreated = cursorCreated,
+                CursorId = cursorId,
+                Take = take,
+            }, cancellationToken: cancellationToken)).ConfigureAwait(false)).ToList();
+
+        var hasMore = rows.Count > lim;
+        if (hasMore)
+            rows.RemoveAt(rows.Count - 1);
+
+        string? next = null;
+        if (hasMore && rows.Count > 0)
+        {
+            var last = rows[^1];
+            next = EncodeCursor(last.CreatedAt, last.Id);
+        }
+
+        return new RefundCaseOrderPage(rows, next);
+    }
+
     private static bool TryMapApiStatusToDb(string api, out string db)
     {
         db = api.ToLowerInvariant() switch
@@ -335,7 +403,7 @@ public sealed class OrderQueryStore
             row.PaymentIntentId,
             row.FailureReason,
             row.FailureErrorCode,
-            row.FailedAt,
+            row.FailedAt.HasValue ? ToUtcOffset(row.FailedAt.Value) : null,
             row.RetryCount);
     }
 
@@ -351,7 +419,7 @@ public sealed class OrderQueryStore
         string? PaymentIntentId,
         string? FailureReason,
         string? FailureErrorCode,
-        DateTimeOffset? FailedAt,
+        DateTime? FailedAt,
         int RetryCount,
         DateTime CreatedAt);
 
@@ -375,4 +443,17 @@ public sealed class OrderQueryStore
         string ProductNameJson,
         string VariantSnapshotJson,
         Guid OrderId);
+
+    public sealed record RefundCaseOrderPage(IReadOnlyList<RefundCaseOrderRow> Items, string? NextCursor);
+
+    public sealed record RefundCaseOrderRow(
+        Guid Id,
+        string? PaymentIntentId,
+        decimal Total,
+        string Currency,
+        string? RefundStatus,
+        string RefundRemark,
+        DateTimeOffset? RefundedAt,
+        DateTimeOffset UpdatedAt,
+        DateTimeOffset CreatedAt);
 }

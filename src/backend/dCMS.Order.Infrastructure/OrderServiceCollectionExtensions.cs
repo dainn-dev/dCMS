@@ -27,6 +27,7 @@ public static class OrderServiceCollectionExtensions
         services.AddPaymentHttpClient(configuration);
         services.AddHostedService<OrderDbMigrationHostedService>();
         services.AddSingleton<OrderQueryStore>();
+        services.AddSingleton<PaymentTransactionQueryStore>();
         services.AddSingleton<ShipmentQueryStore>();
         services.AddSingleton<ShipmentPollingStore>();
         services.AddSingleton<ICarrierStatusMapper, ConfigCarrierStatusMapper>();

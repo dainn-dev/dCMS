@@ -103,7 +103,7 @@ export function OrdersApp({ tenantId, storeId, authToken }: { tenantId?: string;
           onViewFailedOrder={handleViewFailedOrder}
         />
       )}
-      {page === "refund-cases" && <RefundCasesPage />}
+      {page === "refund-cases" && <RefundCasesPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
       {page === "order-detail" && (
         <OrderDetailPage
           orderId={selectedOrderId ?? "EX-99284-B"}

@@ -706,6 +706,56 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    /// <summary>DAI-651 — update refund tracking for a cancelled order (no RefundCases table).</summary>
+    public async Task<int> UpdateRefundTrackingAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        string refundStatus,
+        string refundRemark,
+        DateTimeOffset? refundedAt,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var id))
+            return 0;
+
+        var status = (refundStatus ?? "").Trim();
+        if (status.Length == 0)
+            throw new ArgumentException("refundStatus is required.", nameof(refundStatus));
+
+        var remark = (refundRemark ?? "").Trim();
+        if (remark.Length > 512)
+            remark = remark[..512];
+
+        const string sql = """
+            UPDATE "Orders"
+            SET "RefundStatus" = @RefundStatus,
+                "RefundRemark" = @RefundRemark,
+                "RefundedAt" = @RefundedAt,
+                "UpdatedAt" = @Now
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
+              AND "Status" = 'Cancelled'
+            """;
+
+        return await conn.ExecuteAsync(new CommandDefinition(
+                sql,
+                new
+                {
+                    Id = id,
+                    TenantId = tenantId,
+                    StoreId = storeId,
+                    RefundStatus = status,
+                    RefundRemark = remark,
+                    RefundedAt = refundedAt,
+                    Now = occurredAt,
+                },
+                tx,
+                cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_transaction is not null)
