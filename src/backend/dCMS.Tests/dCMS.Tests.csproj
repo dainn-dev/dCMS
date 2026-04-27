@@ -35,7 +35,9 @@
     <ProjectReference Include="..\dCMS.Gateway\dCMS.Gateway.csproj" />
     <ProjectReference Include="..\dCMS.Promotions.Api\dCMS.Promotions.Api.csproj" />
     <ProjectReference Include="..\dCMS.Fulfillment.Api\dCMS.Fulfillment.Api.csproj" />
-    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
+    <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Approvals.Domain\dCMS.Approvals.Domain.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
     <ProjectReference Include="..\dCMS.Inventory.Api\dCMS.Inventory.Api.csproj" />
     <ProjectReference Include="..\dCMS.Inventory.Core\dCMS.Inventory.Core.csproj" />
@@ -59,12 +61,16 @@
     <None Include="..\dCMS.Infrastructure\Migrations\018_ExtendCategories.sql" Link="Migrations\018_ExtendCategories.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\009_CreateAuditAndNotifications.sql" Link="Migrations\009_CreateAuditAndNotifications.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\019_ExtendCatalogAttributes.sql" Link="Migrations\019_ExtendCatalogAttributes.sql" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\dCMS.Infrastructure\Migrations\020_CreateCampaigns.sql" Link="Migrations\020_CreateCampaigns.sql" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\dCMS.Infrastructure\Migrations\021_CreateFulfillment.sql" Link="Migrations\021_CreateFulfillment.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Promotions.Api\Migrations\001_CreateCampaigns.sql" Link="Migrations\020_CreateCampaigns.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Promotions.Api\Migrations\002_CreatePromoCodes.sql" Link="Migrations\022_CreatePromoCodes.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Promotions.Api\Migrations\003_ExtendPromoCodes.sql" Link="Migrations\023_ExtendPromoCodes.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Promotions.Api\Migrations\004_CreatePromoCodeRedemptions.sql" Link="Migrations\024_CreatePromoCodeRedemptions.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Fulfillment.Api\Migrations\001_CreateFulfillment.sql" Link="Migrations\021_CreateFulfillment.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Inventory.Infrastructure\Migrations\007_CreateInventory.sql" Link="007_CreateInventory.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Reports.Worker\Migrations\001_CreateAnalyticsTables.sql" Link="Migrations\Analytics\001_CreateAnalyticsTables.sql" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\dCMS.Infrastructure\Migrations\025_CreateTemplates.sql" Link="Migrations\025_CreateTemplates.sql" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\dCMS.Infrastructure\Migrations\027_CreateApprovalRequests.sql" Link="Migrations\027_CreateApprovalRequests.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Notification.Api\Migrations\001_CreateTemplates.sql" Link="Migrations\025_CreateTemplates.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Notification.Api\Migrations\002_CreateEmailDeliveryLog.sql" Link="Migrations\026_CreateEmailDeliveryLog.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Approval.Api\Migrations\001_CreateApprovalRequests.sql" Link="Migrations\027_CreateApprovalRequests.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\028_AddProductActivation.sql" Link="Migrations\028_AddProductActivation.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

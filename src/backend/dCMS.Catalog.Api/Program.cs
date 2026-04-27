@@ -5,9 +5,9 @@ using dCMS.Catalog.Api.Attributes;
 using dCMS.Catalog.Api.Brands;
 using dCMS.Catalog.Api.Categories;
 using dCMS.Catalog.Api.Imports;
+using dCMS.Catalog.Api.Internal;
 using dCMS.Catalog.Api.VariantAxes;
 using dCMS.Catalog.Api.Middleware;
-using dCMS.Catalog.Api.Notifications;
 using dCMS.Catalog.Api.Public;
 using dCMS.Catalog.Api.Products;
 using dCMS.Catalog.Api.Services;
@@ -90,10 +90,12 @@ builder.Services.AddMassTransit(bus =>
     });
 });
 builder.Services.Configure<CatalogNotificationOptions>(builder.Configuration.GetSection(CatalogNotificationOptions.SectionName));
-builder.Services.AddSingleton<IProductNotificationSink, ProductNotificationSink>();
+// P2 #6: ProductNotificationSink publishes UserNotificationCreatedV1 — Notification.Worker writes the row.
+builder.Services.AddScoped<IProductNotificationSink, ProductNotificationSink>();
+builder.Services.Configure<InternalCatalogOptions>(
+    builder.Configuration.GetSection(InternalCatalogOptions.SectionName));
 builder.Services.AddSingleton<IBrandPersistence>(_ => new SqlBrandPersistence(catalogCs));
 builder.Services.AddScoped<ProductService>();
-builder.Services.AddScoped<NotificationService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
 
 builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
@@ -206,12 +208,13 @@ app.MapBrandRoutes(builder.Configuration);
 app.MapAttributeRoutes(builder.Configuration);
 app.MapProductRoutes(builder.Configuration);
 app.MapStoreCatalogSettingsRoutes(builder.Configuration);
-app.MapNotificationRoutes(builder.Configuration);
+// P2 #6: notification feed routes moved to dCMS.Notification.Api (mounted at same /api/v1/.../notifications path).
 app.MapProductImageRoutes(builder.Configuration);
 app.MapImportJobRoutes(builder.Configuration);
 app.MapCategoryRoutes(builder.Configuration);
 app.MapVariantAxesRoutes(builder.Configuration);
 app.MapPublicProductRoutes();
+app.MapInternalCatalogRoutes(catalogCs);
 
 app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))
     .WithTags("health")

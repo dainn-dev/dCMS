@@ -2,9 +2,13 @@ using dCMS.Core.Messaging;
 using dCMS.Infrastructure.Outbox;
 using MassTransit;
 
-namespace dCMS.Catalog.Worker.Workers;
+namespace dCMS.Inventory.Api.Messaging;
 
-public sealed class InventoryOutboxRelayHostedService(SqlOutboxRelay relay, IBus bus, ILogger<InventoryOutboxRelayHostedService> log)
+/// <summary>
+/// P1 #3: relays Inventory outbox messages (StockUpdatedV1) to RabbitMQ.
+/// Owned by the service that owns the dcms_inventory database.
+/// </summary>
+public sealed class InventoryOutboxRelayBackgroundService(SqlOutboxRelay relay, IBus bus, ILogger<InventoryOutboxRelayBackgroundService> log)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

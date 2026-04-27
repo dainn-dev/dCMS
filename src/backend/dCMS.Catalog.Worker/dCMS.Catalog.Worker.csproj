@@ -21,7 +21,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
-    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
+    <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />
   </ItemGroup>
 
 </Project>

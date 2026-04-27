@@ -13,6 +13,7 @@ using dCMS.Inventory.Persistence;
 using dCMS.Inventory.Services;
 using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Middleware;
+using dCMS.Infrastructure.Outbox;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Pricing;
 using dCMS.Infrastructure.RateLimiting;
@@ -28,8 +29,6 @@ var inventoryCs = builder.Configuration.GetConnectionString("Inventory");
 if (string.IsNullOrWhiteSpace(inventoryCs))
     throw new InvalidOperationException("Configure ConnectionStrings:Inventory (PostgreSQL inventory database).");
 
-var auditCs = builder.Configuration.GetConnectionString("Audit") ?? inventoryCs;
-
 builder.Services.AddSingleton<IInventoryStockPersistence>(_ => new SqlStockPersistence(inventoryCs));
 builder.Services.AddScoped<StockService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
@@ -41,15 +40,23 @@ if (!string.IsNullOrWhiteSpace(redisCs))
 builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
     sp.GetRequiredService<IConfiguration>(),
     sp.GetService<IConnectionMultiplexer>()));
+// Phase C + P1 #4: audit → local AuditOutbox → MassTransit (at-least-once).
 builder.Services.AddSingleton<AuditLogChannel>();
-builder.Services.AddSingleton(_ => new SqlAuditLogPersistence(auditCs));
-builder.Services.AddHostedService<AuditLogBackgroundService>();
+builder.Services.AddSingleton(_ => new AuditOutboxPersistence(inventoryCs));
+builder.Services.AddHostedService<AuditOutboxWriterBackgroundService>();
+builder.Services.AddHostedService<AuditOutboxRelayBackgroundService>();
 builder.Services.AddSingleton<IPriceChangeAlerter, NoopPriceChangeAlerter>();
 builder.Services.Configure<IdempotencyOptions>(o => o.PathSubstrings = ["/stock"]);
 builder.Services.Configure<InternalInventoryOptions>(builder.Configuration.GetSection(InternalInventoryOptions.SectionName));
 builder.Services.AddHostedService<InventoryDbMigrationHostedService>();
 builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Inventory");
 builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Inventory");
+
+// P1 #3: Inventory outbox relay (StockUpdatedV1) lives with the service that owns dcms_inventory.
+builder.Services.AddHostedService(sp => new InventoryOutboxRelayBackgroundService(
+    new SqlOutboxRelay(inventoryCs),
+    sp.GetRequiredService<IBus>(),
+    sp.GetRequiredService<ILogger<InventoryOutboxRelayBackgroundService>>()));
 
 // DAI-727 — subscribe to ProductRestockedV1 emitted by Order on approved returns.
 builder.Services.AddMassTransit(bus =>

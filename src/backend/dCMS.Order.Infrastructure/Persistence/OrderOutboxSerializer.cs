@@ -23,6 +23,7 @@ internal static class OrderOutboxSerializer
                         x.Currency,
                         lines = x.Lines.Select(l => new { l.VariantId, l.WarehouseId, l.Quantity }),
                         x.OccurredAt,
+                        items = x.SalesLines.Select(s => new { s.ProductId, s.Quantity, s.LineTotal }),
                     },
                     Json)),
             OrderConfirmed x => ("OrderConfirmed", JsonSerializer.Serialize(new { x.OrderId, x.OccurredAt }, Json)),

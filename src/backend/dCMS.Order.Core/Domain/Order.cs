@@ -154,6 +154,10 @@ public sealed class Order
             promoCodeId,
             appliedPromotions);
 
+        var salesLines = items
+            .Select(i => new OrderPlacedSalesLine(i.ProductId, i.Quantity, i.LineTotal().Amount))
+            .ToList();
+
         order._domainEvents.Add(new OrderPlaced(
             order.Id,
             order.TenantId,
@@ -162,7 +166,8 @@ public sealed class Order
             order.Total.Amount,
             order.Total.Currency,
             placementLines,
-            occurredAt));
+            occurredAt,
+            salesLines));
 
         return order;
     }

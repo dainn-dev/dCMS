@@ -6,9 +6,12 @@ using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.RateLimiting;
+using MassTransit;
 using dCMS.Promotions.Api.Campaigns;
 using dCMS.Promotions.Api.Evaluator;
 using dCMS.Promotions.Api.Evaluator.Mechanics;
+using dCMS.Promotions.Api.Internal;
+using dCMS.Promotions.Api.Migrations;
 using dCMS.Promotions.Api.PromoCodes;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
@@ -16,14 +19,13 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var catalogCs = builder.Configuration.GetConnectionString("Catalog");
-if (string.IsNullOrWhiteSpace(catalogCs))
-    throw new InvalidOperationException("Configure ConnectionStrings:Catalog (PostgreSQL catalog database).");
+var promotionsCs = builder.Configuration.GetConnectionString("Promotions");
+if (string.IsNullOrWhiteSpace(promotionsCs))
+    throw new InvalidOperationException("Configure ConnectionStrings:Promotions.");
 
-// DAI-693 — Promotions DB is currently colocated in `dcms_catalog`. Reading `Promotions` first lets us
-// migrate to a dedicated `dcms_promotions` database without code changes (set ConnectionStrings:Promotions
-// in env/appsettings to switch).
-var promotionsCs = builder.Configuration.GetConnectionString("Promotions") ?? catalogCs;
+builder.Services.AddHostedService<PromotionsDbMigrationHostedService>();
+builder.Services.Configure<InternalPromotionsOptions>(
+    builder.Configuration.GetSection(InternalPromotionsOptions.SectionName));
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<ICampaignPersistence>(_ => new SqlCampaignPersistence(promotionsCs));
@@ -81,9 +83,25 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // ── Audit log ─────────────────────────────────────────────────────────────────
+// Phase C + P1 #4: AuditLogChannel → local AuditOutbox table → MassTransit publish (at-least-once).
+// AuditLogConsumer (Catalog.Worker) persists to dcms_catalog AuditLogs.
 builder.Services.AddSingleton<AuditLogChannel>();
-builder.Services.AddSingleton(_ => new SqlAuditLogPersistence(catalogCs));
-builder.Services.AddHostedService<AuditLogBackgroundService>();
+builder.Services.AddSingleton(_ => new AuditOutboxPersistence(promotionsCs));
+builder.Services.AddHostedService<AuditOutboxWriterBackgroundService>();
+builder.Services.AddHostedService<AuditOutboxRelayBackgroundService>();
+
+builder.Services.AddMassTransit(bus =>
+{
+    bus.SetKebabCaseEndpointNameFormatter();
+    bus.UsingRabbitMq((context, cfg) =>
+    {
+        var host = builder.Configuration["RabbitMq:Host"] ?? "localhost";
+        var user = builder.Configuration["RabbitMq:User"] ?? "guest";
+        var pass = builder.Configuration["RabbitMq:Pass"] ?? "guest";
+        cfg.Host(host, "/", h => { h.Username(user); h.Password(pass); });
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -154,6 +172,7 @@ app.MapCampaignRoutes(builder.Configuration);
 app.MapPromoCodeRoutes(builder.Configuration);
 app.MapEvaluateRoutes(builder.Configuration);
 app.MapRedemptionRoutes(builder.Configuration);
+app.MapInternalPromotionsRoutes();
 
 app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))
     .WithTags("health")

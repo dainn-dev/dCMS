@@ -117,13 +117,19 @@ services:
       start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Promotions: "Host=postgres;Port=5432;Database=dcms_promotions;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+      InternalPromotions__ApiKey: "dcms-local-internal-promotions-key-min-32-characters!"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      rabbitmq:
         condition: service_started
 
   fulfillment-api:
@@ -140,13 +146,18 @@ services:
       start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Fulfillment: "Host=postgres;Port=5432;Database=dcms_fulfillment;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      rabbitmq:
         condition: service_started
 
   reports-api:
@@ -185,7 +196,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Auth__Enabled: "false"
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Notification: "Host=postgres;Port=5432;Database=dcms_notification;Username=dcms;Password=Your_password123"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
@@ -197,7 +208,7 @@ services:
       dockerfile: infra/docker/Dockerfile.notification-worker
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Notification: "Host=postgres;Port=5432;Database=dcms_notification;Username=dcms;Password=Your_password123"
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Pass: "guest"
@@ -228,7 +239,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Auth__Enabled: "false"
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Approval: "Host=postgres;Port=5432;Database=dcms_approval;Username=dcms;Password=Your_password123"
+      Promotions__BaseUrl: "http://promotions-api:8080"
+      Catalog__BaseUrl: "http://catalog-api:8080"
+      InternalPromotions__ApiKey: "dcms-local-internal-promotions-key-min-32-characters!"
+      InternalCatalog__ApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
@@ -249,7 +264,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Auth__Enabled: "false"
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Voucher: "Host=postgres;Port=5432;Database=dcms_voucher;Username=dcms;Password=Your_password123"
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Password: "guest"
@@ -275,7 +290,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Auth__Enabled: "false"
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Loyalty: "Host=postgres;Port=5432;Database=dcms_loyalty;Username=dcms;Password=Your_password123"
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Password: "guest"
@@ -359,6 +374,7 @@ services:
       ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
       Elasticsearch__Url: "http://elasticsearch:9200"
+      InternalCatalog__ApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
@@ -383,13 +399,17 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Inventory: "Host=postgres;Port=5432;Database=dcms_inventory;Username=dcms;Password=Your_password123"
-      ConnectionStrings__Audit: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
       Cors__AllowedOrigins__0: "http://localhost:3000"
       InternalInventory__ApiKey: "dcms-local-internal-inventory-key-min-32-characters!!"
     depends_on:
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   order-api:
     build:
@@ -540,15 +560,13 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Analytics: "Host=postgres-analytics;Port=5432;Database=dcms_analytics;Username=dcms;Password=Your_password123"
-      ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      Catalog__BaseUrl: "http://catalog-api:8080"
+      Catalog__InternalApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Pass: "guest"
       RabbitMq__ManagementBaseUrl: "http://rabbitmq:15672"
     depends_on:
-      postgres:
-        condition: service_healthy
       postgres-analytics:
         condition: service_healthy
       rabbitmq:

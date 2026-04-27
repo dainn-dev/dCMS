@@ -8,13 +8,16 @@ var builder = Host.CreateApplicationBuilder(args);
 
 _ = builder.Configuration.GetConnectionString("Analytics")
     ?? throw new InvalidOperationException("Set ConnectionStrings:Analytics.");
-_ = builder.Configuration.GetConnectionString("Order")
-    ?? throw new InvalidOperationException("Set ConnectionStrings:Order.");
-// Catalog is optional (category rollups will be skipped when missing).
 
+// Phase C / P0 #2: Reports.Worker no longer touches dcms_order or dcms_catalog directly.
+// OrderPlacedV1 carries item snapshots (via OrderPlacedItemV1); category lookups go through
+// Catalog.Api /internal/catalog/.../category endpoint.
 builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "reports-worker");
 
 builder.Services.AddHostedService<AnalyticsDbMigrationHostedService>();
+
+builder.Services.Configure<CatalogClientOptions>(builder.Configuration.GetSection(CatalogClientOptions.SectionName));
+builder.Services.AddHttpClient(CatalogClientOptions.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
 
 builder.Services.AddMassTransit(x =>
 {

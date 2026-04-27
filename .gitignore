@@ -89,3 +89,15 @@ src/backend/dCMS.Loyalty.Api/bin/
 src/backend/dCMS.Loyalty.Api/obj/
 src/backend/dCMS.Voucher.Api/bin/
 src/backend/dCMS.Voucher.Api/obj/
+src/backend/dCMS.Approvals.Domain/bin/
+src/backend/dCMS.Approvals.Domain/obj/
+src/backend/dCMS.Catalog.Domain/bin/
+src/backend/dCMS.Catalog.Domain/obj/
+src/backend/dCMS.Common/bin/
+src/backend/dCMS.Common/obj/
+src/backend/dCMS.Fulfillment.Domain/bin/
+src/backend/dCMS.Fulfillment.Domain/obj/
+src/backend/dCMS.Imports.Domain/bin/
+src/backend/dCMS.Imports.Domain/obj/
+src/backend/dCMS.Promotions.Domain/bin/
+src/backend/dCMS.Promotions.Domain/obj/

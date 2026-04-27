@@ -1,5 +1,6 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Loyalty.Api.Migrations;
 using dCMS.Loyalty.Api.Persistence;
 using dCMS.Loyalty.Api.Routes;
 using MassTransit;
@@ -7,10 +8,11 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("Loyalty")
-    ?? builder.Configuration.GetConnectionString("Catalog");
+var connectionString = builder.Configuration.GetConnectionString("Loyalty");
 if (string.IsNullOrWhiteSpace(connectionString))
-    throw new InvalidOperationException("Configure ConnectionStrings:Loyalty (or Catalog).");
+    throw new InvalidOperationException("Configure ConnectionStrings:Loyalty.");
+
+builder.Services.AddHostedService<LoyaltyDbMigrationHostedService>();
 
 if (builder.Configuration.IsDcmsAuthEnabled())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);

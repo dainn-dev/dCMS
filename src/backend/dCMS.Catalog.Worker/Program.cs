@@ -6,6 +6,7 @@ using dCMS.Catalog.Worker.Workers;
 using dCMS.Core.Persistence;
 using dCMS.Core.Search;
 using dCMS.Infrastructure;
+using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Outbox;
 using dCMS.Infrastructure.Search;
@@ -68,6 +69,9 @@ builder.Services.AddSingleton<IImportRowProcessor>(sp => new ProductImageRowProc
 builder.Services.AddSingleton<IImportRowProcessor>(_ => new InventoryRowProcessor(catalogCs, inventoryCs));
 builder.Services.AddSingleton<IImportRowProcessor>(_ => new PromoCodeRowProcessor(catalogCs));
 
+// Phase C — AuditLogConsumer writes audit rows published by services that don't own dcms_catalog.
+builder.Services.AddSingleton(_ => new SqlAuditLogPersistence(catalogCs));
+
 builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "catalog-worker");
 
 builder.Services.AddHostedService<CatalogDbMigrationHostedService>();
@@ -84,6 +88,7 @@ builder.Services.AddMassTransit(x =>
     x.AddConsumer<ProductArchivedIndexConsumer>();
     x.AddConsumer<StockUpdatedIndexConsumer>();
     x.AddConsumer<ImportJobConsumer>();
+    x.AddConsumer<AuditLogConsumer>();
 
     x.UsingRabbitMq((context, cfg) =>
     {
@@ -113,10 +118,8 @@ builder.Services.AddHostedService(sp => new CatalogOutboxRelayHostedService(
     sp.GetRequiredService<IBus>(),
     sp.GetRequiredService<ILogger<CatalogOutboxRelayHostedService>>()));
 
-builder.Services.AddHostedService(sp => new InventoryOutboxRelayHostedService(
-    new SqlOutboxRelay(inventoryCs),
-    sp.GetRequiredService<IBus>(),
-    sp.GetRequiredService<ILogger<InventoryOutboxRelayHostedService>>()));
+// P1 #3: Inventory outbox relay moved to dCMS.Inventory.Api (the service that owns dcms_inventory).
+// inventoryCs is still used here read-only for SqlProductSearchRepository indexing projection.
 
 builder.Services.AddHostedService<DeadLetterSlackNotifierHostedService>();
 

@@ -17,7 +17,7 @@ namespace dCMS.Notification.Worker.Consumers;
 
 public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
 {
-    private readonly string _catalogCs;
+    private readonly string _notificationCs;
     private readonly IIdempotencyService _idempotency;
     private readonly dCMS.Notification.Api.Rendering.ITemplateRenderer _renderer;
     private readonly ILogger<EmailQueuedConsumer> _log;
@@ -30,7 +30,8 @@ public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
         ILogger<EmailQueuedConsumer> log)
     {
         _cfg = cfg;
-        _catalogCs = cfg.GetConnectionString("Catalog") ?? throw new InvalidOperationException("ConnectionStrings:Catalog is required.");
+        _notificationCs = cfg.GetConnectionString("Notification")
+            ?? throw new InvalidOperationException("ConnectionStrings:Notification is required.");
         _idempotency = idempotency;
         _renderer = renderer;
         _log = log;
@@ -75,7 +76,7 @@ public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
                 (@Id,@TenantId,@StoreId,@IdempotencyKey,@TemplateKey,@Locale,@ToAddress,'queued',NULL,@CreatedAt,NULL)
             ON CONFLICT ("TenantId","IdempotencyKey") DO NOTHING
             """;
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_notificationCs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await conn.ExecuteAsync(sql, new
         {
@@ -97,7 +98,7 @@ public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
             SET "Status" = 'sent', "SentAt" = @SentAt, "Error" = NULL
             WHERE "TenantId" = @TenantId AND "IdempotencyKey" = @IdempotencyKey
             """;
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_notificationCs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await conn.ExecuteAsync(
             new CommandDefinition(sql, new { TenantId = m.TenantId, m.IdempotencyKey, SentAt = now }, cancellationToken: ct))
@@ -111,7 +112,7 @@ public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
             SET "Status" = 'failed', "Error" = LEFT(@Error, 4000)
             WHERE "TenantId" = @TenantId AND "IdempotencyKey" = @IdempotencyKey
             """;
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_notificationCs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await conn.ExecuteAsync(
             new CommandDefinition(sql, new { TenantId = m.TenantId, m.IdempotencyKey, Error = error }, cancellationToken: ct))

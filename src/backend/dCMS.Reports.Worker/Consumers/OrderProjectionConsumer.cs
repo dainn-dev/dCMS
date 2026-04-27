@@ -1,16 +1,19 @@
+using System.Text.Json;
 using Dapper;
 using dCMS.Core.Messaging;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using Prometheus;
 
 namespace dCMS.Reports.Worker.Consumers;
 
 /// <summary>
-/// DAI-710: projects order lifecycle messages into analytics tables.
-/// Read workload is on analytics DB; this consumer may read OLTP for enrichment (order items, category mapping).
+/// DAI-710 / P0 #2: projects order lifecycle messages into analytics tables.
+/// Sales-by-product is built from <see cref="OrderPlacedV1.Items"/> (no dcms_order read).
+/// Category lookup uses Catalog.Api /internal/catalog/.../category (no dcms_catalog read).
 /// </summary>
 public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
 {
@@ -19,18 +22,23 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
         "Lag between event OccurredAt and projection processing time.",
         new GaugeConfiguration { LabelNames = ["message"] });
 
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
     private readonly string _analyticsCs;
-    private readonly string _orderCs;
-    private readonly string? _catalogCs;
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly CatalogClientOptions _catalogOptions;
     private readonly ILogger<OrderProjectionConsumer> _log;
 
-    public OrderProjectionConsumer(IConfiguration configuration, ILogger<OrderProjectionConsumer> log)
+    public OrderProjectionConsumer(
+        IConfiguration configuration,
+        IHttpClientFactory httpFactory,
+        IOptions<CatalogClientOptions> catalogOptions,
+        ILogger<OrderProjectionConsumer> log)
     {
         _analyticsCs = configuration.GetConnectionString("Analytics")
             ?? throw new InvalidOperationException("ConnectionStrings:Analytics is required.");
-        _orderCs = configuration.GetConnectionString("Order")
-            ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
-        _catalogCs = configuration.GetConnectionString("Catalog");
+        _httpFactory = httpFactory;
+        _catalogOptions = catalogOptions.Value;
         _log = log;
     }
 
@@ -63,7 +71,6 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
 
             var d = DateOnly.FromDateTime(at.UtcDateTime);
 
-            // Daily order rollup.
             await analytics.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO analytics.orders_daily
@@ -78,15 +85,14 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
                 """,
                 new
                 {
-                    TenantId = m.TenantId,
-                    StoreId = m.StoreId,
+                    m.TenantId,
+                    m.StoreId,
                     Date = d,
                     Gross = m.TotalAmount,
                     Net = m.TotalAmount,
                 }, tx, cancellationToken: context.CancellationToken)).ConfigureAwait(false);
 
-            // Enrich from OLTP order items for product/category rollups.
-            var items = await LoadOrderItemsAsync(m.OrderId, context.CancellationToken).ConfigureAwait(false);
+            var items = m.Items ?? Array.Empty<OrderPlacedItemV1>();
             if (items.Count > 0)
             {
                 foreach (var g in items.GroupBy(i => i.ProductId, StringComparer.Ordinal))
@@ -106,15 +112,16 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
                         """,
                         new
                         {
-                            TenantId = m.TenantId,
-                            StoreId = m.StoreId,
+                            m.TenantId,
+                            m.StoreId,
                             ProductId = g.Key,
                             Date = d,
                             Units = units,
                             Gross = gross,
                         }, tx, cancellationToken: context.CancellationToken)).ConfigureAwait(false);
 
-                    var categoryId = await TryResolveCategoryIdAsync(g.Key, context.CancellationToken).ConfigureAwait(false);
+                    var categoryId = await TryResolveCategoryIdAsync(m.TenantId, g.Key, context.CancellationToken)
+                        .ConfigureAwait(false);
                     if (categoryId.HasValue)
                     {
                         await analytics.ExecuteAsync(new CommandDefinition(
@@ -130,8 +137,8 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
                             """,
                             new
                             {
-                                TenantId = m.TenantId,
-                                StoreId = m.StoreId,
+                                m.TenantId,
+                                m.StoreId,
                                 CategoryId = categoryId.Value,
                                 Date = d,
                                 Units = units,
@@ -151,42 +158,31 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
         }
     }
 
-    private async Task<IReadOnlyList<OrderItemRow>> LoadOrderItemsAsync(string orderId, CancellationToken ct)
+    private async Task<int?> TryResolveCategoryIdAsync(string tenantId, string productId, CancellationToken ct)
     {
-        if (!Guid.TryParse(orderId, out var oid))
-            return Array.Empty<OrderItemRow>();
-
-        await using var conn = new NpgsqlConnection(_orderCs);
-        await conn.OpenAsync(ct).ConfigureAwait(false);
-        var rows = await conn.QueryAsync<OrderItemRow>(
-            new CommandDefinition(
-                """
-                SELECT "ProductId" AS ProductId, "Quantity" AS Quantity, "LineTotal" AS LineTotal
-                FROM "OrderItems"
-                WHERE "OrderId" = @OrderId
-                """,
-                new { OrderId = oid },
-                cancellationToken: ct)).ConfigureAwait(false);
-        return rows.ToList();
-    }
-
-    private async Task<int?> TryResolveCategoryIdAsync(string productId, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(_catalogCs))
+        if (string.IsNullOrWhiteSpace(_catalogOptions.BaseUrl) ||
+            string.IsNullOrWhiteSpace(_catalogOptions.InternalApiKey))
             return null;
 
-        await using var conn = new NpgsqlConnection(_catalogCs);
-        await conn.OpenAsync(ct).ConfigureAwait(false);
-        var cat = await conn.ExecuteScalarAsync<int?>(
-            new CommandDefinition(
-                """
-                SELECT "CategoryId"
-                FROM "Products"
-                WHERE "Id" = @Id
-                """,
-                new { Id = productId },
-                cancellationToken: ct)).ConfigureAwait(false);
-        return cat;
+        try
+        {
+            var client = _httpFactory.CreateClient(CatalogClientOptions.HttpClientName);
+            var baseUrl = _catalogOptions.BaseUrl!.TrimEnd('/');
+            var url = $"{baseUrl}/internal/catalog/tenants/{Uri.EscapeDataString(tenantId)}/products/{Uri.EscapeDataString(productId)}/category";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Add("X-Internal-Api-Key", _catalogOptions.InternalApiKey);
+            using var resp = await client.SendAsync(req, ct).ConfigureAwait(false);
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+            if (!resp.IsSuccessStatusCode) return null;
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var env = await JsonSerializer.DeserializeAsync<CategoryEnvelope>(stream, JsonOpts, ct).ConfigureAwait(false);
+            return env?.Data?.CategoryId;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "Category lookup failed for product {ProductId}", productId);
+            return null;
+        }
     }
 
     private static Guid ResolveEventId<T>(ConsumeContext<T> ctx, string orderId, string typeName)
@@ -196,7 +192,6 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
             return ctx.MessageId.Value;
         if (Guid.TryParse(orderId, out var oid))
             return oid;
-        // last resort: stable-ish per order/type in this process (not perfect; prefer MessageId from outbox).
         return DeterministicGuid(typeName + ":" + orderId);
     }
 
@@ -207,11 +202,14 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
         return new Guid(hash);
     }
 
-    private sealed class OrderItemRow
+    private sealed class CategoryEnvelope
     {
-        public string ProductId { get; init; } = "";
-        public int Quantity { get; init; }
-        public decimal LineTotal { get; init; }
+        public CategoryData? Data { get; set; }
+    }
+
+    private sealed class CategoryData
+    {
+        public string? Id { get; set; }
+        public int? CategoryId { get; set; }
     }
 }
-

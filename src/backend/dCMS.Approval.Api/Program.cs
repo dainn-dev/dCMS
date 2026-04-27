@@ -3,15 +3,36 @@ using dCMS.Core.Approvals;
 using dCMS.Core.Persistence;
 using dCMS.Infrastructure.Approvals;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Approval.Api.Migrations;
 using dCMS.Approval.Api.Routes;
 using dCMS.Approval.Api.Routes.Subjects;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var catalogCs = builder.Configuration.GetConnectionString("Catalog");
-if (string.IsNullOrWhiteSpace(catalogCs))
-    throw new InvalidOperationException("Configure ConnectionStrings:Catalog (PostgreSQL catalog database).");
+var approvalCs = builder.Configuration.GetConnectionString("Approval");
+if (string.IsNullOrWhiteSpace(approvalCs))
+    throw new InvalidOperationException("Configure ConnectionStrings:Approval.");
+
+// Phase C: Campaign/PromoCode/Product approval flows talk to owning services over HTTP
+// (no direct dcms_promotions / dcms_catalog connection strings here).
+var promotionsClient = new PromotionsApiClientOptions
+{
+    BaseUrl = builder.Configuration["Promotions:BaseUrl"],
+    ApiKey = builder.Configuration["InternalPromotions:ApiKey"],
+};
+var catalogClient = new CatalogApiClientOptions
+{
+    BaseUrl = builder.Configuration["Catalog:BaseUrl"],
+    ApiKey = builder.Configuration["InternalCatalog:ApiKey"],
+};
+
+builder.Services.AddSingleton(promotionsClient);
+builder.Services.AddSingleton(catalogClient);
+builder.Services.AddHttpClient(PromotionsApiClientOptions.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHttpClient(CatalogApiClientOptions.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
+
+builder.Services.AddHostedService<ApprovalDbMigrationHostedService>();
 
 if (builder.Configuration.IsDcmsAuthEnabled())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
@@ -35,12 +56,15 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-builder.Services.AddSingleton<IApprovalRequestPersistence>(_ => new SqlApprovalRequestPersistence(catalogCs));
+builder.Services.AddSingleton<IApprovalRequestPersistence>(_ => new SqlApprovalRequestPersistence(approvalCs));
 
-// DAI-718: strategy hook (entity-specific side effects).
-builder.Services.AddSingleton<IApprovalSubject>(_ => new CampaignApprovalSubject(catalogCs));
-builder.Services.AddSingleton<IApprovalSubject>(_ => new PromoCodeApprovalSubject(catalogCs));
-builder.Services.AddSingleton<IApprovalSubject>(_ => new ProductApprovalSubject(catalogCs));
+// DAI-718 (Phase C): strategy hook — HTTP-based subjects against owning services.
+builder.Services.AddSingleton<IApprovalSubject>(sp =>
+    new CampaignApprovalSubject(sp.GetRequiredService<IHttpClientFactory>(), promotionsClient));
+builder.Services.AddSingleton<IApprovalSubject>(sp =>
+    new PromoCodeApprovalSubject(sp.GetRequiredService<IHttpClientFactory>(), promotionsClient));
+builder.Services.AddSingleton<IApprovalSubject>(sp =>
+    new ProductApprovalSubject(sp.GetRequiredService<IHttpClientFactory>(), catalogClient));
 
 // DAI-721: Content subject — HTTP callback to dCMS.Web (Umbraco) to publish/unpublish on approval.
 var contentCallback = new ContentApprovalCallbackOptions

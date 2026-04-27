@@ -1,10 +1,17 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Notification.Api.Migrations;
 using dCMS.Notification.Api.Rendering;
 using dCMS.Notification.Api.Routes;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var notificationCs = builder.Configuration.GetConnectionString("Notification");
+if (string.IsNullOrWhiteSpace(notificationCs))
+    throw new InvalidOperationException("Configure ConnectionStrings:Notification.");
+
+builder.Services.AddHostedService<NotificationDbMigrationHostedService>();
 
 if (builder.Configuration.IsDcmsAuthEnabled())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
@@ -30,6 +37,7 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddSingleton<TemplateRepository>();
 builder.Services.AddSingleton<ITemplateRenderer, ScribanTemplateRenderer>();
+builder.Services.AddSingleton<NotificationEventsRepository>();
 
 var app = builder.Build();
 
@@ -45,6 +53,7 @@ app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();
 
 app.MapTemplateRoutes();
+app.MapNotificationFeedRoutes();
 
 app.MapGet("/", () => Results.Text("dCMS.Notification.Api\n", "text/plain"));
 app.Run();

@@ -10,7 +10,9 @@
   <ItemGroup>
     <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
-    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
+    <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Imports.Domain\dCMS.Imports.Domain.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

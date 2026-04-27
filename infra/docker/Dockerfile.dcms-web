@@ -14,6 +14,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Restore .NET deps ─────────────────────────────────────────────────────────
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
+COPY src/backend/dCMS.Common/dCMS.Common.csproj dCMS.Common/
+COPY src/backend/dCMS.Catalog.Domain/dCMS.Catalog.Domain.csproj dCMS.Catalog.Domain/
+COPY src/backend/dCMS.Promotions.Domain/dCMS.Promotions.Domain.csproj dCMS.Promotions.Domain/
+COPY src/backend/dCMS.Fulfillment.Domain/dCMS.Fulfillment.Domain.csproj dCMS.Fulfillment.Domain/
+COPY src/backend/dCMS.Approvals.Domain/dCMS.Approvals.Domain.csproj dCMS.Approvals.Domain/
+COPY src/backend/dCMS.Imports.Domain/dCMS.Imports.Domain.csproj dCMS.Imports.Domain/
+COPY src/backend/dCMS.AspNetCore.Auth/dCMS.AspNetCore.Auth.csproj dCMS.AspNetCore.Auth/
+COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/
 COPY src/backend/dCMS.Web/dCMS.Web.csproj dCMS.Web/
 RUN dotnet restore dCMS.Web/dCMS.Web.csproj
 
@@ -24,6 +33,15 @@ RUN cd /spa && npm install --prefer-offline --no-audit --no-fund
 COPY src/backoffice/dcms-backoffice-spa/ /spa/
 
 # ── Copy backend source + build ───────────────────────────────────────────────
+COPY src/backend/dCMS.Messaging.Contracts/ ./dCMS.Messaging.Contracts/
+COPY src/backend/dCMS.Common/ ./dCMS.Common/
+COPY src/backend/dCMS.Catalog.Domain/ ./dCMS.Catalog.Domain/
+COPY src/backend/dCMS.Promotions.Domain/ ./dCMS.Promotions.Domain/
+COPY src/backend/dCMS.Fulfillment.Domain/ ./dCMS.Fulfillment.Domain/
+COPY src/backend/dCMS.Approvals.Domain/ ./dCMS.Approvals.Domain/
+COPY src/backend/dCMS.Imports.Domain/ ./dCMS.Imports.Domain/
+COPY src/backend/dCMS.AspNetCore.Auth/ ./dCMS.AspNetCore.Auth/
+COPY src/backend/dCMS.Infrastructure/ ./dCMS.Infrastructure/
 COPY src/backend/dCMS.Web/ ./dCMS.Web/
 
 WORKDIR /src/dCMS.Web

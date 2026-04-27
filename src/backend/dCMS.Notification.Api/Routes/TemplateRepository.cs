@@ -7,12 +7,12 @@ namespace dCMS.Notification.Api.Routes;
 
 public sealed class TemplateRepository
 {
-    private readonly string _catalogCs;
+    private readonly string _cs;
 
     public TemplateRepository(IConfiguration configuration)
     {
-        _catalogCs = configuration.GetConnectionString("Catalog")
-            ?? throw new InvalidOperationException("ConnectionStrings:Catalog is required.");
+        _cs = configuration.GetConnectionString("Notification")
+            ?? throw new InvalidOperationException("ConnectionStrings:Notification is required.");
     }
 
     public async Task<IReadOnlyList<TemplateRow>> ListAsync(string? tenantId, CancellationToken ct)
@@ -24,7 +24,7 @@ public sealed class TemplateRepository
             ORDER BY COALESCE("TenantId",'') DESC, "Key" ASC, "Locale" ASC, "Channel" ASC
             LIMIT 2000
             """;
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_cs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         var rows = await conn.QueryAsync<TemplateRow>(new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: ct))
             .ConfigureAwait(false);
@@ -64,7 +64,7 @@ public sealed class TemplateRepository
             LIMIT 1
             """;
 
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_cs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         return await conn.QuerySingleOrDefaultAsync<TemplateRow>(
             new CommandDefinition(sql, new
@@ -103,7 +103,7 @@ public sealed class TemplateRepository
                 "UpdatedBy" = EXCLUDED."UpdatedBy"
             """;
 
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_cs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await conn.ExecuteAsync(new CommandDefinition(upsert, new
         {
@@ -150,7 +150,7 @@ public sealed class TemplateRepository
               AND "Locale" = @Locale
               AND "Channel" = @Channel
             """;
-        await using var conn = new NpgsqlConnection(_catalogCs);
+        await using var conn = new NpgsqlConnection(_cs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
         return await conn.ExecuteAsync(new CommandDefinition(sql, new
         {

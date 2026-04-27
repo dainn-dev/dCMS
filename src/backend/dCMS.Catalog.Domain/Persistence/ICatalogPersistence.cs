@@ -120,17 +120,6 @@ public interface ICatalogPersistence
     Task InsertApprovalCommentAsync(string productId, string userId, string role, string message, string type,
         DateTimeOffset createdAt, CancellationToken cancellationToken = default);
 
-    Task<int> CountUnreadNotificationsAsync(string tenantId, string userId, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<NotificationEventRow>> ListNotificationsForUserAsync(string tenantId, string userId, int limit,
-        CancellationToken cancellationToken = default);
-
-    Task<int> MarkAllNotificationsReadAsync(string tenantId, string userId, DateTimeOffset readAt,
-        CancellationToken cancellationToken = default);
-
-    Task InsertNotificationAsync(string tenantId, string userId, string type, string entityId, string message,
-        DateTimeOffset createdAt, CancellationToken cancellationToken = default);
-
     Task<StoreCatalogSettingsRow?> GetStoreCatalogSettingsAsync(string tenantId, string storeId,
         CancellationToken cancellationToken = default);
 

@@ -1,5 +1,6 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Voucher.Api.Migrations;
 using dCMS.Voucher.Api.Persistence;
 using dCMS.Voucher.Api.Routes;
 using MassTransit;
@@ -7,12 +8,11 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Connection string: prefer dedicated 'Vouchers' string; fall back to 'Catalog' so dev compose
-// (single Postgres) keeps working. Splitting to a dedicated DB later is a config-only change.
-var connectionString = builder.Configuration.GetConnectionString("Vouchers")
-    ?? builder.Configuration.GetConnectionString("Catalog");
+var connectionString = builder.Configuration.GetConnectionString("Voucher");
 if (string.IsNullOrWhiteSpace(connectionString))
-    throw new InvalidOperationException("Configure ConnectionStrings:Vouchers (or Catalog).");
+    throw new InvalidOperationException("Configure ConnectionStrings:Voucher.");
+
+builder.Services.AddHostedService<VoucherDbMigrationHostedService>();
 
 if (builder.Configuration.IsDcmsAuthEnabled())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);

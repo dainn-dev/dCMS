@@ -6,13 +6,15 @@ using MassTransit;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-_ = builder.Configuration.GetConnectionString("Catalog")
-    ?? throw new InvalidOperationException("Set ConnectionStrings:Catalog.");
+_ = builder.Configuration.GetConnectionString("Notification")
+    ?? throw new InvalidOperationException("Set ConnectionStrings:Notification (used for ProcessedMessages idempotency).");
 
-builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Catalog");
-builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Catalog");
+// Phase C: ProcessedMessages now lives in dcms_notification (no longer cross-DB into dcms_catalog).
+builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Notification");
+builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Notification");
 builder.Services.AddSingleton<TemplateRepository>();
 builder.Services.AddSingleton<ITemplateRenderer, ScribanTemplateRenderer>();
+builder.Services.AddSingleton<NotificationEventsRepository>();
 
 builder.Services.AddMassTransit(x =>
 {
@@ -20,6 +22,7 @@ builder.Services.AddMassTransit(x =>
     x.AddDcmsConsumerEndpointDefaults();
 
     x.AddConsumer<EmailQueuedConsumer>();
+    x.AddConsumer<UserNotificationCreatedConsumer>();
 
     x.UsingRabbitMq((context, cfg) =>
     {

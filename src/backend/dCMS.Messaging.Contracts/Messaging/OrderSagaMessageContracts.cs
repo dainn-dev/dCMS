@@ -5,6 +5,12 @@ namespace dCMS.Core.Messaging;
 /// <summary>Order saga orchestration contracts (US-19 / DAI-317). Versioned names align with order-service design.</summary>
 public sealed record OrderPlacedLineV1(string VariantId, string WarehouseId, int Quantity);
 
+/// <summary>
+/// Sales-side line: product/quantity/line-total snapshot. Reports.Worker uses this to project sales-by-product
+/// without cross-DB reads against dcms_order. Carried alongside <see cref="OrderPlacedLineV1"/> (saga side).
+/// </summary>
+public sealed record OrderPlacedItemV1(string ProductId, int Quantity, decimal LineTotal);
+
 [MessageVersion("OrderPlaced.v1")]
 public sealed record OrderPlacedV1(
     string OrderId,
@@ -14,7 +20,8 @@ public sealed record OrderPlacedV1(
     decimal TotalAmount,
     string Currency,
     IReadOnlyList<OrderPlacedLineV1> Lines,
-    DateTimeOffset OccurredAt);
+    DateTimeOffset OccurredAt,
+    IReadOnlyList<OrderPlacedItemV1>? Items = null);
 
 public sealed record ReserveStockLineV1(string VariantId, string WarehouseId, int Quantity);
 

@@ -33,7 +33,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
-    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
     <ProjectReference Include="..\dCMS.Order.Api\dCMS.Order.Api.csproj" />
     <ProjectReference Include="..\dCMS.Order.Core\dCMS.Order.Core.csproj" />
     <ProjectReference Include="..\dCMS.Order.Infrastructure\dCMS.Order.Infrastructure.csproj" />
