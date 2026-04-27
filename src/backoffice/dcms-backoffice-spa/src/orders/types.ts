@@ -119,6 +119,41 @@ export type RefundCase = {
   changeHistory: RefundCaseHistoryEntry[];
 };
 
+// ── DAI-694/695/696/697: Per-item fulfillment state machine ──────────────────
+
+export type ItemFulfillmentStatus =
+  | "open"
+  | "allocated"
+  | "ready_for_delivery"
+  | "shipped"
+  | "delivered"
+  | "picked_up"
+  | "returned"
+  | "cancelled";
+
+/** DAI-694 — mirrors the server-side transition table in OrderItem.cs. */
+export const ITEM_NEXT_STATUSES: Record<ItemFulfillmentStatus, ItemFulfillmentStatus[]> = {
+  open: ["allocated", "cancelled"],
+  allocated: ["ready_for_delivery", "cancelled"],
+  ready_for_delivery: ["shipped", "picked_up", "cancelled"],
+  shipped: ["delivered"],
+  delivered: ["returned"],
+  picked_up: ["returned"],
+  returned: [],
+  cancelled: [],
+};
+
+export const ITEM_STATUS_LABEL: Record<ItemFulfillmentStatus, string> = {
+  open: "Open",
+  allocated: "Allocated",
+  ready_for_delivery: "Ready for Delivery",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  picked_up: "Picked Up",
+  returned: "Returned",
+  cancelled: "Cancelled",
+};
+
 export type OrderStatus =
   | "Open Order"
   | "Processing"

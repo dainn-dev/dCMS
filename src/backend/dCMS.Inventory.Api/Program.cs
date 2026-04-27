@@ -3,6 +3,7 @@ using dCMS.AspNetCore.Auth;
 using Microsoft.OpenApi.Models;
 using dCMS.Core.Pricing;
 using dCMS.Inventory.Api.Internal;
+using dCMS.Inventory.Api.Messaging;
 using dCMS.Inventory.Api.Middleware;
 using dCMS.Inventory.Api.Stock;
 using dCMS.Inventory.Api.Warehouses;
@@ -15,6 +16,7 @@ using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Pricing;
 using dCMS.Infrastructure.RateLimiting;
+using MassTransit;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -46,7 +48,40 @@ builder.Services.AddSingleton<IPriceChangeAlerter, NoopPriceChangeAlerter>();
 builder.Services.Configure<IdempotencyOptions>(o => o.PathSubstrings = ["/stock"]);
 builder.Services.Configure<InternalInventoryOptions>(builder.Configuration.GetSection(InternalInventoryOptions.SectionName));
 builder.Services.AddHostedService<InventoryDbMigrationHostedService>();
+builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Inventory");
 builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Inventory");
+
+// DAI-727 — subscribe to ProductRestockedV1 emitted by Order on approved returns.
+builder.Services.AddMassTransit(bus =>
+{
+    bus.AddDcmsPublishEnvelopeObserver();
+    bus.AddDcmsConsumerEndpointDefaults();
+    bus.AddConsumer<ProductRestockedConsumer>();
+    bus.SetKebabCaseEndpointNameFormatter();
+    bus.UsingRabbitMq((context, cfg) =>
+    {
+        var host = builder.Configuration["RabbitMq:Host"] ?? "localhost";
+        var user = builder.Configuration["RabbitMq:User"] ?? "guest";
+        var pass = builder.Configuration["RabbitMq:Pass"] ?? "guest";
+        if (ushort.TryParse(builder.Configuration["RabbitMq:Port"], out var port) && port > 0)
+        {
+            cfg.Host(host, port, "/", h =>
+            {
+                h.Username(user);
+                h.Password(pass);
+            });
+        }
+        else
+        {
+            cfg.Host(host, "/", h =>
+            {
+                h.Username(user);
+                h.Password(pass);
+            });
+        }
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 builder.Services.AddRateLimiter(options =>
 {

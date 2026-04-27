@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using dCMS.Web.Access.Caching;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Actions;
 using Umbraco.Cms.Core.Models;
@@ -23,19 +24,25 @@ public sealed class DcmsRoleController : ControllerBase
     private readonly IShortStringHelper _shortStringHelper;
     private readonly IUmbracoDatabaseFactory _dbFactory;
     private readonly IEntityService _entityService;
+    private readonly IPermissionCache _permCache;
+    private readonly IConfiguration _configuration;
 
     public DcmsRoleController(
         IUserGroupService userGroupService,
         IUserService userService,
         IShortStringHelper shortStringHelper,
         IUmbracoDatabaseFactory dbFactory,
-        IEntityService entityService)
+        IEntityService entityService,
+        IPermissionCache permCache,
+        IConfiguration configuration)
     {
         _userGroupService = userGroupService;
         _userService = userService;
         _shortStringHelper = shortStringHelper;
         _dbFactory = dbFactory;
         _entityService = entityService;
+        _permCache = permCache;
+        _configuration = configuration;
     }
 
     // ── GET / ────────────────────────────────────────────────────────────────
@@ -246,12 +253,22 @@ public sealed class DcmsRoleController : ControllerBase
                     alias, module, entry.Action, entry.Granted ? 1 : 0).ConfigureAwait(false);
             }
 
+            // DAI-683: active invalidation — bump tenant-level permission cache version.
+            await _permCache.BumpTenantVersionAsync(ResolveTenantId()).ConfigureAwait(false);
+
             return Ok(new { data = new { updated = request.Actions.Count }, meta = (object?)null, error = (object?)null });
         }
         catch (Exception ex)
         {
             return StatusCode(500, ErrorEnvelope("Failed to upsert module permissions.", ex));
         }
+    }
+
+    private string ResolveTenantId()
+    {
+        // Umbraco backoffice is typically single-tenant per instance; use config hint when available.
+        var tid = _configuration.GetSection("Dcms:Estore")["TenantId"]?.Trim();
+        return string.IsNullOrWhiteSpace(tid) ? "default" : tid!;
     }
 
     // ── GET /{alias}/umbraco-permissions ──────────────────────────────────────

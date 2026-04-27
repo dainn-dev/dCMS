@@ -16,6 +16,7 @@
     <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
     <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Promotions.Contracts\dCMS.Promotions.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

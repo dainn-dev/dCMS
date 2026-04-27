@@ -52,7 +52,11 @@ export function UmbracoTreePicker({ kind, value, onChange, disabled, className }
     <El
       ref={ref}
       class={className /* custom elements use `class`, not `className` */}
-      style={disabled ? { pointerEvents: "none", opacity: 0.5 } : undefined}
+      style={{
+        display: "block",
+        width: "100%",
+        ...(disabled ? { pointerEvents: "none", opacity: 0.5 } : undefined),
+      }}
     />
   );
 }

@@ -6,6 +6,8 @@ public sealed class Order
     private readonly List<OrderItem> _items;
     private readonly List<IDomainEvent> _domainEvents = [];
 
+    private readonly List<AppliedPromotionSnapshot> _appliedPromotions;
+
     private Order(
         string id,
         string tenantId,
@@ -19,8 +21,18 @@ public sealed class Order
         string? failureReason,
         string? failureErrorCode,
         DateTimeOffset? failedAt,
-        int retryCount)
+        int retryCount,
+        string? customerName,
+        string? customerEmail,
+        string? customerPhone,
+        decimal orderDiscount,
+        string? promoCode,
+        string? promoCodeId,
+        IEnumerable<AppliedPromotionSnapshot>? appliedPromotions)
     {
+        if (orderDiscount < 0m)
+            throw new ArgumentOutOfRangeException(nameof(orderDiscount), "OrderDiscount cannot be negative.");
+
         Id = id;
         TenantId = tenantId;
         StoreId = storeId;
@@ -34,16 +46,46 @@ public sealed class Order
         FailureErrorCode = failureErrorCode;
         FailedAt = failedAt;
         RetryCount = retryCount;
+        CustomerName = NormalizeOrNull(customerName);
+        CustomerEmail = NormalizeOrNull(customerEmail);
+        CustomerPhone = NormalizeOrNull(customerPhone);
+        OrderDiscount = orderDiscount;
+        PromoCode = NormalizeOrNull(promoCode);
+        PromoCodeId = NormalizeOrNull(promoCodeId);
+        _appliedPromotions = appliedPromotions?.ToList() ?? new List<AppliedPromotionSnapshot>();
+    }
+
+    private static string? NormalizeOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length == 0 ? null : trimmed;
     }
 
     public string Id { get; }
     public string TenantId { get; }
     public string StoreId { get; }
     public string CustomerId { get; }
+    /// <summary>DAI-649: customer profile snapshot captured at order creation.</summary>
+    public string? CustomerName { get; }
+    public string? CustomerEmail { get; }
+    public string? CustomerPhone { get; }
     public OrderStatus Status { get; private set; }
     public Money Total { get; }
     public ShippingAddress ShippingAddress { get; }
     public IReadOnlyList<OrderItem> Items => _items;
+
+    /// <summary>DAI-725 — order-level promotion discount, applied to subtotal of <see cref="LineTotal"/>s.</summary>
+    public decimal OrderDiscount { get; }
+
+    /// <summary>DAI-725 — promo code text supplied by customer (null if none).</summary>
+    public string? PromoCode { get; }
+
+    /// <summary>DAI-725 — internal Promotions PromoCodeId (FK into Promotions DB) for redemption side-effects.</summary>
+    public string? PromoCodeId { get; }
+
+    /// <summary>DAI-725 — snapshot of campaigns applied at order create time. Drives saga Confirm/Release.</summary>
+    public IReadOnlyList<AppliedPromotionSnapshot> AppliedPromotions => _appliedPromotions;
 
     /// <summary>Payment provider intent id for saga correlation (DAI-315). Set before first persistence.</summary>
     public string? PaymentIntentId { get; private set; }
@@ -66,7 +108,14 @@ public sealed class Order
         IReadOnlyList<OrderItem> items,
         IReadOnlyList<OrderPlacedLine> placementLines,
         ShippingAddress shippingAddress,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        string? customerName = null,
+        string? customerEmail = null,
+        string? customerPhone = null,
+        decimal orderDiscount = 0m,
+        string? promoCode = null,
+        string? promoCodeId = null,
+        IReadOnlyList<AppliedPromotionSnapshot>? appliedPromotions = null)
     {
         if (string.IsNullOrWhiteSpace(orderId))
             throw new ArgumentException("Order id is required.", nameof(orderId));
@@ -75,7 +124,14 @@ public sealed class Order
         if (placementLines is null || placementLines.Count == 0)
             throw new ArgumentException("At least one placement line is required for saga messaging.", nameof(placementLines));
 
-        var total = Money.Sum(items.Select(i => i.LineTotal()));
+        var lineSubtotal = Money.Sum(items.Select(i => i.LineTotal()));
+        if (orderDiscount > lineSubtotal.Amount)
+            throw new ArgumentOutOfRangeException(nameof(orderDiscount),
+                "OrderDiscount cannot exceed the sum of line totals.");
+
+        var totalAmount = lineSubtotal.Amount - orderDiscount;
+        if (totalAmount < 0m) totalAmount = 0m;
+        var total = new Money(totalAmount, lineSubtotal.Currency);
         var order = new Order(
             orderId,
             tenantId,
@@ -89,7 +145,14 @@ public sealed class Order
             failureReason: null,
             failureErrorCode: null,
             failedAt: null,
-            retryCount: 0);
+            retryCount: 0,
+            customerName,
+            customerEmail,
+            customerPhone,
+            orderDiscount,
+            promoCode,
+            promoCodeId,
+            appliedPromotions);
 
         order._domainEvents.Add(new OrderPlaced(
             order.Id,
@@ -118,9 +181,17 @@ public sealed class Order
         string? failureReason = null,
         string? failureErrorCode = null,
         DateTimeOffset? failedAt = null,
-        int retryCount = 0) =>
+        int retryCount = 0,
+        string? customerName = null,
+        string? customerEmail = null,
+        string? customerPhone = null,
+        decimal orderDiscount = 0m,
+        string? promoCode = null,
+        string? promoCodeId = null,
+        IEnumerable<AppliedPromotionSnapshot>? appliedPromotions = null) =>
         new(id, tenantId, storeId, customerId, status, total, shippingAddress, items, paymentIntentId, failureReason,
-            failureErrorCode, failedAt, retryCount);
+            failureErrorCode, failedAt, retryCount, customerName, customerEmail, customerPhone,
+            orderDiscount, promoCode, promoCodeId, appliedPromotions);
 
     /// <summary>Assigns the payment intent id after Payment Service returns success (DAI-315).</summary>
     public void AssignPaymentIntent(string paymentIntentId)
@@ -236,6 +307,64 @@ public sealed class Order
 
         Status = OrderStatus.Cancelled;
         _domainEvents.Add(new OrderFailureResolved(Id, note ?? "", occurredAt));
+    }
+
+    // ── DAI-695 Item-level fulfillment + state derivation ───────────────────
+
+    private static readonly HashSet<OrderStatus> PreFulfillmentStatuses =
+    [
+        OrderStatus.PaymentPending,
+        OrderStatus.Confirmed,
+        OrderStatus.PaymentFailed,
+        OrderStatus.AuthFailed,
+        OrderStatus.AddressError,
+        OrderStatus.StockError,
+        OrderStatus.SystemError,
+    ];
+
+    /// <summary>
+    /// DAI-695 — recompute Order.Status from item fulfillment statuses.
+    /// Skipped while the order is still in a pre-fulfillment status so we don't
+    /// leak Processing back over PaymentPending/Confirmed/Failed.
+    /// </summary>
+    public void RecalculateStatus()
+    {
+        if (PreFulfillmentStatuses.Contains(Status))
+            return;
+        Status = OrderStatusDerivation.Derive(_items);
+    }
+
+    private OrderItem RequireItem(string lineId)
+    {
+        var item = _items.FirstOrDefault(i => i.Id == lineId);
+        if (item is null)
+            throw new KeyNotFoundException($"Order {Id} has no line {lineId}.");
+        return item;
+    }
+
+    /// <summary>DAI-694 — admin/saga-level item transition with order-status rollup.</summary>
+    public void TransitionItem(string lineId, OrderItemFulfillmentStatus next)
+    {
+        RequireItem(lineId).TransitionTo(next);
+        RecalculateStatus();
+    }
+
+    /// <summary>DAI-696 — assign hashed pickup PIN when item is ready for collection.</summary>
+    public void AssignItemPickupPin(string lineId, string pinHash) =>
+        RequireItem(lineId).AssignPickupPin(pinHash);
+
+    /// <summary>DAI-696 — record a confirmed pickup; rolls up order status.</summary>
+    public void MarkItemPickedUp(string lineId, string staffOrCustomerId, DateTimeOffset occurredAt)
+    {
+        RequireItem(lineId).MarkPickedUp(staffOrCustomerId, occurredAt);
+        RecalculateStatus();
+    }
+
+    /// <summary>DAI-697 — record returned units (full or partial); rolls up order status.</summary>
+    public void RecordItemReturn(string lineId, int qty)
+    {
+        RequireItem(lineId).RecordReturn(qty);
+        RecalculateStatus();
     }
 }
 

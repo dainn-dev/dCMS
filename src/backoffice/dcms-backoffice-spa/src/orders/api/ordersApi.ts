@@ -9,10 +9,12 @@
  * - { error: { code, message } } on failure
  */
 
-import type { Order } from "../types";
+import type { ItemFulfillmentStatus, Order } from "../types";
 import { GATEWAY } from "../../estore/api/gatewayConfig";
 
 const BASE = GATEWAY.orders;
+// DAI-728 — cross-order RMA endpoints route through dedicated gateway path.
+const RETURNS_BASE = GATEWAY.returns;
 
 export type OrderFilters = {
   customerId?: string;
@@ -195,6 +197,13 @@ export type LineItemDto = {
   lineTotal: { amount: number; currency: string };
   productNameSnapshot: string | null;
   variantSnapshot: Record<string, unknown> | null;
+  /** DAI-694: per-item fulfillment status (open/allocated/.../returned/cancelled). */
+  fulfillmentStatus?: ItemFulfillmentStatus | null;
+  /** DAI-697: cumulative returned units for the line. */
+  returnedQuantity?: number | null;
+  /** DAI-696: pickup audit columns (only set after confirm-pickup). */
+  pickedUpAt?: string | null;
+  pickedUpBy?: string | null;
 };
 
 export type OrderDetailDto = {
@@ -202,6 +211,10 @@ export type OrderDetailDto = {
   tenantId: string;
   storeId: string;
   customerId: string;
+  // DAI-649: customer profile snapshot — null for orders created before the snapshot column existed.
+  customerName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
   status: string;
   total: { amount: number; currency: string };
   paymentIntentId: string | null;
@@ -239,9 +252,9 @@ export function orderDetailFromDto(dto: OrderDetailDto): Order {
     orderId: String(dto.orderId ?? ""),
     orderDate: fmtDate(String(dto.createdAt ?? "")),
     type: "Online",
-    customerName: "",
-    customerEmail: "",
-    customerContactNo: null,
+    customerName: dto.customerName ?? "",
+    customerEmail: dto.customerEmail ?? "",
+    customerContactNo: dto.customerPhone ?? null,
     status: mapApiStatusToUiLabel(String(dto.status ?? "")),
     fulfilledDate: null,
     deliveryDate: null,
@@ -424,6 +437,222 @@ export async function resolveFailedOrder(
     credentials: "same-origin",
     headers: orderHeaders(tenantId, storeId, token),
     body: JSON.stringify(note ? { note } : {}),
+  });
+  await throwIfApiError(res);
+}
+
+// ── DAI-694/696/697 Per-item fulfillment + pickup + returns ──────────────────
+
+/** DAI-694 — PATCH item fulfillment status. */
+export async function updateItemFulfillmentStatus(
+  tenantId: string,
+  storeId: string,
+  orderId: string,
+  lineId: string,
+  status: ItemFulfillmentStatus,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE}/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}/fulfillment-status`,
+    {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: orderHeaders(tenantId, storeId, token),
+      body: JSON.stringify({ status }),
+    },
+  );
+  await throwIfApiError(res);
+}
+
+/** DAI-696 — Issue plaintext pickup PIN (returned ONCE; backend stores hash only). */
+export async function issuePickupPin(
+  tenantId: string,
+  storeId: string,
+  orderId: string,
+  lineId: string,
+  token?: string,
+): Promise<{ pin: string }> {
+  const res = await fetch(
+    `${BASE}/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}/issue-pickup-pin`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: orderHeaders(tenantId, storeId, token),
+    },
+  );
+  await throwIfApiError(res);
+  const body = (await res.json()) as { pin: string };
+  return { pin: String(body?.pin ?? "") };
+}
+
+/** DAI-696 — Verify PIN + transition line to PickedUp. */
+export async function confirmPickup(
+  tenantId: string,
+  storeId: string,
+  orderId: string,
+  lineId: string,
+  pin: string,
+  pickedUpBy: string | null,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE}/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(lineId)}/confirm-pickup`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: orderHeaders(tenantId, storeId, token),
+      body: JSON.stringify({ pin, pickedUpBy }),
+    },
+  );
+  await throwIfApiError(res);
+}
+
+// ── DAI-697 Returns / RMA API ─────────────────────────────────────────────────
+
+export type ReturnReason =
+  | "WrongItem"
+  | "Defective"
+  | "NotAsDescribed"
+  | "ChangedMind"
+  | "DamagedInTransit"
+  | "Other";
+
+export type ReturnStatus = "Pending" | "Approved" | "Rejected" | "Completed";
+
+export type ReturnLineDto = {
+  id: string;
+  orderItemId: string;
+  quantity: number;
+  reason: ReturnReason | null;
+};
+
+export type ReturnDto = {
+  returnId: string;
+  orderId: string;
+  status: ReturnStatus;
+  reason: ReturnReason;
+  notes: string | null;
+  refundCaseId: string | null;
+  createdAt: string;
+  approvedAt: string | null;
+  approvedBy: string | null;
+  completedAt: string | null;
+  items: ReturnLineDto[];
+};
+
+export type CreateReturnLine = { lineId: string; quantity: number; reason?: ReturnReason | null };
+
+export async function createReturn(
+  tenantId: string,
+  storeId: string,
+  orderId: string,
+  payload: { reason: ReturnReason; notes?: string | null; lines: CreateReturnLine[] },
+  idempotencyKey: string,
+  token?: string,
+): Promise<{ returnId: string; orderId: string; status: ReturnStatus }> {
+  const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/returns`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { ...orderHeaders(tenantId, storeId, token), "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(payload),
+  });
+  await throwIfApiError(res);
+  return (await res.json()) as { returnId: string; orderId: string; status: ReturnStatus };
+}
+
+export async function listReturnsForOrder(
+  tenantId: string,
+  storeId: string,
+  orderId: string,
+  token?: string,
+): Promise<ReturnDto[]> {
+  const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/returns`, {
+    credentials: "same-origin",
+    headers: orderHeaders(tenantId, storeId, token),
+  });
+  await throwIfApiError(res);
+  const body = (await res.json()) as { items: ReturnDto[] };
+  return body.items ?? [];
+}
+
+export async function listReturns(
+  tenantId: string,
+  storeId: string,
+  filters: { status?: ReturnStatus; limit?: number } | undefined,
+  token?: string,
+): Promise<ReturnDto[]> {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  const qs = params.toString() ? `?${params.toString()}` : "";
+
+  const res = await fetch(`${RETURNS_BASE}/${qs}`, {
+    credentials: "same-origin",
+    headers: orderHeaders(tenantId, storeId, token),
+  });
+  await throwIfApiError(res);
+  const body = (await res.json()) as { items: ReturnDto[] };
+  return body.items ?? [];
+}
+
+export async function getReturn(
+  tenantId: string,
+  storeId: string,
+  returnId: string,
+  token?: string,
+): Promise<ReturnDto> {
+  const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}`, {
+    credentials: "same-origin",
+    headers: orderHeaders(tenantId, storeId, token),
+  });
+  await throwIfApiError(res);
+  return (await res.json()) as ReturnDto;
+}
+
+export async function approveReturn(
+  tenantId: string,
+  storeId: string,
+  returnId: string,
+  approvedBy: string | null,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}/approve`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: orderHeaders(tenantId, storeId, token),
+    body: JSON.stringify(approvedBy ? { approvedBy } : {}),
+  });
+  await throwIfApiError(res);
+}
+
+export async function rejectReturn(
+  tenantId: string,
+  storeId: string,
+  returnId: string,
+  approvedBy: string | null,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}/reject`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: orderHeaders(tenantId, storeId, token),
+    body: JSON.stringify(approvedBy ? { approvedBy } : {}),
+  });
+  await throwIfApiError(res);
+}
+
+export async function completeReturn(
+  tenantId: string,
+  storeId: string,
+  returnId: string,
+  refundCaseId: string | null,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}/complete`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: orderHeaders(tenantId, storeId, token),
+    body: JSON.stringify(refundCaseId ? { refundCaseId } : {}),
   });
   await throwIfApiError(res);
 }

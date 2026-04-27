@@ -10,6 +10,8 @@ using dCMS.Order.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using dCMS.Promotions.Contracts.Evaluate;
 
 namespace dCMS.Order.Api.Routes;
 
@@ -25,6 +27,11 @@ public static class OrderHttpRoutes
         app.MapGet("/api/orders/{orderId}", GetOrderById)
             .WithName("GetOrderById")
             .WithTags("orders")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+        app.MapGet("/api/orders/{orderId}/payment", GetOrderPayment)
+            .WithName("GetOrderPayment")
+            .WithTags("payments")
             .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
         app.MapGet("/api/orders", ListOrders)
@@ -72,6 +79,26 @@ public static class OrderHttpRoutes
             .WithName("PutRefundCaseForOrder")
             .WithTags("refunds")
             .RequireAuthorization(DcmsPolicies.OrderFailureManage)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        // DAI-694 — admin per-item fulfillment status transition.
+        app.MapPatch("/api/orders/{orderId}/items/{lineId}/fulfillment-status", PatchItemFulfillmentStatus)
+            .WithName("PatchOrderItemFulfillmentStatus")
+            .WithTags("orders")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        // DAI-696 — pickup PIN issuance + confirm.
+        app.MapPost("/api/orders/{orderId}/items/{lineId}/issue-pickup-pin", IssuePickupPin)
+            .WithName("IssueOrderItemPickupPin")
+            .WithTags("orders")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        app.MapPost("/api/orders/{orderId}/items/{lineId}/confirm-pickup", ConfirmPickup)
+            .WithName("ConfirmOrderItemPickup")
+            .WithTags("orders")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
 
         // DAI-637 Failed-order recovery transitions
@@ -290,6 +317,78 @@ public static class OrderHttpRoutes
         return Results.Text(json, "application/json; charset=utf-8");
     }
 
+    private static async Task<IResult> GetOrderPayment(
+        string orderId,
+        HttpContext http,
+        [FromServices] IOrderService orders,
+        [FromServices] OrderPaymentQueryStore payments,
+        [FromServices] IConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (!Guid.TryParse(orderId, out var oid))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ORDER_ID", message = "orderId must be a UUID." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var timed = await orders.GetTimedByIdAsync(tenantId, storeId, orderId, cancellationToken).ConfigureAwait(false);
+        if (timed is null)
+        {
+            return Results.Json(
+                new { error = new { code = "NOT_FOUND", message = "Order not found." } },
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (OrderAuthorization.ValidateCustomerOwnsOrder(http, configuration, timed.Order.CustomerId) is { } custErr)
+            return custErr;
+
+        var view = await payments.GetByOrderIdAsync(oid, cancellationToken).ConfigureAwait(false);
+        if (view is null)
+        {
+            // Back-compat: order might still be single-payment; expose basic gateway intent if present.
+            return Results.Json(new
+            {
+                orderId = timed.Order.Id,
+                total = new { amount = timed.Order.Total.Amount, currency = timed.Order.Total.Currency },
+                components = timed.Order.PaymentIntentId is null
+                    ? Array.Empty<object>()
+                    : new object[]
+                    {
+                        new
+                        {
+                            type = "Gateway",
+                            amount = timed.Order.Total.Amount,
+                            externalRef = timed.Order.PaymentIntentId,
+                            state = "Unknown"
+                        }
+                    }
+            });
+        }
+
+        return Results.Json(new
+        {
+            orderId = view.OrderId,
+            total = new { amount = view.Total, currency = timed.Order.Total.Currency },
+            status = view.Status,
+            components = view.Components.Select(c => new
+            {
+                id = c.Id,
+                type = c.Type,
+                amount = c.Amount,
+                externalRef = c.ExternalRef,
+                state = c.State,
+                lastError = c.LastError,
+                ordering = c.Ordering,
+                createdAt = c.CreatedAt,
+                updatedAt = c.UpdatedAt
+            }).ToList()
+        });
+    }
+
     private static async Task<IResult> ListOrders(
         HttpContext http,
         [FromServices] IOrderService orders,
@@ -366,6 +465,10 @@ public static class OrderHttpRoutes
             tenantId = o.TenantId,
             storeId = o.StoreId,
             customerId = o.CustomerId,
+            // DAI-649: snapshot — null when order pre-dates the snapshot column.
+            customerName = o.CustomerName,
+            customerEmail = o.CustomerEmail,
+            customerPhone = o.CustomerPhone,
             status = ToApiStatus(o.Status),
             total = new { amount = o.Total.Amount, currency = o.Total.Currency },
             paymentIntentId = o.PaymentIntentId,
@@ -406,8 +509,26 @@ public static class OrderHttpRoutes
                 quantity = i.Quantity,
                 unitPrice = new { amount = i.UnitPrice.Amount, currency = i.UnitPrice.Currency },
                 lineTotal = new { amount = i.LineTotal().Amount, currency = i.UnitPrice.Currency },
+                lineDiscount = i.LineDiscount,
                 productNameSnapshot = i.ProductNameSnapshot,
                 variantSnapshot = ParseVariantSnapshotElement(i.VariantSnapshotJson),
+                fulfillmentStatus = ToApiItemStatus(i.FulfillmentStatus),
+                returnedQuantity = i.ReturnedQuantity,
+                pickedUpAt = i.PickedUpAt,
+                pickedUpBy = i.PickedUpBy,
+            }).ToList(),
+            // DAI-725 — promotion snapshot fields
+            orderDiscount = o.OrderDiscount,
+            promoCode = o.PromoCode,
+            promoCodeId = o.PromoCodeId,
+            appliedPromotions = o.AppliedPromotions.Select(p => new
+            {
+                id = p.Id,
+                campaignId = p.CampaignId,
+                editorKind = p.EditorKind,
+                name = p.Name,
+                amount = p.Amount,
+                promoCode = p.PromoCode,
             }).ToList(),
         };
     }
@@ -499,6 +620,8 @@ public static class OrderHttpRoutes
         [FromBody] CreateOrderApiRequest? body,
         [FromServices] IOrderService orders,
         [FromServices] IConfiguration configuration,
+        [FromServices] IPromotionsClient promotions,
+        [FromServices] ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         if (body is null)
@@ -541,6 +664,13 @@ public static class OrderHttpRoutes
 
         if (OrderAuthorization.ValidateCreateOrderCustomer(http, configuration, command.CustomerId) is { } custErr)
             return custErr;
+
+        var promoLogger = loggerFactory.CreateLogger("OrderHttpRoutes.Promotions");
+        var (enrichedCommand, promoErr) = await EvaluatePromotionsAsync(
+            promotions, configuration, promoLogger, command, body.PromoCode, cancellationToken).ConfigureAwait(false);
+        if (promoErr is not null)
+            return promoErr;
+        command = enrichedCommand;
 
         try
         {
@@ -901,7 +1031,10 @@ public static class OrderHttpRoutes
             idempotencyKey,
             lines,
             shipping,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            body.CustomerName,
+            body.CustomerEmail,
+            body.CustomerPhone);
 
         return true;
     }
@@ -1037,7 +1170,331 @@ public static class OrderHttpRoutes
 
     public sealed record ResolveFailureBody(string? Note);
 
-    private static string ToApiStatus(OrderStatus s) =>
+    public sealed record PatchItemStatusBody(string? Status);
+
+    public sealed record ConfirmPickupBody(string? Pin, string? PickedUpBy);
+
+    /// <summary>DAI-694 — admin transitions a single line's fulfillment status; order status is recomputed in the same transaction.</summary>
+    private static async Task<IResult> PatchItemFulfillmentStatus(
+        string orderId,
+        string lineId,
+        PatchItemStatusBody? body,
+        HttpContext http,
+        [FromServices] IConfiguration configuration,
+        [FromServices] IOrderService orders,
+        [FromServices] IOrderDetailCache orderDetailCache,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (configuration.IsDcmsAuthEnabled() && !OrderAuthorization.IsStaff(http.User))
+        {
+            return Results.Json(
+                new { error = new { code = "FORBIDDEN", message = "Only staff can change item fulfillment." } },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!Guid.TryParse(orderId, out _))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ORDER_ID", message = "orderId must be a UUID." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrWhiteSpace(lineId))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_LINE_ID", message = "lineId is required." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (body is null || !TryParseApiItemStatus(body.Status ?? "", out var nextStatus))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_STATUS", message = "status is required (one of open, allocated, ready_for_delivery, shipped, delivered, picked_up, returned, cancelled)." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var timed = await orders.GetTimedByIdAsync(tenantId, storeId, orderId, cancellationToken).ConfigureAwait(false);
+        if (timed is null)
+        {
+            return Results.Json(
+                new { error = new { code = "NOT_FOUND", message = "Order not found." } },
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var line = timed.Order.Items.FirstOrDefault(i => string.Equals(i.Id, lineId, StringComparison.Ordinal));
+        if (line is null)
+        {
+            return Results.Json(
+                new { error = new { code = "LINE_NOT_FOUND", message = "Line not found on this order." } },
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (line.FulfillmentStatus == nextStatus)
+        {
+            return Results.Json(new
+            {
+                orderId,
+                lineId,
+                fulfillmentStatus = ToApiItemStatus(nextStatus),
+                orderStatus = ToApiStatus(timed.Order.Status),
+            });
+        }
+
+        if (!OrderItem.IsValidTransition(line.FulfillmentStatus, nextStatus))
+        {
+            return Results.Json(
+                new
+                {
+                    error = new
+                    {
+                        code = "INVALID_TRANSITION",
+                        message = $"Cannot transition line from {ToApiItemStatus(line.FulfillmentStatus)} to {ToApiItemStatus(nextStatus)}.",
+                    },
+                },
+                statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
+
+        var cs = configuration.GetConnectionString("Order")
+                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+
+        await using var uow = new OrderUnitOfWork(cs);
+        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rows = await uow.UpdateItemFulfillmentStatusAsync(
+                tenantId,
+                storeId,
+                orderId,
+                lineId,
+                expectedFromStatuses: new[] { line.FulfillmentStatus.ToString() },
+                newStatus: nextStatus.ToString(),
+                occurredAt: DateTimeOffset.UtcNow,
+                cancellationToken).ConfigureAwait(false);
+
+            if (rows == 0)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "STALE_STATE", message = "Item state changed concurrently; reload and retry." } },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await uow.RecalculateOrderStatusAsync(tenantId, storeId, orderId, DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+
+            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await orderDetailCache.InvalidateAsync(orderId, cancellationToken).ConfigureAwait(false);
+
+            var refreshed = await orders.GetTimedByIdAsync(tenantId, storeId, orderId, cancellationToken).ConfigureAwait(false);
+            var orderStatus = refreshed?.Order.Status ?? timed.Order.Status;
+
+            return Results.Json(new
+            {
+                orderId,
+                lineId,
+                fulfillmentStatus = ToApiItemStatus(nextStatus),
+                orderStatus = ToApiStatus(orderStatus),
+            });
+        }
+        catch
+        {
+            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>DAI-696 — issue a fresh pickup PIN. Plaintext PIN is returned exactly once; only the hash is stored.</summary>
+    private static async Task<IResult> IssuePickupPin(
+        string orderId,
+        string lineId,
+        HttpContext http,
+        [FromServices] IConfiguration configuration,
+        [FromServices] IOrderService orders,
+        [FromServices] IOrderDetailCache orderDetailCache,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (configuration.IsDcmsAuthEnabled() && !OrderAuthorization.IsStaff(http.User))
+        {
+            return Results.Json(
+                new { error = new { code = "FORBIDDEN", message = "Only staff can issue pickup PINs." } },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!Guid.TryParse(orderId, out _) || string.IsNullOrWhiteSpace(lineId))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ARGUMENTS", message = "orderId must be a UUID and lineId is required." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var timed = await orders.GetTimedByIdAsync(tenantId, storeId, orderId, cancellationToken).ConfigureAwait(false);
+        var line = timed?.Order.Items.FirstOrDefault(i => string.Equals(i.Id, lineId, StringComparison.Ordinal));
+        if (timed is null || line is null)
+        {
+            return Results.Json(
+                new { error = new { code = "NOT_FOUND", message = "Order or line not found." } },
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        if (line.FulfillmentStatus != OrderItemFulfillmentStatus.ReadyForDelivery)
+        {
+            return Results.Json(
+                new { error = new { code = "NOT_READY", message = "PIN can only be issued when item is ready_for_delivery." } },
+                statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
+
+        var pin = PickupPinService.GeneratePin();
+        var hash = PickupPinService.Hash(pin);
+
+        var cs = configuration.GetConnectionString("Order")
+                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+
+        await using var uow = new OrderUnitOfWork(cs);
+        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rows = await uow.SetItemPickupPinHashAsync(tenantId, storeId, orderId, lineId, hash, cancellationToken)
+                .ConfigureAwait(false);
+            if (rows == 0)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "INVALID_STATE", message = "Cannot issue pickup PIN for this line in its current state." } },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await orderDetailCache.InvalidateAsync(orderId, cancellationToken).ConfigureAwait(false);
+
+            return Results.Json(new { orderId, lineId, pin });
+        }
+        catch
+        {
+            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>DAI-696 — verify PIN, transition line to PickedUp, recompute order status.</summary>
+    private static async Task<IResult> ConfirmPickup(
+        string orderId,
+        string lineId,
+        ConfirmPickupBody? body,
+        HttpContext http,
+        [FromServices] IConfiguration configuration,
+        [FromServices] IOrderService orders,
+        [FromServices] IOrderDetailCache orderDetailCache,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return MissingTenantStore();
+
+        if (configuration.IsDcmsAuthEnabled() && !OrderAuthorization.IsStaff(http.User))
+        {
+            return Results.Json(
+                new { error = new { code = "FORBIDDEN", message = "Only staff can confirm pickup." } },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!Guid.TryParse(orderId, out _) || string.IsNullOrWhiteSpace(lineId))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_ARGUMENTS", message = "orderId must be a UUID and lineId is required." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var pin = body?.Pin?.Trim() ?? "";
+        if (pin.Length == 0)
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_PIN", message = "pin is required." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var pickedUpBy = string.IsNullOrWhiteSpace(body?.PickedUpBy)
+            ? http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            : body!.PickedUpBy!.Trim();
+
+        var cs = configuration.GetConnectionString("Order")
+                 ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+
+        await using var uow = new OrderUnitOfWork(cs);
+        await uow.BeginAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var row = await uow.GetItemForPickupAsync(tenantId, storeId, orderId, lineId, cancellationToken)
+                .ConfigureAwait(false);
+            if (row is null)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "NOT_FOUND", message = "Order or line not found." } },
+                    statusCode: StatusCodes.Status404NotFound);
+            }
+
+            if (!string.Equals(row.FulfillmentStatus, nameof(OrderItemFulfillmentStatus.ReadyForDelivery), StringComparison.OrdinalIgnoreCase))
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "NOT_READY", message = "Item is not ready for pickup." } },
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+
+            if (!PickupPinService.Verify(pin, row.PickupPinHash))
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "INVALID_PIN", message = "PIN does not match." } },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var rows = await uow.ConfirmItemPickupAsync(
+                tenantId,
+                storeId,
+                orderId,
+                lineId,
+                pickedUpBy ?? "",
+                DateTimeOffset.UtcNow,
+                cancellationToken).ConfigureAwait(false);
+
+            if (rows == 0)
+            {
+                await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return Results.Json(
+                    new { error = new { code = "STALE_STATE", message = "Item state changed concurrently; reload and retry." } },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await uow.RecalculateOrderStatusAsync(tenantId, storeId, orderId, DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+
+            await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+            await orderDetailCache.InvalidateAsync(orderId, cancellationToken).ConfigureAwait(false);
+
+            var refreshed = await orders.GetTimedByIdAsync(tenantId, storeId, orderId, cancellationToken).ConfigureAwait(false);
+            return Results.Json(new
+            {
+                orderId,
+                lineId,
+                fulfillmentStatus = ToApiItemStatus(OrderItemFulfillmentStatus.PickedUp),
+                orderStatus = ToApiStatus(refreshed?.Order.Status ?? OrderStatus.Processing),
+                pickedUpBy,
+            });
+        }
+        catch
+        {
+            await uow.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    internal static string ToApiStatus(OrderStatus s) =>
         s switch
         {
             OrderStatus.PaymentPending => "payment_pending",
@@ -1052,6 +1509,161 @@ public static class OrderHttpRoutes
             OrderStatus.AddressError => "address_error",
             OrderStatus.StockError => "stock_error",
             OrderStatus.SystemError => "system_error",
+            // DAI-695 item-derived states
+            OrderStatus.ReadyForDelivery => "ready_for_delivery",
+            OrderStatus.PickedUp => "picked_up",
+            OrderStatus.Returned => "returned",
+            OrderStatus.PartialFulfilled => "partial_fulfilled",
             _ => s.ToString().ToLowerInvariant(),
         };
+
+    internal static string ToApiItemStatus(OrderItemFulfillmentStatus s) =>
+        s switch
+        {
+            OrderItemFulfillmentStatus.Open => "open",
+            OrderItemFulfillmentStatus.Allocated => "allocated",
+            OrderItemFulfillmentStatus.ReadyForDelivery => "ready_for_delivery",
+            OrderItemFulfillmentStatus.Shipped => "shipped",
+            OrderItemFulfillmentStatus.Delivered => "delivered",
+            OrderItemFulfillmentStatus.PickedUp => "picked_up",
+            OrderItemFulfillmentStatus.Returned => "returned",
+            OrderItemFulfillmentStatus.Cancelled => "cancelled",
+            _ => s.ToString().ToLowerInvariant(),
+        };
+
+    internal static bool TryParseApiItemStatus(string api, out OrderItemFulfillmentStatus status)
+    {
+        switch ((api ?? "").Trim().ToLowerInvariant())
+        {
+            case "open": status = OrderItemFulfillmentStatus.Open; return true;
+            case "allocated": status = OrderItemFulfillmentStatus.Allocated; return true;
+            case "ready_for_delivery": status = OrderItemFulfillmentStatus.ReadyForDelivery; return true;
+            case "shipped": status = OrderItemFulfillmentStatus.Shipped; return true;
+            case "delivered": status = OrderItemFulfillmentStatus.Delivered; return true;
+            case "picked_up": status = OrderItemFulfillmentStatus.PickedUp; return true;
+            case "returned": status = OrderItemFulfillmentStatus.Returned; return true;
+            case "cancelled": status = OrderItemFulfillmentStatus.Cancelled; return true;
+            default: status = default; return false;
+        }
+    }
+
+    /// <summary>
+    /// DAI-693 / DAI-725 — Calls Promotions /evaluate and threads adjustments back into a new
+    /// <see cref="CreateOrderCommand"/>. Returns (enrichedCommand, null) on success; (originalCommand, IResult)
+    /// when the call fails and Promotions:Required=true (fail-closed) or when a promo code is rejected.
+    /// </summary>
+    private static async Task<(CreateOrderCommand Command, IResult? Error)> EvaluatePromotionsAsync(
+        IPromotionsClient promotions,
+        IConfiguration configuration,
+        ILogger logger,
+        CreateOrderCommand command,
+        string? promoCode,
+        CancellationToken cancellationToken)
+    {
+        var currency = command.Lines.FirstOrDefault()?.UnitPrice.Currency ?? "VND";
+        var subtotal = command.Lines.Sum(l => l.UnitPrice.Amount * l.Quantity);
+        var cartLines = command.Lines.Select(l => new CartLine(
+            l.LineId,
+            l.ProductId,
+            l.VariantId,
+            l.ProductId,
+            l.Quantity,
+            l.UnitPrice.Amount,
+            Array.Empty<string>(),
+            null)).ToList();
+
+        var trimmedPromoCode = string.IsNullOrWhiteSpace(promoCode) ? null : promoCode!.Trim();
+        var request = new EvaluateRequest(
+            command.TenantId,
+            command.StoreId,
+            command.CustomerId,
+            trimmedPromoCode,
+            currency,
+            cartLines,
+            subtotal,
+            command.IdempotencyKey);
+
+        try
+        {
+            var response = await promotions.EvaluateAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response is null)
+            {
+                logger.LogInformation("Promotions evaluate returned null for tenant {TenantId} order {OrderId}",
+                    command.TenantId, command.OrderId);
+                return (command, null);
+            }
+
+            if (response.RejectedCode is { } rej)
+            {
+                logger.LogInformation("Promotions rejected code {Code} reason {Reason}", rej.Code, rej.Reason);
+                return (command, Results.Json(
+                    new { error = new { code = "PROMO_CODE_REJECTED", message = rej.Reason, promoCode = rej.Code } },
+                    statusCode: StatusCodes.Status422UnprocessableEntity));
+            }
+
+            var lineDiscountByLineId = response.LineAdjustments
+                .GroupBy(a => a.LineId)
+                .ToDictionary(g => g.Key, g => g.Sum(a => a.Amount));
+
+            var enrichedLines = command.Lines.Select(l =>
+                lineDiscountByLineId.TryGetValue(l.LineId, out var disc) && disc > 0m
+                    ? l with { LineDiscount = disc }
+                    : l).ToList();
+
+            var orderDiscount = response.OrderAdjustments.Sum(a => a.Amount);
+
+            var snapshots = response.AppliedPromotions
+                .Select(p => new AppliedPromotionSnapshot(
+                    Id: Guid.NewGuid().ToString(),
+                    CampaignId: p.CampaignId,
+                    EditorKind: p.EditorKind,
+                    Name: p.Name,
+                    Amount: p.Amount,
+                    PromoCode: trimmedPromoCode))
+                .ToList();
+
+            var enriched = command with
+            {
+                Lines = enrichedLines,
+                OrderDiscount = orderDiscount,
+                PromoCode = trimmedPromoCode,
+                PromoCodeId = response.PromoCodeId,
+                AppliedPromotions = snapshots,
+            };
+
+            if (response.AppliedPromotions.Count > 0)
+            {
+                OrderPromotionMetrics.OrdersPromotionsApplied
+                    .WithLabels(command.TenantId ?? "unknown")
+                    .Inc();
+                logger.LogInformation(
+                    "Promotions applied for order {OrderId}: {Count} promotions, lineAdj={LineAdjCount}, orderAdj={OrderAdjCount}, totalDiscount={Total}",
+                    command.OrderId, response.AppliedPromotions.Count, response.LineAdjustments.Count,
+                    response.OrderAdjustments.Count, orderDiscount + lineDiscountByLineId.Values.Sum());
+            }
+
+            return (enriched, null);
+        }
+        catch (Exception ex)
+        {
+            var required = configuration.GetValue<bool>("Promotions:Required");
+            var mode = required ? "fail-closed" : "fail-open";
+            OrderPromotionMetrics.PromotionsEvaluateFailures
+                .WithLabels(command.TenantId ?? "unknown", mode)
+                .Inc();
+
+            if (required)
+            {
+                logger.LogError(ex, "Promotions evaluate failed (fail-closed) for tenant {TenantId} order {OrderId}",
+                    command.TenantId, command.OrderId);
+                return (command, Results.Json(
+                    new { error = new { code = "PROMOTIONS_UNAVAILABLE", message = "Promotions service is unavailable." } },
+                    statusCode: StatusCodes.Status503ServiceUnavailable));
+            }
+
+            logger.LogWarning(ex, "Promotions evaluate failed (fail-open) for tenant {TenantId} order {OrderId}",
+                command.TenantId, command.OrderId);
+            return (command, null);
+        }
+    }
 }

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>dCMS.Loyalty.Api</RootNamespace>
+    <AssemblyName>dCMS.Loyalty.Api</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.2.5" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
+    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\dCMS.Messaging.Contracts\dCMS.Messaging.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using dCMS.Web.Access.Caching;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Umbraco.Cms.Core;
@@ -25,17 +26,23 @@ public sealed class DcmsUserController : ControllerBase
     private readonly IUserGroupService _userGroupService;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IUmbracoDatabaseFactory _dbFactory;
+    private readonly IPermissionCache _permCache;
+    private readonly IConfiguration _configuration;
 
     public DcmsUserController(
         IUserService userService,
         IUserGroupService userGroupService,
         IPasswordHasher passwordHasher,
-        IUmbracoDatabaseFactory dbFactory)
+        IUmbracoDatabaseFactory dbFactory,
+        IPermissionCache permCache,
+        IConfiguration configuration)
     {
         _userService = userService;
         _userGroupService = userGroupService;
         _passwordHasher = passwordHasher;
         _dbFactory = dbFactory;
+        _permCache = permCache;
+        _configuration = configuration;
     }
 
     // ── GET / ────────────────────────────────────────────────────────────────
@@ -143,6 +150,9 @@ public sealed class DcmsUserController : ControllerBase
                         Constants.Security.SuperUserKey).ConfigureAwait(false);
             }
 
+            // DAI-683: permissions for this user may have changed (group assignment). Bump tenant version (simple invalidation).
+            await _permCache.BumpTenantVersionAsync(ResolveTenantId()).ConfigureAwait(false);
+
             return Ok(new { data = MapUser(user), meta = (object?)null, error = (object?)null });
         }
         catch (Exception ex)
@@ -206,6 +216,8 @@ public sealed class DcmsUserController : ControllerBase
                         new HashSet<Guid> { user.Key },
                         Constants.Security.SuperUserKey).ConfigureAwait(false);
             }
+
+            await _permCache.BumpTenantVersionAsync(ResolveTenantId()).ConfigureAwait(false);
 
             return Ok(new { data = MapUser(user), meta = (object?)null, error = (object?)null });
         }
@@ -448,5 +460,11 @@ public sealed class DcmsUserController : ControllerBase
         public string NotificationType { get; set; } = null!;
         public bool Enabled { get; set; }
         public string? TenantIds { get; set; }
+    }
+
+    private string ResolveTenantId()
+    {
+        var tid = _configuration.GetSection("Dcms:Estore")["TenantId"]?.Trim();
+        return string.IsNullOrWhiteSpace(tid) ? "default" : tid!;
     }
 }

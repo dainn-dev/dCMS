@@ -83,19 +83,20 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel, authToken }: R
     setSaving(true);
     setLoadError(null);
     try {
+      const targetAlias = isAdd ? alias.trim().toLowerCase() : roleAlias!;
       if (isAdd) {
         await createRole(
           {
             name: name.trim(),
-            alias: alias.trim().toLowerCase(),
+            alias: targetAlias,
             description: description.trim(),
             isTenantRole,
           },
           authToken,
         );
-      } else if (roleAlias) {
+      } else {
         await updateRole(
-          roleAlias,
+          targetAlias,
           {
             name: name.trim(),
             description: description.trim(),
@@ -122,23 +123,6 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel, authToken }: R
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
-          {!isAdd && (
-            <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-              <span>eStore</span>
-              <span className="mx-2">/</span>
-              <span>Access</span>
-              <span className="mx-2">/</span>
-              <button
-                type="button"
-                className="text-on-surface-variant hover:text-primary transition-colors"
-                onClick={onCancel}
-              >
-                Roles
-              </button>
-              <span className="mx-2">/</span>
-              <span className="text-primary">Edit Role</span>
-            </nav>
-          )}
           <button
             type="button"
             onClick={onCancel}
@@ -172,7 +156,7 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel, authToken }: R
       </div>
 
       {/* Body */}
-      <div className="flex-1 p-6 max-w-2xl">
+      <div className="flex-1 p-6 max-w-2xl space-y-6">
         {loadError && (
           <p className="mb-4 rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs font-medium text-error" role="alert">
             {loadError}
@@ -256,6 +240,7 @@ export function RoleFormPage({ mode, roleAlias, onSave, onCancel, authToken }: R
             </div>
           </div>
         </section>
+
       </div>
 
       {showSuccess && (

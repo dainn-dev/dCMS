@@ -49,6 +49,19 @@ public sealed class OrderApiAuthIntegrationTests(OrderApiAuthFixture fx)
     }
 
     [Fact]
+    public async Task GetOrder_chain_admin_with_store_scope_cannot_access_other_store()
+    {
+        var client = fx.Factory.CreateClient();
+        // Token only allows store "s-allowed", but headers request store "s-denied".
+        AddOrderHeaders(client, Jwt("ca-1", OrderApiAuthFixture.TenantId, "s-allowed", DcmsRoles.ChainAdmin, storeIds: ["s-allowed"]));
+        client.DefaultRequestHeaders.Remove("X-Store-Id");
+        client.DefaultRequestHeaders.Add("X-Store-Id", "s-denied");
+
+        var response = await client.GetAsync($"/api/orders/{Guid.NewGuid():D}");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetOrder_customer_cannot_read_other_customer_order()
     {
         var orderId = Guid.NewGuid();
@@ -233,7 +246,12 @@ public sealed class OrderApiAuthIntegrationTests(OrderApiAuthFixture fx)
             new { OrderId = orderId }).ConfigureAwait(false);
     }
 
-    private static string Jwt(string sub, string tenantId, string storeId, string role)
+    private static string Jwt(
+        string sub,
+        string tenantId,
+        string storeId,
+        string role,
+        IReadOnlyList<string>? storeIds = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(OrderApiAuthFixture.JwtKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -244,6 +262,9 @@ public sealed class OrderApiAuthIntegrationTests(OrderApiAuthFixture fx)
             new(DcmsClaims.StoreId, storeId),
             new(ClaimTypes.Role, role),
         };
+
+        if (storeIds is { Count: > 0 })
+            claims.Add(new Claim(DcmsClaims.StoreIds, string.Join(",", storeIds)));
 
         var token = new JwtSecurityToken(
             issuer: "dcms",

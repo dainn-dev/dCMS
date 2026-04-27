@@ -35,4 +35,13 @@ public interface IPromoCodePersistence
         string actorUserId,
         string comment,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// DAI-692: load binding/cap fields needed by the evaluator's <c>PromoCodeResolver</c>.
+    /// Returns null when the code does not exist for the tenant (case-insensitive code match).
+    /// </summary>
+    Task<PromoCodeBindingRow?> GetForResolutionAsync(
+        string tenantId,
+        string code,
+        CancellationToken cancellationToken = default);
 }

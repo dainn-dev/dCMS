@@ -30,6 +30,7 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
 
         var tid = user.FindFirst(DcmsClaims.TenantId)?.Value;
         var sid = user.FindFirst(DcmsClaims.StoreId)?.Value;
+        var allowedStores = DcmsScopeClaimParser.ParseCsvClaim(user.FindFirst(DcmsClaims.StoreIds)?.Value);
         if (!string.Equals(tid, tenantRoute, StringComparison.Ordinal))
         {
             return Results.Json(
@@ -43,9 +44,33 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
         }
 
         // US-11: ChainAdmin / BrandManager may operate across stores within the same tenant; others must match store.
-        if (!user.IsInRole(DcmsRoles.ChainAdmin) && !user.IsInRole(DcmsRoles.BrandManager)
-            && !string.Equals(sid, storeRoute, StringComparison.Ordinal))
+        if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager))
         {
+            // If token explicitly constrains store scope, enforce it; else allow all stores within tenant (backward compat).
+            if (allowedStores.Count > 0 && !allowedStores.Contains(storeRoute!, StringComparer.Ordinal))
+                return Results.Json(
+                    new
+                    {
+                        data = (object?)null,
+                        meta = (object?)null,
+                        error = new { code = "tenant_mismatch", message = "Token does not grant access to the requested store." }
+                    },
+                    statusCode: StatusCodes.Status403Forbidden);
+            return await next(context);
+        }
+
+        // Store-scoped roles must match the store and (if present) the allowedStores set.
+        if (allowedStores.Count > 0 && !allowedStores.Contains(storeRoute!, StringComparer.Ordinal))
+            return Results.Json(
+                new
+                {
+                    data = (object?)null,
+                    meta = (object?)null,
+                    error = new { code = "tenant_mismatch", message = "Token does not grant access to the requested store." }
+                },
+                statusCode: StatusCodes.Status403Forbidden);
+
+        if (!string.Equals(sid, storeRoute, StringComparison.Ordinal))
             return Results.Json(
                 new
                 {
@@ -54,7 +79,6 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
                     error = new { code = "tenant_mismatch", message = "Token store does not match the request path." }
                 },
                 statusCode: StatusCodes.Status403Forbidden);
-        }
 
         return await next(context);
     }

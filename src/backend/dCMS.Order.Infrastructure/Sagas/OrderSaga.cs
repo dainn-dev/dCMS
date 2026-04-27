@@ -117,6 +117,13 @@ public sealed class OrderSaga : MassTransitStateMachine<OrderSagaState>
                     ctx.Saga.StoreId,
                     "payment_timeout",
                     DateTimeOffset.UtcNow))
+                // DAI-724: any partially-Authorized tender holds need to be released on timeout.
+                .Publish(ctx => new ReleasePaymentComponentsV1(
+                    Guid.TryParse(ctx.Saga.OrderId, out var oid) ? oid : Guid.Empty,
+                    ctx.Saga.TenantId,
+                    ctx.Saga.StoreId,
+                    Reason: "payment_timeout",
+                    RequestedAt: DateTimeOffset.UtcNow))
                 .TransitionTo(Cancelled),
             When(OrderCustomerCancellation)
                 .Publish(ctx => new ReleaseStockV1(
@@ -125,6 +132,13 @@ public sealed class OrderSaga : MassTransitStateMachine<OrderSagaState>
                     ctx.Saga.TenantId,
                     ctx.Saga.StoreId,
                     ctx.Saga.ReserveLines))
+                // DAI-724: release any in-flight Authorized tender holds.
+                .Publish(ctx => new ReleasePaymentComponentsV1(
+                    Guid.TryParse(ctx.Saga.OrderId, out var oid) ? oid : Guid.Empty,
+                    ctx.Saga.TenantId,
+                    ctx.Saga.StoreId,
+                    Reason: "customer_cancellation_during_payment",
+                    RequestedAt: DateTimeOffset.UtcNow))
                 .TransitionTo(Cancelled),
             Ignore(StockReservationTimeout));
 
@@ -164,6 +178,14 @@ public sealed class OrderSaga : MassTransitStateMachine<OrderSagaState>
                                     s.Saga.Currency,
                                     Reason: "late_payment_on_cancelled",
                                     RequestedAt: DateTimeOffset.UtcNow))
+                                // DAI-724: also notify the multi-tender orchestrator so per-component
+                                // Voucher/Loyalty holds are refunded/released idempotently.
+                                .Publish(s => new ReleasePaymentComponentsV1(
+                                    Guid.TryParse(s.Saga.OrderId, out var oid) ? oid : Guid.Empty,
+                                    s.Saga.TenantId,
+                                    s.Saga.StoreId,
+                                    Reason: "late_payment_on_cancelled",
+                                    RequestedAt: DateTimeOffset.UtcNow))
                                 .TransitionTo(LatePaymentRefunding),
                             _ => _.Then(_ => { }))));
 
@@ -184,6 +206,13 @@ public sealed class OrderSaga : MassTransitStateMachine<OrderSagaState>
                     ctx.Saga.TenantId,
                     ctx.Saga.StoreId,
                     ctx.Saga.ReserveLines))
+                // DAI-724: payment components are already captured by this point — refund them.
+                .Publish(ctx => new ReleasePaymentComponentsV1(
+                    Guid.TryParse(ctx.Saga.OrderId, out var oid) ? oid : Guid.Empty,
+                    ctx.Saga.TenantId,
+                    ctx.Saga.StoreId,
+                    Reason: "customer_cancellation_after_confirm",
+                    RequestedAt: DateTimeOffset.UtcNow))
                 .TransitionTo(Cancelled),
             Ignore(StockReservationTimeout),
             Ignore(PaymentTimeout));
@@ -205,6 +234,13 @@ public sealed class OrderSaga : MassTransitStateMachine<OrderSagaState>
                     ctx.Saga.TenantId,
                     ctx.Saga.StoreId,
                     ctx.Saga.ReserveLines))
+                // DAI-724: payment components captured — refund them.
+                .Publish(ctx => new ReleasePaymentComponentsV1(
+                    Guid.TryParse(ctx.Saga.OrderId, out var oid) ? oid : Guid.Empty,
+                    ctx.Saga.TenantId,
+                    ctx.Saga.StoreId,
+                    Reason: "customer_cancellation_after_processing",
+                    RequestedAt: DateTimeOffset.UtcNow))
                 .TransitionTo(Cancelled),
             Ignore(StockReservationTimeout),
             Ignore(PaymentTimeout));

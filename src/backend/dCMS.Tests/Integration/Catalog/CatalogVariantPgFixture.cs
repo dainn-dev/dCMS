@@ -30,7 +30,9 @@ public sealed class CatalogVariantPgFixture : IAsyncLifetime
                  {
                      "001_CreateCategories.sql", "003_CreateProducts.sql", "004_CreateVariants.sql",
                      "009_CreateAuditAndNotifications.sql",
-                     "010_AddCombinationCanonical.sql", "012_AddVariantBasePriceAndProductImages.sql"
+                     "010_AddCombinationCanonical.sql", "012_AddVariantBasePriceAndProductImages.sql",
+                     "027_CreateApprovalRequests.sql",
+                     "028_AddProductActivation.sql"
                  })
         {
             var path = Path.Combine(baseDir, "Migrations", name);

@@ -23,6 +23,13 @@ ALTER TABLE "Categories"
     ADD COLUMN IF NOT EXISTS "AccessMemberType"   VARCHAR(30)  NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS "AccessMemberTier"   VARCHAR(30)  NOT NULL DEFAULT '';
 
+-- Deduplicate before creating the unique index (keep lowest Id per TenantId+Slug)
+DELETE FROM "Categories" c
+USING "Categories" c2
+WHERE c."TenantId" = c2."TenantId"
+  AND c."Slug"     = c2."Slug"
+  AND c."Id"       > c2."Id";
+
 -- Unique slug within tenant
 CREATE UNIQUE INDEX IF NOT EXISTS "UX_Categories_Tenant_Slug"
     ON "Categories" ("TenantId", "Slug");

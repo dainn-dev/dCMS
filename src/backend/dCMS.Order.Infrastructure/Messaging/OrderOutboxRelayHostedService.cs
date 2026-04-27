@@ -58,6 +58,16 @@ public sealed class OrderOutboxRelayHostedService : BackgroundService
                                         .Publish(msg, ctx => ctx.MessageId = mid, stoppingToken)
                                         .ConfigureAwait(false);
                                     return;
+                                case ProductRestockedV1 msg:
+                                    await publish
+                                        .Publish(msg, ctx => ctx.MessageId = mid, stoppingToken)
+                                        .ConfigureAwait(false);
+                                    return;
+                                case ReturnStatusChangedV1 msg:
+                                    await publish
+                                        .Publish(msg, ctx => ctx.MessageId = mid, stoppingToken)
+                                        .ConfigureAwait(false);
+                                    return;
                                 default:
                                     await publish.Publish(m, stoppingToken).ConfigureAwait(false);
                                     return;

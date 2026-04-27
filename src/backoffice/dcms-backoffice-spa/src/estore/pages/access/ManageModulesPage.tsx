@@ -332,23 +332,6 @@ export function ManageModulesPage({ roleAlias, roleName = "Role", onBack, authTo
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-            <span>eStore</span>
-            <span className="mx-2">/</span>
-            <span>Access</span>
-            <span className="mx-2">/</span>
-            <button
-              type="button"
-              className="text-on-surface-variant hover:text-primary transition-colors"
-              onClick={onBack}
-            >
-              Roles
-            </button>
-            <span className="mx-2">/</span>
-            <span className="text-on-surface-variant">{roleName}</span>
-            <span className="mx-2">/</span>
-            <span className="text-primary">Manage Modules</span>
-          </nav>
           <button
             type="button"
             onClick={onBack}

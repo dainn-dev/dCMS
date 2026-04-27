@@ -46,4 +46,14 @@ public interface ICampaignPersistence
     Task<IReadOnlyList<CampaignWorkflowHistoryRow>> GetWorkflowHistoryAsync(
         string id, string tenantId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// DAI-679: load all active campaigns for the tenant whose validity window covers <paramref name="now"/>.
+    /// Used by the rule-engine evaluator. Filters: WorkflowState='active' AND
+    /// (StartDate IS NULL OR StartDate &lt;= now) AND (EndDate IS NULL OR EndDate &gt;= now).
+    /// </summary>
+    Task<IReadOnlyList<CampaignRow>> GetActiveByTenantAsync(
+        string tenantId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }

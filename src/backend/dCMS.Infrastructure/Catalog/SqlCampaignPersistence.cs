@@ -270,6 +270,28 @@ public sealed class SqlCampaignPersistence(string connectionString) : ICampaignP
         return true;
     }
 
+    // ── Active by tenant (DAI-679) ────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<CampaignRow>> GetActiveByTenantAsync(
+        string tenantId, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_cs);
+        const string sql = $"""
+            SELECT {CampaignCols}
+            FROM "Campaigns"
+            WHERE "TenantId" = @TenantId
+              AND "WorkflowState" = 'active'
+              AND ("StartDate" IS NULL OR "StartDate" <= @Now)
+              AND ("EndDate"   IS NULL OR "EndDate"   >= @Now)
+            ORDER BY "CreatedAt" ASC
+            """;
+        var rows = await conn.QueryAsync<CampaignDapperRow>(
+            new CommandDefinition(sql,
+                new { TenantId = tenantId, Now = now.UtcDateTime },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return rows.Select(r => r.ToModel()).ToList();
+    }
+
     // ── History ───────────────────────────────────────────────────────────────
 
     public async Task<IReadOnlyList<CampaignWorkflowHistoryRow>> GetWorkflowHistoryAsync(

@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
-import { OperationalReportPage } from "./pages/OperationalReportPage";
+import { AbandonCartReportPage } from "./pages/AbandonCartReportPage";
+import { DeliverySlotReportPage } from "./pages/DeliverySlotReportPage";
+import { RestockSubscriptionsReportPage } from "./pages/RestockSubscriptionsReportPage";
 import { SalesReportPage } from "./pages/SalesReportPage";
 import { TransactionReportPage } from "./pages/TransactionReportPage";
 import { reportsHashForPage, parseReportsPageFromHash } from "./reportsHashRouting";
 import { ReportsLayout, type ReportsPageId } from "./ReportsLayout";
 
-export function ReportsApp() {
+type ReportsAppProps = {
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
+};
+
+export function ReportsApp({ tenantId, storeId, authToken }: ReportsAppProps) {
   const [page, setPage] = useState<ReportsPageId>(() => parseReportsPageFromHash() ?? "transaction");
 
   function handlePageChange(id: ReportsPageId) {
@@ -40,9 +48,13 @@ export function ReportsApp() {
 
   return (
     <ReportsLayout page={page} onPageChange={handlePageChange}>
-      {page === "transaction" && <TransactionReportPage />}
-      {page === "sales" && <SalesReportPage />}
-      {page === "operational" && <OperationalReportPage />}
+      {page === "transaction" && <TransactionReportPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
+      {page === "sales" && <SalesReportPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
+      {page === "abandon-cart" && <AbandonCartReportPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
+      {page === "restock-subscriptions" && (
+        <RestockSubscriptionsReportPage tenantId={tenantId} storeId={storeId} authToken={authToken} />
+      )}
+      {page === "delivery-slots" && <DeliverySlotReportPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
     </ReportsLayout>
   );
 }

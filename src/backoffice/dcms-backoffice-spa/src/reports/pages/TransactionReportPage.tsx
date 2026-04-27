@@ -5,6 +5,14 @@ import { IconDownload } from "../../orders/icons";
 import { exportReportRowsToXlsx } from "../shared/exportReportRowsToXlsx";
 import { ReportFilterField, ReportFilterPanel, inputClass } from "../shared/ReportFilterPanel";
 import { useReportExportState } from "../shared/useReportExport";
+import {
+  fetchTransactionSummary,
+  fetchTransactionDetails,
+  fetchEcommercePayments,
+  type TransactionSummaryRow as ApiSummaryRow,
+  type TransactionDetailRow as ApiDetailRow,
+  type EcommercePaymentRow as ApiEcommerceRow,
+} from "../api/reportsApi";
 
 type ReportTab = "summary" | "details" | "ecommerce";
 
@@ -250,7 +258,51 @@ function applySummaryDemoFilters(rows: SummaryRow[], store: string, brand: strin
   return out;
 }
 
-export function TransactionReportPage() {
+type TransactionReportPageProps = {
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
+};
+
+function formatAmount(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function mapApiSummary(r: ApiSummaryRow): SummaryRow {
+  return {
+    id: `${r.paymentMethod}-${r.currency}`,
+    paymentMethod: r.paymentMethod,
+    transactionCount: r.transactionCount,
+    totalAmount: formatAmount(r.totalAmount),
+  };
+}
+
+function mapApiDetail(r: ApiDetailRow): DetailsRow {
+  return {
+    id: r.orderId,
+    orderId: r.orderId.substring(0, 12).toUpperCase(),
+    date: r.date.substring(0, 10),
+    member: r.member,
+    store: r.store,
+    brandCode: "",
+    paymentMethod: "",
+    amount: formatAmount(r.amount),
+    status: r.status,
+  };
+}
+
+function mapApiEcommerce(r: ApiEcommerceRow): EcommerceRow {
+  return {
+    id: `${r.orderId}-${r.transactionRef}`,
+    orderId: r.orderId.substring(0, 12).toUpperCase(),
+    paymentMethod: r.paymentMethod,
+    amount: formatAmount(r.amount),
+    transactionRef: r.transactionRef,
+    date: r.date.substring(0, 16).replace("T", " "),
+  };
+}
+
+export function TransactionReportPage({ tenantId, storeId, authToken }: TransactionReportPageProps) {
   const [tab, setTab] = useState<ReportTab>("summary");
   const [dateFrom, setDateFrom] = useState("2026-04-01");
   const [dateTo, setDateTo] = useState("2026-04-18");
@@ -279,6 +331,8 @@ export function TransactionReportPage() {
     };
   }, [summaryRows]);
 
+  const [error, setError] = useState<string | null>(null);
+
   const handleSearch = useCallback(async () => {
     if (dateFrom > dateTo) {
       setSummaryRows([]);
@@ -289,16 +343,34 @@ export function TransactionReportPage() {
     }
     setLoading(true);
     setHasSearched(true);
-    await new Promise((r) => setTimeout(r, 500));
+    setError(null);
 
-    setSummaryRows(filterSummaryByBrand([...MOCK_SUMMARY], brandScope));
-    setDetailsRows(filterDetails([...MOCK_DETAILS], memberQuery, brandScope, storeScope));
-    let eco = [...MOCK_ECOMMERCE];
-    eco = filterEcommerce(eco, paymentMethodFilter);
-    setEcommerceRows(eco);
+    if (tenantId) {
+      const filters = { dateFrom, dateTo, storeId: storeScope !== "all" ? storeScope : storeId, brandCode: brandScope, memberQuery, paymentMethod: paymentMethodFilter };
+      try {
+        const [summary, details, ecommerce] = await Promise.all([
+          fetchTransactionSummary(tenantId, filters, authToken),
+          fetchTransactionDetails(tenantId, filters, { limit: 100 }, authToken),
+          fetchEcommercePayments(tenantId, filters, authToken),
+        ]);
+        setSummaryRows(summary.map(mapApiSummary));
+        setDetailsRows(details.rows.map(mapApiDetail));
+        setEcommerceRows(ecommerce.map(mapApiEcommerce));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load report data");
+        setSummaryRows([]);
+        setDetailsRows([]);
+        setEcommerceRows([]);
+      }
+    } else {
+      await new Promise((r) => setTimeout(r, 500));
+      setSummaryRows(filterSummaryByBrand([...MOCK_SUMMARY], brandScope));
+      setDetailsRows(filterDetails([...MOCK_DETAILS], memberQuery, brandScope, storeScope));
+      setEcommerceRows(filterEcommerce([...MOCK_ECOMMERCE], paymentMethodFilter));
+    }
 
     setLoading(false);
-  }, [brandScope, dateFrom, dateTo, memberQuery, paymentMethodFilter, storeScope]);
+  }, [brandScope, dateFrom, dateTo, memberQuery, paymentMethodFilter, storeScope, tenantId, storeId, authToken]);
 
   const handleReset = useCallback(() => {
     setDateFrom("2026-04-01");
@@ -356,7 +428,9 @@ export function TransactionReportPage() {
           <p className="max-w-3xl text-sm text-on-surface-variant">
             Summary, detailed order lines, and ecommerce payment rows (including split tender per order). Demo data is tenant-scoped to the current backoffice context.
           </p>
-          <p className="text-xs font-semibold uppercase tracking-wider text-primary">Current tenant: Demo supermarket (mock)</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+            {tenantId ? `Tenant: ${tenantId}` : "Current tenant: Demo supermarket (mock)"}
+          </p>
         </div>
         <button
           type="button"
@@ -446,6 +520,12 @@ export function TransactionReportPage() {
             </ReportFilterField>
           )}
         </ReportFilterPanel>
+
+        {error && (
+          <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </div>
+        )}
 
         {tab === "summary" && !loading && hasSearched && summaryMetrics && summaryRows.length > 0 && (
           <div className="grid gap-4 md:grid-cols-3">

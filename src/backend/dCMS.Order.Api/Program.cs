@@ -61,6 +61,8 @@ app.UseMiddleware<IdempotencyMiddleware>();
 app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();
 app.MapOrderHttpRoutes();
+app.MapOrderReturnRoutes();
+app.MapOrderReportRoutes();
 app.MapOrderFailedRoutes();
 app.MapOrderDlqAdminRoutes();
 app.MapShipmentWebhookRoutes();

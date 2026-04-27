@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using dCMS.AspNetCore.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
@@ -76,9 +77,9 @@ public sealed class DcmsEstoreContextController : ControllerBase
             new(ClaimTypes.Role, "SuperAdmin"),
         };
         if (!string.IsNullOrWhiteSpace(tenantId))
-            claims.Add(new Claim("tenantId", tenantId));
+            claims.Add(new Claim(DcmsClaims.TenantId, tenantId));
         if (!string.IsNullOrWhiteSpace(storeId))
-            claims.Add(new Claim("storeId", storeId));
+            claims.Add(new Claim(DcmsClaims.StoreId, storeId));
 
         var token = new JwtSecurityToken(
             issuer:             issuer,

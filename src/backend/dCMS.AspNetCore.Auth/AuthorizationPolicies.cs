@@ -6,8 +6,14 @@ public static class DcmsPolicies
     public const string CatalogWrite = "catalog:write";
     /// <summary>Approve / request-changes / reject on products in <c>pending_approval</c> (DAI-296).</summary>
     public const string CatalogApproval = "catalog:approval";
+
+    /// <summary>DAI-684 / DAI-706 — bulk import upload + status endpoints.</summary>
+    public const string CatalogImport = "catalog:import";
     public const string InventoryRead = "inventory:read";
     public const string InventoryWrite = "inventory:write";
+
+    /// <summary>DAI-688: approve/reject/request-changes via generic approval engine.</summary>
+    public const string ApprovalManage = "approval:manage";
 
     /// <summary>Order API (US-21): any authenticated principal; route handlers enforce customer vs staff scope.</summary>
     public const string OrderAccess = "order:access";

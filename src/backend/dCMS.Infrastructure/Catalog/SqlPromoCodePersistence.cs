@@ -205,4 +205,46 @@ public sealed class SqlPromoCodePersistence(string connectionString) : IPromoCod
         await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
         return true;
     }
+
+    public async Task<PromoCodeBindingRow?> GetForResolutionAsync(
+        string tenantId, string code, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_cs);
+        const string sql = """
+            SELECT "Id","TenantId","Code","WorkflowState","StartDate","EndDate",
+                   "CampaignId","CustomerId","GroupId",
+                   "MaxUsesPerCustomer","MaxTotalUses","ExcludedProductsJson"
+              FROM "PromoCodes"
+             WHERE "TenantId" = @TenantId AND UPPER("Code") = UPPER(@Code)
+             LIMIT 1
+            """;
+        var row = await conn.QuerySingleOrDefaultAsync<BindingDapperRow>(new CommandDefinition(
+            sql, new { TenantId = tenantId, Code = code }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return row?.ToModel();
+    }
+
+    private sealed class BindingDapperRow
+    {
+        public string    Id                   { get; init; } = null!;
+        public string    TenantId             { get; init; } = null!;
+        public string    Code                 { get; init; } = null!;
+        public string    WorkflowState        { get; init; } = "";
+        public DateTime? StartDate            { get; init; }
+        public DateTime? EndDate              { get; init; }
+        public string?   CampaignId           { get; init; }
+        public string?   CustomerId           { get; init; }
+        public string?   GroupId              { get; init; }
+        public int?      MaxUsesPerCustomer   { get; init; }
+        public int?      MaxTotalUses         { get; init; }
+        public string    ExcludedProductsJson { get; init; } = "[]";
+
+        public PromoCodeBindingRow ToModel() => new(
+            Id, TenantId, Code, WorkflowState,
+            StartDate.HasValue ? new DateTimeOffset(StartDate.Value, TimeSpan.Zero) : null,
+            EndDate.HasValue   ? new DateTimeOffset(EndDate.Value,   TimeSpan.Zero) : null,
+            CampaignId, CustomerId, GroupId,
+            MaxUsesPerCustomer, MaxTotalUses,
+            ExcludedProductsJson ?? "[]");
+    }
 }

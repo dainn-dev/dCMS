@@ -6,6 +6,7 @@ export type OrdersPageId =
   | "order-processing"
   | "failed-orders"
   | "refund-cases"
+  | "returns"
   | "order-detail"
   | "failed-order-detail";
 
@@ -15,6 +16,7 @@ const navItems: NavItem[] = [
   { id: "order-processing", label: "Orders Processing", Icon: IconReceipt },
   { id: "failed-orders", label: "Failed Orders", Icon: IconWarning },
   { id: "refund-cases", label: "Refund Cases", Icon: IconRefund },
+  { id: "returns", label: "Returns / RMA", Icon: IconRefund },
 ];
 
 /** Sidebar + drill-down routes for `location.hash` sync. */

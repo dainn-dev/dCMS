@@ -92,6 +92,31 @@ class DcmsTreePickerBase extends HTMLElement {
         this.dispatchEvent(new CustomEvent("change", { detail: { value: v }, bubbles: true, composed: true }));
       });
 
+      // Normalise media picker: stretch the add-button card to fill width
+      // so it looks identical to the document picker's full-width "Choose" button.
+      if (this.#kind === "media") {
+        el.style.width = "100%";
+        const injectStyle = () => {
+          const shadow = (el as HTMLElement).shadowRoot;
+          if (shadow) {
+            const style = document.createElement("style");
+            style.textContent = `
+              :host { display: block; width: 100%; }
+              #add-button { width: 100% !important; }
+              #add-button uui-card-media { width: 100% !important; }
+            `;
+            shadow.appendChild(style);
+            return true;
+          }
+          return false;
+        };
+        // Shadow root may not exist yet (Lit creates it in connectedCallback).
+        if (!injectStyle()) {
+          const iv = setInterval(() => { if (injectStyle()) clearInterval(iv); }, 50);
+          setTimeout(() => clearInterval(iv), 3000);
+        }
+      }
+
       this.#inner = el;
       this.replaceChildren(el);
       return;

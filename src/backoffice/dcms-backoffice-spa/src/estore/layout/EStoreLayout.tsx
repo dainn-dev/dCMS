@@ -7,6 +7,7 @@ import {
   IconBolt,
   IconBox,
   IconChevronDown,
+  IconDownload,
   IconGrid,
   IconGroup,
   IconHelp,
@@ -26,12 +27,14 @@ export type EStorePageId =
   | "brand-configuration"
   | "categories"
   | "products"
+  | "bulk-jobs"
   | "product-best-sellers"
   | "product-category-assignment"
   | "product-configuration"
   | "attributes"
   | "campaigns"
   | "promo-codes"
+  | "templates"
   | "fulfillment-options"
   | "fulfillment-delivery-allocation"
   | "fulfillment-collection-locations"
@@ -56,18 +59,20 @@ const navItems: NavItem[] = [
   { id: "brand-configuration", label: "Brand Configuration", Icon: IconTune, nestUnderBrands: true },
   { id: "categories", label: "Categories", Icon: IconGrid },
   { id: "products", label: "Products", Icon: IconBox },
+  { id: "bulk-jobs", label: "Bulk jobs", Icon: IconDownload, nestUnderProducts: true },
   { id: "product-best-sellers", label: "Best Seller Settings", Icon: IconTrendingUp, nestUnderProducts: true },
   { id: "product-category-assignment", label: "Category Assignment", Icon: IconAccountTree, nestUnderProducts: true },
   { id: "product-configuration", label: "Product Configuration", Icon: IconTune, nestUnderProducts: true },
   { id: "attributes", label: "Attributes", Icon: IconTag },
   { id: "campaigns", label: "Campaigns", Icon: IconBolt },
   { id: "promo-codes", label: "Promo Codes", Icon: IconLocalOffer },
+  { id: "templates", label: "Templates", Icon: IconTune, nestUnderProducts: true },
   { id: "fulfillment-options", label: "Fulfillment Options", Icon: IconShipping },
   { id: "fulfillment-delivery-allocation", label: "Delivery Allocation", Icon: IconMap, nestUnderFulfillment: true },
   { id: "fulfillment-collection-locations", label: "Collection Location", Icon: IconLocationOn, nestUnderFulfillment: true },
   { id: "access-users", label: "Users", Icon: IconPerson },
-  { id: "access-roles", label: "Roles", Icon: IconGroup, nestUnderAccess: true },
-  { id: "access-tenants", label: "Tenants", Icon: IconApartment, nestUnderAccess: true },
+  { id: "access-roles", label: "Roles", Icon: IconGroup },
+  { id: "access-tenants", label: "Tenants", Icon: IconApartment },
 ];
 
 /** Top-level eStore routes — keep in sync with `navItems` for hash URL parsing. */

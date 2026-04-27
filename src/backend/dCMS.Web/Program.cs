@@ -1,4 +1,5 @@
 using System.IO;
+using dCMS.Infrastructure.Monitoring;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 
@@ -17,7 +18,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 // ── YARP: forward /gateway/** → dCMS.Gateway ─────────────────────────────────
-// GatewayUrl defaults to http://localhost:5100 (local Docker publish).
+// GatewayUrl must be dCMS.Gateway (YARP), e.g. http://localhost:5100 — not Order/Catalog/etc.
+// If this points at Order.Api, paths like /gateway/v1/orders/orders are forwarded unchanged and return 404 upstream.
 // Override via Dcms:GatewayUrl in appsettings or environment variable.
 var gatewayUrl = builder.Configuration["Dcms:GatewayUrl"] ?? "http://localhost:5100";
 builder.Services.AddReverseProxy()
@@ -67,6 +69,8 @@ app.MapGet(
                 meta = (object?)null,
                 error = (object?)null,
             }));
+
+app.MapDcmsPrometheusMetrics();
 
 // ── Map YARP proxy BEFORE Umbraco so /gateway/** is intercepted first ─────────
 app.MapReverseProxy();

@@ -6,19 +6,7 @@ import {
   IconSave,
 } from "../../../orders/icons";
 import { createUser, getUser, updateUser } from "../../api/usersApi";
-
-const ROLES = [
-  "IT Administrator",
-  "System Administrator",
-  "Ecommerce Manager",
-  "Tenant Product Manager",
-  "Tenant Inventory Manager",
-  "Operations",
-  "Finance",
-  "Brand Manager",
-  "Product Upload",
-  "Guest",
-];
+import { fetchRoles, type RoleRow } from "../../api/rolesApi";
 
 const labelBase =
   "block text-[0.6875rem] font-bold text-on-surface-variant uppercase tracking-wider mb-1";
@@ -32,6 +20,7 @@ type UserFormPageProps = {
   userId?: string;
   onSave?: () => void;
   onCancel?: () => void;
+  authToken?: string;
 };
 
 type PasswordError = { password?: string; confirm?: string };
@@ -53,7 +42,7 @@ function validatePassword(password: string, confirm: string): PasswordError {
   return errs;
 }
 
-export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPageProps) {
+export function UserFormPage({ mode, userId, onSave, onCancel, authToken }: UserFormPageProps) {
   const isAdd = mode === "add";
 
   const [username, setUsername] = useState("");
@@ -61,7 +50,8 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [role, setRole] = useState(ROLES[0]);
+  const [roleAlias, setRoleAlias] = useState("");
+  const [roles, setRoles] = useState<RoleRow[]>([]);
   const [active, setActive] = useState(true);
   const [passwordNeverExpires, setPasswordNeverExpires] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState<PasswordError>({});
@@ -87,19 +77,33 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
   const [tenants, setTenants] = useState<string[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Load existing user in edit mode
   useEffect(() => {
-    if (isAdd || !userId) return;
-    getUser(Number(userId))
-      .then((dto) => {
+    let cancelled = false;
+    const loadRoles = fetchRoles(authToken).then((rows) => {
+      if (!cancelled) setRoles(rows);
+      return rows;
+    });
+
+    if (isAdd || !userId) {
+      loadRoles.then((rows) => {
+        if (!cancelled && rows.length > 0 && !roleAlias) setRoleAlias(rows[0].alias);
+      });
+      return () => { cancelled = true; };
+    }
+
+    Promise.all([loadRoles, getUser(Number(userId))])
+      .then(([rows, dto]) => {
+        if (cancelled) return;
         setUsername(dto.username);
         setEmail(dto.email);
         setFullName(dto.name);
-        setRole(dto.groups?.[0] ?? ROLES[0]);
+        const userGroup = dto.groups?.[0] ?? "";
+        setRoleAlias(userGroup || (rows.length > 0 ? rows[0].alias : ""));
         setActive(dto.isActive);
       })
       .catch(() => { /* prefill silently fails → user sees empty form */ });
-  }, [isAdd, userId]);
+    return () => { cancelled = true; };
+  }, [isAdd, userId, authToken]);
 
   function addTenant() {
     const v = tenantInput.trim();
@@ -122,8 +126,8 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
     setSaving(true);
     setApiError(null);
     const call = isAdd
-      ? createUser({ username, email, name: fullName, userGroupAlias: role, password })
-      : updateUser(Number(userId), { name: fullName, email, userGroupAlias: role, active });
+      ? createUser({ username, email, name: fullName, userGroupAlias: roleAlias, password })
+      : updateUser(Number(userId), { name: fullName, email, userGroupAlias: roleAlias, active });
     call
       .then(() => setShowSuccess(true))
       .catch((e: unknown) => setApiError(e instanceof Error ? e.message : "Save failed"))
@@ -135,23 +139,6 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
-          {!isAdd && (
-            <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-              <span>eStore</span>
-              <span className="mx-2">/</span>
-              <span>Access</span>
-              <span className="mx-2">/</span>
-              <button
-                type="button"
-                className="text-on-surface-variant hover:text-primary transition-colors"
-                onClick={onCancel}
-              >
-                Users
-              </button>
-              <span className="mx-2">/</span>
-              <span className="text-primary">Edit User</span>
-            </nav>
-          )}
           <button
             type="button"
             onClick={onCancel}
@@ -276,11 +263,14 @@ export function UserFormPage({ mode, userId, onSave, onCancel }: UserFormPagePro
               </label>
               <select
                 className={inputBase}
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
+                value={roleAlias}
+                onChange={(e) => setRoleAlias(e.target.value)}
               >
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
+                {roles.length === 0 && (
+                  <option value="">Loading roles…</option>
+                )}
+                {roles.map((r) => (
+                  <option key={r.alias} value={r.alias}>{r.name}</option>
                 ))}
               </select>
             </div>

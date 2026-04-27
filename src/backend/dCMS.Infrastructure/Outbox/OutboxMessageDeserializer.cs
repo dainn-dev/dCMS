@@ -20,6 +20,8 @@ public static class OutboxMessageDeserializer
             "OrderShipped" => JsonSerializer.Deserialize<OrderShippedV1>(payloadJson, Options),
             "OrderDelivered" => JsonSerializer.Deserialize<OrderDeliveredV1>(payloadJson, Options),
             "OrderFailed" => JsonSerializer.Deserialize<OrderFailedV1>(payloadJson, Options),
+            "ProductRestocked.v1" => JsonSerializer.Deserialize<ProductRestockedV1>(payloadJson, Options),
+            "ReturnStatusChanged.v1" => JsonSerializer.Deserialize<ReturnStatusChangedV1>(payloadJson, Options),
             _ => null
         };
 

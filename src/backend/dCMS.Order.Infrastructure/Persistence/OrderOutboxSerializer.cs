@@ -43,6 +43,32 @@ internal static class OrderOutboxSerializer
                         failedAt = x.FailedAt
                     },
                     Json)),
+            ProductRestocked x => (
+                "ProductRestocked.v1",
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        x.OrderId,
+                        x.TenantId,
+                        x.StoreId,
+                        x.VariantId,
+                        x.Quantity,
+                        x.ReturnId,
+                        x.OccurredAt,
+                    },
+                    Json)),
+            ReturnStatusChanged x => (
+                "ReturnStatusChanged.v1",
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        x.ReturnId,
+                        x.OrderId,
+                        x.FromStatus,
+                        x.ToStatus,
+                        x.OccurredAt,
+                    },
+                    Json)),
             _ => throw new InvalidOperationException($"Unknown order domain event {e.GetType().Name}."),
         };
 }

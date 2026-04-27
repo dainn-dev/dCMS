@@ -30,3 +30,6 @@ using dCMS.Core.Messaging;
 [assembly: TypeForwardedTo(typeof(StockUpdatedV1))]
 [assembly: TypeForwardedTo(typeof(OrderShippedV1))]
 [assembly: TypeForwardedTo(typeof(OrderDeliveredV1))]
+[assembly: TypeForwardedTo(typeof(ProductRestockedV1))]
+[assembly: TypeForwardedTo(typeof(ReturnStatusChangedV1))]
+[assembly: TypeForwardedTo(typeof(ImportJobQueuedV1))]

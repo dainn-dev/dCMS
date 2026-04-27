@@ -17,4 +17,12 @@ export const GATEWAY = {
   promotions: "/gateway/v1/promotions",
   /** dCMS.Fulfillment.Api routes — /gateway/v1/fulfillment/... → fulfillment-api /api/v1/... */
   fulfillment: "/gateway/v1/fulfillment",
+  /** DAI-728 — cross-order RMA endpoints — /gateway/v1/returns/... → order-api /api/returns/... */
+  returns: "/gateway/v1/returns",
+  /** DAI-685 — analytics reports API — /gateway/v1/reports/... → reports-api /api/v1/reports/... */
+  reports: "/gateway/v1/reports",
+  /** DAI-687 — notification/templates API — /gateway/v1/notifications/... → notification-api /api/v1/... */
+  notifications: "/gateway/v1/notifications",
+  /** DAI-688 — approvals API — /gateway/v1/approvals/... → approval-api /api/v1/... */
+  approvals: "/gateway/v1/approvals",
 } as const;

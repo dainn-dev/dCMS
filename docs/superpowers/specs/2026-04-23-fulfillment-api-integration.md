@@ -16,7 +16,7 @@
 | Service (direct) | `/api/v1/tenants/{tenantId}/fulfillment/...` |
 | Gateway (YARP) | `/gateway/v1/fulfillment/tenants/{tenantId}/fulfillment/...` → strips gateway prefix, forwards as `/api/v1/...` |
 
-Local ports: **5287** (`dotnet run`), **5006** (Docker host map), **5100** gateway.
+Local ports: **5006** (Fulfillment.Api `dotnet run` and Docker host map), **5100** gateway.
 
 ## Resources
 

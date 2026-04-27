@@ -7,6 +7,8 @@ using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.RateLimiting;
 using dCMS.Promotions.Api.Campaigns;
+using dCMS.Promotions.Api.Evaluator;
+using dCMS.Promotions.Api.Evaluator.Mechanics;
 using dCMS.Promotions.Api.PromoCodes;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
@@ -18,9 +20,34 @@ var catalogCs = builder.Configuration.GetConnectionString("Catalog");
 if (string.IsNullOrWhiteSpace(catalogCs))
     throw new InvalidOperationException("Configure ConnectionStrings:Catalog (PostgreSQL catalog database).");
 
+// DAI-693 — Promotions DB is currently colocated in `dcms_catalog`. Reading `Promotions` first lets us
+// migrate to a dedicated `dcms_promotions` database without code changes (set ConnectionStrings:Promotions
+// in env/appsettings to switch).
+var promotionsCs = builder.Configuration.GetConnectionString("Promotions") ?? catalogCs;
+
 // ── Persistence ───────────────────────────────────────────────────────────────
-builder.Services.AddSingleton<ICampaignPersistence>(_ => new SqlCampaignPersistence(catalogCs));
-builder.Services.AddSingleton<IPromoCodePersistence>(_ => new SqlPromoCodePersistence(catalogCs));
+builder.Services.AddSingleton<ICampaignPersistence>(_ => new SqlCampaignPersistence(promotionsCs));
+builder.Services.AddSingleton<IPromoCodePersistence>(_ => new SqlPromoCodePersistence(promotionsCs));
+builder.Services.AddSingleton<IPromoCodeRedemptionPersistence>(_ => new SqlPromoCodeRedemptionPersistence(promotionsCs));
+
+// ── Promotion evaluator (DAI-679) ─────────────────────────────────────────────
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<EvaluateIdempotencyCache>(sp => new EvaluateIdempotencyCache(
+    sp.GetService<IConnectionMultiplexer>(),
+    sp.GetRequiredService<ILogger<EvaluateIdempotencyCache>>()));
+builder.Services.AddSingleton<ActiveCampaignsCache>(sp => new ActiveCampaignsCache(
+    sp.GetService<IConnectionMultiplexer>(),
+    sp.GetRequiredService<ILogger<ActiveCampaignsCache>>()));
+builder.Services.AddSingleton<IMechanicEvaluator, ProductDiscountMechanic>();
+builder.Services.AddSingleton<IMechanicEvaluator, MixMatchMechanic>();
+builder.Services.AddSingleton<IMechanicEvaluator, PwpItemMechanic>();
+builder.Services.AddSingleton<IMechanicEvaluator, PwpDiscountMechanic>();
+builder.Services.AddSingleton<IMechanicEvaluator, AfterSalesMechanic>();
+builder.Services.AddSingleton<PromoCodeCache>(sp => new PromoCodeCache(
+    sp.GetService<IConnectionMultiplexer>(),
+    sp.GetRequiredService<ILogger<PromoCodeCache>>()));
+builder.Services.AddSingleton<PromoCodeResolver, DefaultPromoCodeResolver>();
+builder.Services.AddSingleton<IPromotionEvaluator, PromotionEvaluator>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
@@ -125,6 +152,8 @@ app.UseRateLimiter();
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.MapCampaignRoutes(builder.Configuration);
 app.MapPromoCodeRoutes(builder.Configuration);
+app.MapEvaluateRoutes(builder.Configuration);
+app.MapRedemptionRoutes(builder.Configuration);
 
 app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))
     .WithTags("health")
