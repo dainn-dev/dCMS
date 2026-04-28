@@ -6,6 +6,9 @@ public sealed class PaymentComponent
     public Guid Id { get; }
     public PaymentComponentType Type { get; }
     public decimal Amount { get; }
+    /// <summary>Input identifier set at plan time (voucher code, customer id, etc.). Immutable.</summary>
+    public string? Reference { get; }
+    /// <summary>Output identifier set after Authorize (holdId, chargeRef, etc.).</summary>
     public string? ExternalRef { get; private set; }
     public PaymentComponentState State { get; private set; }
     public string? LastError { get; private set; }
@@ -19,6 +22,7 @@ public sealed class PaymentComponent
         decimal amount,
         int ordering,
         PaymentComponentState state = PaymentComponentState.Pending,
+        string? reference = null,
         string? externalRef = null,
         string? lastError = null,
         DateTimeOffset? createdAt = null,
@@ -31,6 +35,7 @@ public sealed class PaymentComponent
         Amount = amount;
         Ordering = ordering;
         State = state;
+        Reference = reference;
         ExternalRef = externalRef;
         LastError = lastError;
         CreatedAt = createdAt ?? DateTimeOffset.UtcNow;

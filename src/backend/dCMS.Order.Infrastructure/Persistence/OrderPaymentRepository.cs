@@ -46,11 +46,12 @@ public class OrderPaymentRepository
             await conn.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO "PaymentComponents"
-                  ("Id","OrderPaymentId","Type","Amount","ExternalRef","State","LastError","Ordering","CreatedAt","UpdatedAt")
+                  ("Id","OrderPaymentId","Type","Amount","Reference","ExternalRef","State","LastError","Ordering","CreatedAt","UpdatedAt")
                 VALUES
-                  (@Id, @OrderPaymentId, @Type, @Amount, @ExternalRef, @State, @LastError, @Ordering, @CreatedAt, @UpdatedAt)
+                  (@Id, @OrderPaymentId, @Type, @Amount, @Reference, @ExternalRef, @State, @LastError, @Ordering, @CreatedAt, @UpdatedAt)
                 ON CONFLICT ("Id") DO UPDATE SET
                   "Amount"=EXCLUDED."Amount",
+                  "Reference"=COALESCE(EXCLUDED."Reference","PaymentComponents"."Reference"),
                   "ExternalRef"=EXCLUDED."ExternalRef",
                   "State"=EXCLUDED."State",
                   "LastError"=EXCLUDED."LastError",
@@ -63,6 +64,7 @@ public class OrderPaymentRepository
                     OrderPaymentId = paymentId,
                     Type = c.Type.ToString(),
                     c.Amount,
+                    c.Reference,
                     c.ExternalRef,
                     State = c.State.ToString(),
                     c.LastError,
@@ -87,10 +89,10 @@ public class OrderPaymentRepository
                 new { OrderId = orderId }, cancellationToken: ct));
         if (head is null) return null;
 
-        var rows = await conn.QueryAsync<(Guid Id, string Type, decimal Amount, string? ExternalRef, string State, string? LastError, int Ordering, DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt)>(
+        var rows = await conn.QueryAsync<(Guid Id, string Type, decimal Amount, string? Reference, string? ExternalRef, string State, string? LastError, int Ordering, DateTimeOffset CreatedAt, DateTimeOffset? UpdatedAt)>(
             new CommandDefinition(
                 """
-                SELECT "Id","Type","Amount","ExternalRef","State","LastError","Ordering","CreatedAt","UpdatedAt"
+                SELECT "Id","Type","Amount","Reference","ExternalRef","State","LastError","Ordering","CreatedAt","UpdatedAt"
                 FROM "PaymentComponents" WHERE "OrderPaymentId"=@PaymentId
                 ORDER BY "Ordering" ASC, "CreatedAt" ASC;
                 """,
@@ -102,6 +104,7 @@ public class OrderPaymentRepository
             r.Amount,
             r.Ordering,
             Enum.Parse<PaymentComponentState>(r.State, ignoreCase: true),
+            r.Reference,
             r.ExternalRef,
             r.LastError,
             r.CreatedAt,

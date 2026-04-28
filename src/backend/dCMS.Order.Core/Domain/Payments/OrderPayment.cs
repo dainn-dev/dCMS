@@ -25,15 +25,25 @@ public sealed class OrderPayment
         EnsureSumInvariant();
     }
 
-    public static OrderPayment Plan(Guid orderId, decimal total, IEnumerable<(PaymentComponentType Type, decimal Amount)> tenders)
+    public static OrderPayment Plan(
+        Guid orderId,
+        decimal total,
+        IEnumerable<(PaymentComponentType Type, decimal Amount, string? Reference)> tenders)
     {
         var ordered = tenders
             .Where(t => t.Amount > 0m)
             .OrderBy(t => OrderingFor(t.Type))
-            .Select((t, i) => new PaymentComponent(Guid.NewGuid(), t.Type, t.Amount, i))
+            .Select((t, i) => new PaymentComponent(Guid.NewGuid(), t.Type, t.Amount, i, reference: t.Reference))
             .ToList();
         return new OrderPayment(Guid.NewGuid(), orderId, total, "Pending", ordered);
     }
+
+    /// <summary>Backwards-compat overload — used by existing tests that don't care about Reference.</summary>
+    public static OrderPayment Plan(
+        Guid orderId,
+        decimal total,
+        IEnumerable<(PaymentComponentType Type, decimal Amount)> tenders)
+        => Plan(orderId, total, tenders.Select(t => (t.Type, t.Amount, (string?)null)));
 
     /// <summary>Vouchers consume first, then LoyaltyPoints, then any remainder via Gateway/GiftCard.</summary>
     private static int OrderingFor(PaymentComponentType type) => type switch

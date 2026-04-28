@@ -104,4 +104,29 @@ public sealed class OrderPaymentTests
         Assert.Equal(PaymentComponentState.Captured, c.State);
         Assert.NotNull(c.UpdatedAt);
     }
+
+    [Fact]
+    public void Plan_persists_reference_per_component()
+    {
+        var orderId = Guid.NewGuid();
+        var plan = OrderPayment.Plan(orderId, 100m, new[]
+        {
+            (PaymentComponentType.Voucher, 40m, (string?)"PROMO10"),
+            (PaymentComponentType.LoyaltyPoints, 60m, (string?)"cust-1"),
+        });
+
+        Assert.Equal("PROMO10", plan.Components.Single(c => c.Type == PaymentComponentType.Voucher).Reference);
+        Assert.Equal("cust-1", plan.Components.Single(c => c.Type == PaymentComponentType.LoyaltyPoints).Reference);
+        Assert.All(plan.Components, c => Assert.Null(c.ExternalRef));
+    }
+
+    [Fact]
+    public void Authorize_sets_ExternalRef_without_clearing_Reference()
+    {
+        var c = new PaymentComponent(Guid.NewGuid(), PaymentComponentType.Voucher, 40m, ordering: 0,
+            reference: "PROMO10");
+        c.Authorize("hold-123");
+        Assert.Equal("PROMO10", c.Reference);
+        Assert.Equal("hold-123", c.ExternalRef);
+    }
 }
