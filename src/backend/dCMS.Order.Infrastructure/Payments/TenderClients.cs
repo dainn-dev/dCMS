@@ -28,6 +28,20 @@ public interface ILoyaltyTenderClient
     Task<TenderCallResult> RefundAsync(string tenantId, Guid holdId, CancellationToken ct);
 }
 
+/// <summary>
+/// DAI-689: gateway tender client. Authorize creates an external charge intent and
+/// returns a chargeRef; capture commits; void releases an uncaptured authorization;
+/// refund returns funds on a captured charge. Idempotent on chargeRef.
+/// </summary>
+public interface IGatewayTenderClient
+{
+    Task<TenderCallResult> AuthorizeAsync(
+        string tenantId, string customerId, Guid orderId, decimal amount, string currency, CancellationToken ct);
+    Task<TenderCallResult> CaptureAsync(string tenantId, string chargeRef, CancellationToken ct);
+    Task<TenderCallResult> VoidAsync(string tenantId, string chargeRef, string reason, CancellationToken ct);
+    Task<TenderCallResult> RefundAsync(string tenantId, string chargeRef, CancellationToken ct);
+}
+
 public abstract class TenderHttpClientBase
 {
     protected readonly HttpClient Http;

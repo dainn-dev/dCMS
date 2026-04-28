@@ -27,6 +27,7 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
     private readonly IPaymentComponentDispatchLog _log;
     private readonly IVoucherTenderClient _vouchers;
     private readonly ILoyaltyTenderClient _loyalty;
+    private readonly IGatewayTenderClient _gateway;
     private readonly ILogger<PaymentOrchestrator> _logger;
 
     public PaymentOrchestrator(
@@ -34,12 +35,14 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
         IPaymentComponentDispatchLog log,
         IVoucherTenderClient vouchers,
         ILoyaltyTenderClient loyalty,
+        IGatewayTenderClient gateway,
         ILogger<PaymentOrchestrator> logger)
     {
         _payments = payments;
         _log = log;
         _vouchers = vouchers;
         _loyalty = loyalty;
+        _gateway = gateway;
         _logger = logger;
     }
 
@@ -119,7 +122,9 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
                     orderId, component.Amount, ct),
             PaymentComponentType.LoyaltyPoints
                 => await _loyalty.ReserveAsync(msg.TenantId, msg.CustomerId, orderId, component.Amount, ct),
-            // GiftCard / Gateway components flow through the existing Payment.Api path: treat reserve as a no-op success.
+            PaymentComponentType.Gateway
+                => await _gateway.AuthorizeAsync(msg.TenantId, msg.CustomerId, orderId, component.Amount, msg.Currency, ct),
+            // GiftCard: no dedicated tender client yet — treat reserve as no-op success.
             _ => TenderCallResult.Ok(null),
         };
 
@@ -132,23 +137,31 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
 
     private async Task<TenderCallResult> DispatchCaptureAsync(Guid orderId, string tenantId, PaymentComponent component, CancellationToken ct)
     {
-        if (component.Type is PaymentComponentType.GiftCard or PaymentComponentType.Gateway)
-            return TenderCallResult.Ok(); // gateway capture handled by Payment.Api
-
-        if (!Guid.TryParse(component.ExternalRef, out var holdId) || holdId == Guid.Empty)
-            return TenderCallResult.Fail("missing_hold", "no hold id from reserve to capture");
-
         var prior = await _log.TryGetAsync(orderId, component.Id, "CAPTURE", ct);
         if (prior is { IsSuccess: true }) return TenderCallResult.Ok(prior.ExternalRef);
         if (prior is { IsSuccess: false })
             return TenderCallResult.Fail(prior.ErrorCode ?? "capture_failed", prior.ErrorMessage ?? "previous capture failed");
 
-        var result = component.Type switch
+        TenderCallResult result;
+        switch (component.Type)
         {
-            PaymentComponentType.Voucher => await _vouchers.CaptureAsync(tenantId, holdId, ct),
-            PaymentComponentType.LoyaltyPoints => await _loyalty.CaptureAsync(tenantId, holdId, ct),
-            _ => TenderCallResult.Ok(),
-        };
+            case PaymentComponentType.Voucher:
+            case PaymentComponentType.LoyaltyPoints:
+                if (!Guid.TryParse(component.ExternalRef, out var holdId) || holdId == Guid.Empty)
+                    return TenderCallResult.Fail("missing_hold", "no hold id from reserve to capture");
+                result = component.Type == PaymentComponentType.Voucher
+                    ? await _vouchers.CaptureAsync(tenantId, holdId, ct)
+                    : await _loyalty.CaptureAsync(tenantId, holdId, ct);
+                break;
+            case PaymentComponentType.Gateway:
+                if (string.IsNullOrEmpty(component.ExternalRef))
+                    return TenderCallResult.Fail("missing_charge_ref", "no chargeRef from authorize to capture");
+                result = await _gateway.CaptureAsync(tenantId, component.ExternalRef, ct);
+                break;
+            default:
+                result = TenderCallResult.Ok();
+                break;
+        }
 
         if (result.Success)
             await _log.RecordSuccessAsync(orderId, component.Id, "CAPTURE", null, ct);
@@ -159,18 +172,30 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
 
     private async Task ReleaseSingleAsync(Guid orderId, string tenantId, PaymentComponent component, string reason, CancellationToken ct)
     {
-        if (!Guid.TryParse(component.ExternalRef, out var holdId) || holdId == Guid.Empty) return;
-        var result = component.Type switch
+        TenderCallResult result;
+        string refLabel;
+        switch (component.Type)
         {
-            PaymentComponentType.Voucher => await _vouchers.ReleaseAsync(tenantId, holdId, reason, ct),
-            PaymentComponentType.LoyaltyPoints => await _loyalty.ReleaseAsync(tenantId, holdId, reason, ct),
-            _ => TenderCallResult.Ok(),
-        };
+            case PaymentComponentType.Voucher:
+            case PaymentComponentType.LoyaltyPoints:
+                if (!Guid.TryParse(component.ExternalRef, out var holdId) || holdId == Guid.Empty) return;
+                result = component.Type == PaymentComponentType.Voucher
+                    ? await _vouchers.ReleaseAsync(tenantId, holdId, reason, ct)
+                    : await _loyalty.ReleaseAsync(tenantId, holdId, reason, ct);
+                refLabel = holdId.ToString();
+                break;
+            case PaymentComponentType.Gateway:
+                if (string.IsNullOrEmpty(component.ExternalRef)) return;
+                result = await _gateway.VoidAsync(tenantId, component.ExternalRef, reason, ct);
+                refLabel = component.ExternalRef;
+                break;
+            default: return;
+        }
         if (!result.Success)
-            _logger.LogWarning("PaymentOrchestrator: release failed for {Component}/{Hold}: {Code} {Message}",
-                component.Type, holdId, result.ErrorCode, result.ErrorMessage);
+            _logger.LogWarning("PaymentOrchestrator: release failed for {Component}/{Ref}: {Code} {Message}",
+                component.Type, refLabel, result.ErrorCode, result.ErrorMessage);
         else
-            await _log.RecordSuccessAsync(orderId, component.Id, "RELEASE", holdId.ToString(), ct);
+            await _log.RecordSuccessAsync(orderId, component.Id, "RELEASE", refLabel, ct);
     }
 
     private async Task CompensateAsync(Guid orderId, string tenantId, IEnumerable<PaymentComponent> captured, string reason, CancellationToken ct)
@@ -178,22 +203,34 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
         // Reverse order: refund captured components in opposite order to capture.
         foreach (var c in captured.Reverse())
         {
-            if (!Guid.TryParse(c.ExternalRef, out var holdId) || holdId == Guid.Empty) continue;
-            var result = c.Type switch
+            TenderCallResult result;
+            string refLabel;
+            switch (c.Type)
             {
-                PaymentComponentType.Voucher => await _vouchers.RefundAsync(tenantId, holdId, ct),
-                PaymentComponentType.LoyaltyPoints => await _loyalty.RefundAsync(tenantId, holdId, ct),
-                _ => TenderCallResult.Ok(),
-            };
+                case PaymentComponentType.Voucher:
+                case PaymentComponentType.LoyaltyPoints:
+                    if (!Guid.TryParse(c.ExternalRef, out var holdId) || holdId == Guid.Empty) continue;
+                    result = c.Type == PaymentComponentType.Voucher
+                        ? await _vouchers.RefundAsync(tenantId, holdId, ct)
+                        : await _loyalty.RefundAsync(tenantId, holdId, ct);
+                    refLabel = holdId.ToString();
+                    break;
+                case PaymentComponentType.Gateway:
+                    if (string.IsNullOrEmpty(c.ExternalRef)) continue;
+                    result = await _gateway.RefundAsync(tenantId, c.ExternalRef, ct);
+                    refLabel = c.ExternalRef;
+                    break;
+                default: continue;
+            }
             if (result.Success)
             {
                 c.Refund();
-                await _log.RecordSuccessAsync(orderId, c.Id, "REFUND", holdId.ToString(), ct);
+                await _log.RecordSuccessAsync(orderId, c.Id, "REFUND", refLabel, ct);
             }
             else
             {
-                _logger.LogError("PaymentOrchestrator: compensation refund failed for {Component}/{Hold} reason={Reason}: {Code} {Message}",
-                    c.Type, holdId, reason, result.ErrorCode, result.ErrorMessage);
+                _logger.LogError("PaymentOrchestrator: compensation refund failed for {Component}/{Ref} reason={Reason}: {Code} {Message}",
+                    c.Type, refLabel, reason, result.ErrorCode, result.ErrorMessage);
             }
         }
     }

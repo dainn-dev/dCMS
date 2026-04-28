@@ -124,6 +124,7 @@ public sealed class PaymentOrchestratorTests
         var repo = new FakeRepo();
         var voucher = new FakeVoucherClient();
         var loyalty = new FakeLoyaltyClient();
+        var gateway = new StubGatewayTenderClient();
         var log = new FakeDispatchLog();
 
         var services = new ServiceCollection();
@@ -131,6 +132,7 @@ public sealed class PaymentOrchestratorTests
         services.AddSingleton<IPaymentComponentDispatchLog>(log);
         services.AddSingleton<IVoucherTenderClient>(voucher);
         services.AddSingleton<ILoyaltyTenderClient>(loyalty);
+        services.AddSingleton<IGatewayTenderClient>(gateway);
         services.AddMassTransitTestHarness(cfg =>
         {
             cfg.AddConsumer<PaymentOrchestrator>();
@@ -139,7 +141,7 @@ public sealed class PaymentOrchestratorTests
         var harness = provider.GetRequiredService<ITestHarness>();
         await harness.Start();
 
-        var orch = new PaymentOrchestrator(repo, log, voucher, loyalty, NullLogger<PaymentOrchestrator>.Instance);
+        var orch = new PaymentOrchestrator(repo, log, voucher, loyalty, gateway, NullLogger<PaymentOrchestrator>.Instance);
         return (orch, repo, voucher, loyalty, log, harness);
     }
 

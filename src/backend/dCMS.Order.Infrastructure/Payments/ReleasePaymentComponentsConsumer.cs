@@ -10,7 +10,7 @@ namespace dCMS.Order.Infrastructure.Payments;
 /// DAI-724: late-cancel compensation consumer. The OrderSaga publishes
 /// <see cref="ReleasePaymentComponentsV1"/> when an order is cancelled after one or more
 /// payment components have already captured. This consumer issues per-component refund
-/// (for captured) or release (for authorised but uncaptured) calls, idempotent on
+/// (for captured) or release/void (for authorised but uncaptured) calls, idempotent on
 /// <c>(OrderId, ComponentId, REFUND|RELEASE)</c> via <see cref="IPaymentComponentDispatchLog"/>.
 /// </summary>
 public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentComponentsV1>
@@ -19,6 +19,7 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
     private readonly IPaymentComponentDispatchLog _log;
     private readonly IVoucherTenderClient _vouchers;
     private readonly ILoyaltyTenderClient _loyalty;
+    private readonly IGatewayTenderClient _gateway;
     private readonly ILogger<ReleasePaymentComponentsConsumer> _logger;
 
     public ReleasePaymentComponentsConsumer(
@@ -26,12 +27,14 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
         IPaymentComponentDispatchLog log,
         IVoucherTenderClient vouchers,
         ILoyaltyTenderClient loyalty,
+        IGatewayTenderClient gateway,
         ILogger<ReleasePaymentComponentsConsumer> logger)
     {
         _payments = payments;
         _log = log;
         _vouchers = vouchers;
         _loyalty = loyalty;
+        _gateway = gateway;
         _logger = logger;
     }
 
@@ -43,15 +46,13 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
 
         foreach (var c in payment.Components)
         {
-            if (!Guid.TryParse(c.ExternalRef, out var holdId) || holdId == Guid.Empty) continue;
-
             switch (c.State)
             {
                 case PaymentComponentState.Captured:
-                    await IssueRefundAsync(msg, c, holdId, ctx.CancellationToken);
+                    await IssueRefundAsync(msg, c, ctx.CancellationToken);
                     break;
                 case PaymentComponentState.Authorized:
-                    await IssueReleaseAsync(msg, c, holdId, ctx.CancellationToken);
+                    await IssueReleaseAsync(msg, c, ctx.CancellationToken);
                     break;
                 default:
                     // Pending/Failed/Refunded/Cancelled: nothing to do here.
@@ -62,7 +63,7 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
         await _payments.UpsertAsync(payment, ctx.CancellationToken);
     }
 
-    private async Task IssueRefundAsync(ReleasePaymentComponentsV1 msg, PaymentComponent c, Guid holdId, CancellationToken ct)
+    private async Task IssueRefundAsync(ReleasePaymentComponentsV1 msg, PaymentComponent c, CancellationToken ct)
     {
         var prior = await _log.TryGetAsync(msg.OrderId, c.Id, "REFUND", ct);
         if (prior is { IsSuccess: true })
@@ -70,16 +71,32 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
             c.Refund();
             return;
         }
-        var result = c.Type switch
+
+        TenderCallResult result;
+        string refLabel;
+        switch (c.Type)
         {
-            PaymentComponentType.Voucher => await _vouchers.RefundAsync(msg.TenantId, holdId, ct),
-            PaymentComponentType.LoyaltyPoints => await _loyalty.RefundAsync(msg.TenantId, holdId, ct),
-            _ => TenderCallResult.Ok(), // GiftCard/Gateway refund handled by Payment.Api via RefundPaymentV1
-        };
+            case PaymentComponentType.Voucher:
+            case PaymentComponentType.LoyaltyPoints:
+                if (!Guid.TryParse(c.ExternalRef, out var holdId) || holdId == Guid.Empty) return;
+                result = c.Type == PaymentComponentType.Voucher
+                    ? await _vouchers.RefundAsync(msg.TenantId, holdId, ct)
+                    : await _loyalty.RefundAsync(msg.TenantId, holdId, ct);
+                refLabel = holdId.ToString();
+                break;
+            case PaymentComponentType.Gateway:
+                if (string.IsNullOrEmpty(c.ExternalRef)) return;
+                result = await _gateway.RefundAsync(msg.TenantId, c.ExternalRef, ct);
+                refLabel = c.ExternalRef;
+                break;
+            default:
+                return;
+        }
+
         if (result.Success)
         {
             c.Refund();
-            await _log.RecordSuccessAsync(msg.OrderId, c.Id, "REFUND", holdId.ToString(), ct);
+            await _log.RecordSuccessAsync(msg.OrderId, c.Id, "REFUND", refLabel, ct);
         }
         else
         {
@@ -89,7 +106,7 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
         }
     }
 
-    private async Task IssueReleaseAsync(ReleasePaymentComponentsV1 msg, PaymentComponent c, Guid holdId, CancellationToken ct)
+    private async Task IssueReleaseAsync(ReleasePaymentComponentsV1 msg, PaymentComponent c, CancellationToken ct)
     {
         var prior = await _log.TryGetAsync(msg.OrderId, c.Id, "RELEASE", ct);
         if (prior is { IsSuccess: true })
@@ -97,16 +114,32 @@ public sealed class ReleasePaymentComponentsConsumer : IConsumer<ReleasePaymentC
             c.Cancel();
             return;
         }
-        var result = c.Type switch
+
+        TenderCallResult result;
+        string refLabel;
+        switch (c.Type)
         {
-            PaymentComponentType.Voucher => await _vouchers.ReleaseAsync(msg.TenantId, holdId, msg.Reason, ct),
-            PaymentComponentType.LoyaltyPoints => await _loyalty.ReleaseAsync(msg.TenantId, holdId, msg.Reason, ct),
-            _ => TenderCallResult.Ok(),
-        };
+            case PaymentComponentType.Voucher:
+            case PaymentComponentType.LoyaltyPoints:
+                if (!Guid.TryParse(c.ExternalRef, out var holdId) || holdId == Guid.Empty) return;
+                result = c.Type == PaymentComponentType.Voucher
+                    ? await _vouchers.ReleaseAsync(msg.TenantId, holdId, msg.Reason, ct)
+                    : await _loyalty.ReleaseAsync(msg.TenantId, holdId, msg.Reason, ct);
+                refLabel = holdId.ToString();
+                break;
+            case PaymentComponentType.Gateway:
+                if (string.IsNullOrEmpty(c.ExternalRef)) return;
+                result = await _gateway.VoidAsync(msg.TenantId, c.ExternalRef, msg.Reason, ct);
+                refLabel = c.ExternalRef;
+                break;
+            default:
+                return;
+        }
+
         if (result.Success)
         {
             c.Cancel();
-            await _log.RecordSuccessAsync(msg.OrderId, c.Id, "RELEASE", holdId.ToString(), ct);
+            await _log.RecordSuccessAsync(msg.OrderId, c.Id, "RELEASE", refLabel, ct);
         }
         else
         {

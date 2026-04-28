@@ -167,6 +167,7 @@ public static class OrderServiceCollectionExtensions
     {
         var voucherBase = configuration["Voucher:BaseUrl"] ?? "http://voucher-api:8080/";
         var loyaltyBase = configuration["Loyalty:BaseUrl"] ?? "http://loyalty-api:8080/";
+        var paymentBase = configuration["Payment:BaseUrl"] ?? "http://payment-api:8080/";
 
         services.AddHttpClient<IVoucherTenderClient, HttpVoucherTenderClient>(client =>
             {
@@ -179,6 +180,20 @@ public static class OrderServiceCollectionExtensions
                 client.BaseAddress = new Uri(loyaltyBase.TrimEnd('/') + "/", UriKind.Absolute);
             })
             .AddTransientHttpErrorPolicy(p => p.WaitAndRetryAsync(2, _ => TimeSpan.FromMilliseconds(200)));
+
+        // DAI-689: gateway client. Default to stub (matches dCMS.Payment.Infrastructure default).
+        if (configuration.GetValue("Payment:UseStubGateway", true))
+        {
+            services.AddSingleton<IGatewayTenderClient, StubGatewayTenderClient>();
+        }
+        else
+        {
+            services.AddHttpClient<IGatewayTenderClient, HttpGatewayTenderClient>(client =>
+                {
+                    client.BaseAddress = new Uri(paymentBase.TrimEnd('/') + "/", UriKind.Absolute);
+                })
+                .AddTransientHttpErrorPolicy(p => p.WaitAndRetryAsync(2, _ => TimeSpan.FromMilliseconds(200)));
+        }
 
         return services;
     }
