@@ -112,10 +112,11 @@ public sealed class PaymentOrchestrator : IConsumer<ProcessPaymentV1>
         TenderCallResult result = component.Type switch
         {
             PaymentComponentType.Voucher
-                // Voucher reserve is keyed by code; we don't have it on the component yet, so fall back to OrderId.
-                // In practice, the placement flow records the voucher code in component.ExternalRef *before* publishing
-                // ProcessPaymentV1 (or in a future story, on a dedicated VoucherCode column).
-                => await _vouchers.ReserveAsync(msg.TenantId, code: component.ExternalRef ?? msg.OrderId, orderId, component.Amount, ct),
+                => await _vouchers.ReserveAsync(
+                    msg.TenantId,
+                    code: component.Reference ?? throw new InvalidOperationException(
+                        $"Voucher component {component.Id} on order {orderId} has no Reference (voucher code)."),
+                    orderId, component.Amount, ct),
             PaymentComponentType.LoyaltyPoints
                 => await _loyalty.ReserveAsync(msg.TenantId, msg.CustomerId, orderId, component.Amount, ct),
             // GiftCard / Gateway components flow through the existing Payment.Api path: treat reserve as a no-op success.

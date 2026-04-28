@@ -24,8 +24,8 @@ public sealed class PaymentOrchestratorTests
         var orderId = Guid.NewGuid();
         var plan = OrderPayment.Plan(orderId, 100m, new[]
         {
-            (PaymentComponentType.Voucher, 40m),
-            (PaymentComponentType.LoyaltyPoints, 60m),
+            (PaymentComponentType.Voucher, 40m, (string?)"PROMO10"),
+            (PaymentComponentType.LoyaltyPoints, 60m, (string?)"cust-1"),
         });
         repo.Seed(plan);
         voucher.NextHoldId = Guid.NewGuid();
@@ -52,8 +52,8 @@ public sealed class PaymentOrchestratorTests
         var orderId = Guid.NewGuid();
         var plan = OrderPayment.Plan(orderId, 100m, new[]
         {
-            (PaymentComponentType.Voucher, 40m),
-            (PaymentComponentType.LoyaltyPoints, 60m),
+            (PaymentComponentType.Voucher, 40m, (string?)"PROMO10"),
+            (PaymentComponentType.LoyaltyPoints, 60m, (string?)"cust-1"),
         });
         repo.Seed(plan);
         voucher.NextHoldId = Guid.NewGuid();
@@ -79,7 +79,7 @@ public sealed class PaymentOrchestratorTests
         var orderId = Guid.NewGuid();
         var plan = OrderPayment.Plan(orderId, 50m, new[]
         {
-            (PaymentComponentType.Voucher, 50m),
+            (PaymentComponentType.Voucher, 50m, (string?)"PROMO10"),
         });
         repo.Seed(plan);
         var voucherComponent = plan.Components[0];
@@ -98,6 +98,25 @@ public sealed class PaymentOrchestratorTests
         Assert.Equal(0, voucher.ReserveCalls);
         Assert.Equal(0, voucher.CaptureCalls);
         Assert.True(await harness.Published.Any<PaymentCompletedV1>());
+    }
+
+    [Fact]
+    public async Task Voucher_reserve_uses_component_reference_not_externalref()
+    {
+        var (_, repo, voucher, loyalty, _, harness) = await BuildAsync();
+        var orderId = Guid.NewGuid();
+        var plan = OrderPayment.Plan(orderId, 25m, new[]
+        {
+            (PaymentComponentType.Voucher, 25m, (string?)"PROMO10"),
+        });
+        repo.Seed(plan);
+
+        await harness.Bus.Publish(new ProcessPaymentV1(
+            Guid.NewGuid(), orderId.ToString(), "t1", "cust-1", 25m, "USD", "card",
+            DateTimeOffset.UtcNow.AddMinutes(15)));
+        await harness.InactivityTask;
+
+        Assert.Equal("PROMO10", voucher.LastReserveCode);
     }
 
     private static async Task<(PaymentOrchestrator orch, FakeRepo repo, FakeVoucherClient voucher, FakeLoyaltyClient loyalty, FakeDispatchLog log, ITestHarness harness)> BuildAsync()
@@ -155,9 +174,11 @@ public sealed class PaymentOrchestratorTests
         public int RefundCalls;
         public Guid? NextHoldId;
         public TenderCallResult? ReserveResult;
+        public string? LastReserveCode;
         public Task<TenderCallResult> ReserveAsync(string tenantId, string code, Guid orderId, decimal amount, CancellationToken ct)
         {
             ReserveCalls++;
+            LastReserveCode = code;
             if (ReserveResult is { } r) return Task.FromResult(r);
             return Task.FromResult(TenderCallResult.Ok((NextHoldId ?? Guid.NewGuid()).ToString()));
         }
