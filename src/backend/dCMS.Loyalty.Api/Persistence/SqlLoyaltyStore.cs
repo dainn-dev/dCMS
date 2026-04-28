@@ -163,6 +163,24 @@ public sealed class SqlLoyaltyStore(string connectionString) : ILoyaltyStore
         return new LoyaltyRefundResult(true, null, null, hold with { Status = LoyaltyHoldStatus.Refunded, UpdatedAt = now });
     }
 
+    public async Task<IReadOnlyList<ExpiredLoyaltyHoldRow>> ListExpiredHoldsAsync(DateTimeOffset asOf, int limit, CancellationToken ct)
+    {
+        if (limit <= 0) return Array.Empty<ExpiredLoyaltyHoldRow>();
+
+        await using var conn = new NpgsqlConnection(connectionString);
+        var rows = await conn.QueryAsync<ExpiredLoyaltyHoldRow>(new CommandDefinition(
+            """
+            SELECT "Id" AS HoldId, "TenantId" AS TenantId, "CustomerId" AS CustomerId,
+                   "OrderId" AS OrderId, "Amount" AS Amount, "ExpiresAt" AS ExpiresAt
+              FROM "LoyaltyHolds"
+             WHERE "Status" = 'Held' AND "ExpiresAt" <= @AsOf
+             ORDER BY "ExpiresAt" ASC
+             LIMIT @Limit;
+            """,
+            new { AsOf = asOf, Limit = limit }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
     public async Task<long> RecordLedgerAsync(string tenantId, string customerId, decimal delta, string reason,
         Guid? orderId, string? notes, CancellationToken ct)
     {

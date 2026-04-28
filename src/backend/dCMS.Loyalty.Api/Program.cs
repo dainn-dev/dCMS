@@ -3,6 +3,7 @@ using dCMS.Infrastructure.Monitoring;
 using dCMS.Loyalty.Api.Migrations;
 using dCMS.Loyalty.Api.Persistence;
 using dCMS.Loyalty.Api.Routes;
+using dCMS.Loyalty.Api.Workers;
 using MassTransit;
 using Microsoft.OpenApi.Models;
 
@@ -32,6 +33,8 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddSingleton<ILoyaltyStore>(_ => new SqlLoyaltyStore(connectionString));
+
+builder.Services.AddHostedService<HoldExpiryWorker>();
 
 builder.Services.AddMassTransit(x =>
 {

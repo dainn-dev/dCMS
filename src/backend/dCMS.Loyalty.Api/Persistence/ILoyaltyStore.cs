@@ -22,6 +22,9 @@ public interface ILoyaltyStore
     /// <summary>Records an EARN/ADJUST ledger entry directly (no hold). Used by external earn flows.</summary>
     Task<long> RecordLedgerAsync(string tenantId, string customerId, decimal delta, string reason,
         Guid? orderId, string? notes, CancellationToken ct);
+
+    /// <summary>DAI-689: lists 'Held' loyalty holds whose ExpiresAt is in the past, up to <paramref name="limit"/>.</summary>
+    Task<IReadOnlyList<ExpiredLoyaltyHoldRow>> ListExpiredHoldsAsync(DateTimeOffset asOf, int limit, CancellationToken ct);
 }
 
 public sealed record LoyaltyBalanceView(string CustomerId, decimal Balance, decimal HeldAmount, decimal Available);
@@ -29,3 +32,4 @@ public sealed record LoyaltyReserveResult(bool Success, string? ErrorCode, strin
 public sealed record LoyaltyCaptureResult(bool Success, string? ErrorCode, string? ErrorMessage, LoyaltyHoldRow? Hold);
 public sealed record LoyaltyReleaseResult(bool Success, string? ErrorCode, string? ErrorMessage, LoyaltyHoldRow? Hold);
 public sealed record LoyaltyRefundResult(bool Success, string? ErrorCode, string? ErrorMessage, LoyaltyHoldRow? Hold);
+public sealed record ExpiredLoyaltyHoldRow(Guid HoldId, string TenantId, string CustomerId, Guid OrderId, decimal Amount, DateTimeOffset ExpiresAt);
