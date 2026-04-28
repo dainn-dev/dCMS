@@ -19,6 +19,12 @@ public interface IVoucherStore
     Task<RefundResult> RefundAsync(string tenantId, Guid holdId, CancellationToken ct);
 
     Task<BalanceView?> GetBalanceAsync(string tenantId, string code, CancellationToken ct);
+
+    /// <summary>
+    /// DAI-689: lists holds in 'Held' state whose ExpiresAt is in the past, up to <paramref name="limit"/> rows.
+    /// Used by the HoldExpiryWorker to release abandoned reservations. Cross-tenant scan — caller is the worker.
+    /// </summary>
+    Task<IReadOnlyList<ExpiredHoldRow>> ListExpiredHoldsAsync(DateTimeOffset asOf, int limit, CancellationToken ct);
 }
 
 public sealed record ReserveResult(bool Success, string? ErrorCode, string? ErrorMessage, VoucherHoldRow? Hold);
@@ -26,3 +32,4 @@ public sealed record CaptureResult(bool Success, string? ErrorCode, string? Erro
 public sealed record ReleaseResult(bool Success, string? ErrorCode, string? ErrorMessage, VoucherHoldRow? Hold);
 public sealed record RefundResult(bool Success, string? ErrorCode, string? ErrorMessage, VoucherHoldRow? Hold);
 public sealed record BalanceView(string Code, decimal FaceValue, decimal RemainingValue, decimal HeldValue, string Currency, string Status);
+public sealed record ExpiredHoldRow(Guid HoldId, string TenantId, Guid VoucherId, Guid OrderId, decimal Amount, DateTimeOffset ExpiresAt);

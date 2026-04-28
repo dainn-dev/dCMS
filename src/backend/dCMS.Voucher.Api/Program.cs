@@ -3,6 +3,7 @@ using dCMS.Infrastructure.Monitoring;
 using dCMS.Voucher.Api.Migrations;
 using dCMS.Voucher.Api.Persistence;
 using dCMS.Voucher.Api.Routes;
+using dCMS.Voucher.Api.Workers;
 using MassTransit;
 using Microsoft.OpenApi.Models;
 
@@ -32,6 +33,8 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddSingleton<IVoucherStore>(_ => new SqlVoucherStore(connectionString));
+
+builder.Services.AddHostedService<HoldExpiryWorker>();
 
 builder.Services.AddMassTransit(x =>
 {

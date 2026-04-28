@@ -209,6 +209,24 @@ public sealed class SqlVoucherStore(string connectionString) : IVoucherStore
         return new RefundResult(true, null, null, hold with { Status = VoucherHoldStatus.Refunded, UpdatedAt = now });
     }
 
+    public async Task<IReadOnlyList<ExpiredHoldRow>> ListExpiredHoldsAsync(DateTimeOffset asOf, int limit, CancellationToken ct)
+    {
+        if (limit <= 0) return Array.Empty<ExpiredHoldRow>();
+
+        await using var conn = new NpgsqlConnection(connectionString);
+        var rows = await conn.QueryAsync<ExpiredHoldRow>(new CommandDefinition(
+            """
+            SELECT "Id" AS HoldId, "TenantId" AS TenantId, "VoucherId" AS VoucherId,
+                   "OrderId" AS OrderId, "Amount" AS Amount, "ExpiresAt" AS ExpiresAt
+              FROM "VoucherHolds"
+             WHERE "Status" = 'Held' AND "ExpiresAt" <= @AsOf
+             ORDER BY "ExpiresAt" ASC
+             LIMIT @Limit;
+            """,
+            new { AsOf = asOf, Limit = limit }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
     public async Task<BalanceView?> GetBalanceAsync(string tenantId, string code, CancellationToken ct)
     {
         await using var conn = new NpgsqlConnection(connectionString);
