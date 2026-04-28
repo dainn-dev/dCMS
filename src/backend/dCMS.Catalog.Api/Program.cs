@@ -4,9 +4,10 @@ using dCMS.AspNetCore.Auth;
 using dCMS.Catalog.Api.Attributes;
 using dCMS.Catalog.Api.Brands;
 using dCMS.Catalog.Api.Categories;
+using dCMS.Catalog.Api.Imports;
+using dCMS.Catalog.Api.Internal;
 using dCMS.Catalog.Api.VariantAxes;
 using dCMS.Catalog.Api.Middleware;
-using dCMS.Catalog.Api.Notifications;
 using dCMS.Catalog.Api.Public;
 using dCMS.Catalog.Api.Products;
 using dCMS.Catalog.Api.Services;
@@ -30,6 +31,7 @@ using dCMS.Infrastructure.Search;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using MassTransit;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
@@ -69,11 +71,31 @@ builder.Services.AddSingleton<IProductImagePersistence>(_ => new SqlProductImage
 builder.Services.Configure<CatalogMediaOptions>(builder.Configuration.GetSection("Catalog:Media"));
 builder.Services.Configure<ProductImageS3Options>(builder.Configuration.GetSection("Catalog:S3:ProductImages"));
 builder.Services.AddSingleton<ProductImageS3Signer>();
+
+// DAI-684: bulk import endpoints + worker contract.
+builder.Services.Configure<ImportFileS3Options>(builder.Configuration.GetSection("Catalog:S3:ImportFiles"));
+builder.Services.Configure<CatalogImportOptions>(builder.Configuration.GetSection("Catalog:Imports"));
+builder.Services.AddSingleton<ImportFileStore>();
+builder.Services.AddSingleton<IImportJobPersistence>(_ => new SqlImportJobPersistence(catalogCs));
+builder.Services.AddMassTransit(bus =>
+{
+    bus.SetKebabCaseEndpointNameFormatter();
+    bus.UsingRabbitMq((context, cfg) =>
+    {
+        var host = builder.Configuration["RabbitMq:Host"] ?? "localhost";
+        var user = builder.Configuration["RabbitMq:User"] ?? "guest";
+        var pass = builder.Configuration["RabbitMq:Pass"] ?? "guest";
+        cfg.Host(host, "/", h => { h.Username(user); h.Password(pass); });
+        cfg.ConfigureEndpoints(context);
+    });
+});
 builder.Services.Configure<CatalogNotificationOptions>(builder.Configuration.GetSection(CatalogNotificationOptions.SectionName));
-builder.Services.AddSingleton<IProductNotificationSink, ProductNotificationSink>();
+// P2 #6: ProductNotificationSink publishes UserNotificationCreatedV1 — Notification.Worker writes the row.
+builder.Services.AddScoped<IProductNotificationSink, ProductNotificationSink>();
+builder.Services.Configure<InternalCatalogOptions>(
+    builder.Configuration.GetSection(InternalCatalogOptions.SectionName));
 builder.Services.AddSingleton<IBrandPersistence>(_ => new SqlBrandPersistence(catalogCs));
 builder.Services.AddScoped<ProductService>();
-builder.Services.AddScoped<NotificationService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
 
 builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
@@ -186,11 +208,13 @@ app.MapBrandRoutes(builder.Configuration);
 app.MapAttributeRoutes(builder.Configuration);
 app.MapProductRoutes(builder.Configuration);
 app.MapStoreCatalogSettingsRoutes(builder.Configuration);
-app.MapNotificationRoutes(builder.Configuration);
+// P2 #6: notification feed routes moved to dCMS.Notification.Api (mounted at same /api/v1/.../notifications path).
 app.MapProductImageRoutes(builder.Configuration);
+app.MapImportJobRoutes(builder.Configuration);
 app.MapCategoryRoutes(builder.Configuration);
 app.MapVariantAxesRoutes(builder.Configuration);
 app.MapPublicProductRoutes();
+app.MapInternalCatalogRoutes(catalogCs);
 
 app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))
     .WithTags("health")

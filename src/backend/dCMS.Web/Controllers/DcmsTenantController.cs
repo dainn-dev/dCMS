@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Umbraco.Cms.Core;
 using Umbraco.Cms.Infrastructure.Persistence;
 
 namespace dCMS.Web.Controllers;
@@ -10,7 +11,7 @@ namespace dCMS.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("umbraco/dcms/api/tenants")]
-[Authorize(Policy = "BackOfficeAccess")]
+[Authorize(AuthenticationSchemes = Constants.Security.BackOfficeAuthenticationType)]
 public sealed class DcmsTenantController : ControllerBase
 {
     private static readonly Regex CodeRegex = new(@"^[A-Za-z0-9][A-Za-z0-9_-]{0,18}$", RegexOptions.Compiled);

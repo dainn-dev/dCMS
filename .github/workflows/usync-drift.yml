@@ -1,0 +1,28 @@
+name: usync-drift
+
+on:
+  pull_request:
+    paths:
+      - "src/backend/dCMS.Web/**"
+      - ".github/workflows/usync-drift.yml"
+
+jobs:
+  usync-folder-present:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure uSync folder exists
+        run: |
+          test -d "src/backend/dCMS.Web/uSync/v16"
+          test -f "src/backend/dCMS.Web/uSync/v16/.gitkeep" || true
+
+  # DAI-686 / AC4:
+  # Full drift detection requires spinning up Umbraco + exporting via uSync (CLI or management API).
+  # This will be implemented once tenant unattended install + deterministic baseline export is in place (DAI-714).
+  #
+  # The goal is: run export against a fresh DB, then fail if `git diff --exit-code src/backend/dCMS.Web/uSync/v16`.
+  #
+  # References:
+  # - uSync.Complete v16: https://www.nuget.org/packages/uSync.Complete/16.1.2
+  # - uSync command line repo: https://github.com/Jumoo/uSync.CommandLine
+

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/dcms-analyzers",
+  "_": "DAI-702 — list of tables that MUST be filtered by tenant_id in Dapper queries.",
+  "tenantScopedTables": [
+    "Orders",
+    "OrderItems",
+    "OrderReturns",
+    "OrderReturnItems",
+    "OrderPromotions",
+    "Products",
+    "ProductVariants",
+    "ProductImages",
+    "Categories",
+    "Brands",
+    "Campaigns",
+    "PromoCodes",
+    "PromotionRedemptions",
+    "Stock",
+    "StockMovements",
+    "Warehouses"
+  ]
+}

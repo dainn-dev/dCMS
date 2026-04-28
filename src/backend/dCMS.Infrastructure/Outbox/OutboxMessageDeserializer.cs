@@ -20,6 +20,8 @@ public static class OutboxMessageDeserializer
             "OrderShipped" => JsonSerializer.Deserialize<OrderShippedV1>(payloadJson, Options),
             "OrderDelivered" => JsonSerializer.Deserialize<OrderDeliveredV1>(payloadJson, Options),
             "OrderFailed" => JsonSerializer.Deserialize<OrderFailedV1>(payloadJson, Options),
+            "ProductRestocked.v1" => JsonSerializer.Deserialize<ProductRestockedV1>(payloadJson, Options),
+            "ReturnStatusChanged.v1" => JsonSerializer.Deserialize<ReturnStatusChangedV1>(payloadJson, Options),
             _ => null
         };
 
@@ -34,6 +36,11 @@ public static class OutboxMessageDeserializer
             .Select(l => new OrderPlacedLineV1(l.VariantId ?? "", l.WarehouseId ?? "", l.Quantity))
             .ToList();
 
+        var items = dto.Items ?? [];
+        var v1Items = items
+            .Select(i => new OrderPlacedItemV1(i.ProductId ?? "", i.Quantity, i.LineTotal))
+            .ToList();
+
         return new OrderPlacedV1(
             dto.OrderId,
             dto.TenantId ?? "",
@@ -42,7 +49,8 @@ public static class OutboxMessageDeserializer
             dto.TotalAmount,
             dto.Currency ?? "USD",
             v1Lines,
-            dto.OccurredAt);
+            dto.OccurredAt,
+            v1Items.Count > 0 ? v1Items : null);
     }
 
     private sealed class OrderPlacedOutboxDto
@@ -55,6 +63,7 @@ public static class OutboxMessageDeserializer
         public string? Currency { get; set; }
         public List<OrderPlacedLineOutboxDto>? Lines { get; set; }
         public DateTimeOffset OccurredAt { get; set; }
+        public List<OrderPlacedItemOutboxDto>? Items { get; set; }
     }
 
     private sealed class OrderPlacedLineOutboxDto
@@ -62,5 +71,12 @@ public static class OutboxMessageDeserializer
         public string? VariantId { get; set; }
         public string? WarehouseId { get; set; }
         public int Quantity { get; set; }
+    }
+
+    private sealed class OrderPlacedItemOutboxDto
+    {
+        public string? ProductId { get; set; }
+        public int Quantity { get; set; }
+        public decimal LineTotal { get; set; }
     }
 }

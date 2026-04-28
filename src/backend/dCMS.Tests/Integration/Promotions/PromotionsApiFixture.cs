@@ -44,6 +44,9 @@ public sealed class PromotionsApiFixture : IAsyncLifetime
             {
                 "009_CreateAuditAndNotifications.sql",
                 "020_CreateCampaigns.sql",
+                "022_CreatePromoCodes.sql",
+                "023_ExtendPromoCodes.sql",
+                "024_CreatePromoCodeRedemptions.sql",
             })
             {
                 var sql = await File.ReadAllTextAsync(Path.Combine(baseDir, "Migrations", migration))

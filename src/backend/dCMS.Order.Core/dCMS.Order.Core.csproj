@@ -8,4 +8,8 @@
     <Description>Order domain (DAI-310 / DAI-312 / US-18). Aggregates and domain events.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.Promotions.Contracts\dCMS.Promotions.Contracts.csproj" />
+  </ItemGroup>
+
 </Project>

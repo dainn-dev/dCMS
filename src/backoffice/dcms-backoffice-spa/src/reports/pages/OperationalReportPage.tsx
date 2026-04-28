@@ -268,7 +268,13 @@ function readAbandonExportRole(): boolean {
   }
 }
 
-export function OperationalReportPage() {
+type OperationalReportPageProps = {
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
+};
+
+export function OperationalReportPage({ tenantId: _tenantId, storeId: _storeId, authToken: _authToken }: OperationalReportPageProps) {
   const [tab, setTab] = useState<OpsTab>("restock");
   const [dateFrom, setDateFrom] = useState("2026-04-01");
   const [dateTo, setDateTo] = useState("2026-04-18");
@@ -488,10 +494,20 @@ export function OperationalReportPage() {
           )}
         </ReportFilterPanel>
 
+        {tab === "restock" && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            Demo data — restock subscription API not yet available. Showing mock data.
+          </div>
+        )}
         {tab === "restock" && hasSearched && restockRows.length > 0 && !loading && (
           <p className="text-xs text-on-surface-variant">
             Subscriber count is aggregated per product with duplicate user+product subscriptions removed (mock behaves as post-dedup API).
           </p>
+        )}
+        {tab === "abandon" && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            Demo data — cart persistence API not yet available. Showing mock data.
+          </div>
         )}
         {tab === "abandon" && hasSearched && abandonRows.length > 0 && !loading && (
           <p className="text-xs text-on-surface-variant">

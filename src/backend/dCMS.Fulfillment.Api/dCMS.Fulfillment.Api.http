@@ -1,10 +1,10 @@
 # dCMS.Fulfillment.Api — manual smoke / REST Client (VS / Rider / VS Code REST Client)
-# Local: launchSettings "http" profile → http://localhost:5287
+# Local: launchSettings "http" profile → http://localhost:5006
 # Docker: host port 5006 (infra/docker-compose.yml)
 # Gateway (eStore / backoffice): http://localhost:5100/gateway/v1/fulfillment/...  (path → /api/v1/... upstream)
 # When Auth:Enabled, set @token to a JWT with catalog:read / catalog:write and tenant_id claim = @tenantId.
 
-@FulfillmentApi_HostAddress = http://localhost:5287
+@FulfillmentApi_HostAddress = http://localhost:5006
 @Gateway_HostAddress = http://localhost:5100
 @tenantId = t1
 @groupingId = ffg_REPLACE_ME

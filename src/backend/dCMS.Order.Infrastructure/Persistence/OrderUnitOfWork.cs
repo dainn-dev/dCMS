@@ -70,11 +70,15 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
             INSERT INTO "Orders" (
                 "Id", "TenantId", "StoreId", "CustomerId", "Status", "Currency", "SubTotal", "TaxTotal", "Total",
                 "PaymentIntentId", "IdempotencyKey", "CreatedAt", "UpdatedAt", "ShippingAddress",
-                "FailureReason", "FailureErrorCode", "FailedAt", "RetryCount")
+                "FailureReason", "FailureErrorCode", "FailedAt", "RetryCount",
+                "CustomerName", "CustomerEmail", "CustomerPhone",
+                "OrderDiscount", "PromoCode", "PromoCodeId")
             VALUES (
                 @Id, @TenantId, @StoreId, @CustomerId, @Status, @Currency, @SubTotal, @TaxTotal, @Total,
                 @PaymentIntentId, @IdempotencyKey, @Now, @Now, @ShippingAddress::jsonb,
-                @FailureReason, @FailureErrorCode, @FailedAt, @RetryCount)
+                @FailureReason, @FailureErrorCode, @FailedAt, @RetryCount,
+                @CustomerName, @CustomerEmail, @CustomerPhone,
+                @OrderDiscount, @PromoCode, @PromoCodeId)
             """;
 
         await conn.ExecuteAsync(new CommandDefinition(insertOrder,
@@ -97,15 +101,25 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
                 order.FailureErrorCode,
                 order.FailedAt,
                 order.RetryCount,
+                order.CustomerName,
+                order.CustomerEmail,
+                order.CustomerPhone,
+                order.OrderDiscount,
+                order.PromoCode,
+                order.PromoCodeId,
             },
             tx,
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         const string insertItem = """
             INSERT INTO "OrderItems" (
-                "Id", "OrderId", "VariantId", "ProductId", "Quantity", "UnitPrice", "LineTotal", "ProductName", "VariantSnapshot")
+                "Id", "OrderId", "VariantId", "ProductId", "Quantity", "UnitPrice", "LineTotal",
+                "ProductName", "VariantSnapshot", "FulfillmentStatus", "ReturnedQuantity",
+                "PickupPinHash", "PickedUpAt", "PickedUpBy", "LineDiscount")
             VALUES (
-                @Id, @OrderId, @VariantId, @ProductId, @Quantity, @UnitPrice, @LineTotal, @ProductName::jsonb, @VariantSnapshot::jsonb)
+                @Id, @OrderId, @VariantId, @ProductId, @Quantity, @UnitPrice, @LineTotal,
+                @ProductName::jsonb, @VariantSnapshot::jsonb, @FulfillmentStatus, @ReturnedQuantity,
+                @PickupPinHash, @PickedUpAt, @PickedUpBy, @LineDiscount)
             """;
 
         foreach (var line in order.Items)
@@ -124,11 +138,303 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
                     LineTotal = line.LineTotal().Amount,
                     ProductName = productNameJson,
                     VariantSnapshot = variantJson,
+                    FulfillmentStatus = line.FulfillmentStatus.ToString(),
+                    line.ReturnedQuantity,
+                    line.PickupPinHash,
+                    line.PickedUpAt,
+                    line.PickedUpBy,
+                    line.LineDiscount,
+                },
+                tx,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+
+        if (order.AppliedPromotions.Count > 0)
+        {
+            // DAI-693: single round-trip bulk insert via unnest (avoid N+1).
+            const string insertPromos = """
+                INSERT INTO "OrderPromotions" (
+                    "Id", "TenantId", "OrderId", "CampaignId", "EditorKind", "Name", "Amount", "PromoCode", "AppliedAt")
+                SELECT * FROM UNNEST(
+                    @Ids::text[],
+                    @TenantIds::text[],
+                    @OrderIds::text[],
+                    @CampaignIds::text[],
+                    @EditorKinds::text[],
+                    @Names::text[],
+                    @Amounts::numeric[],
+                    @PromoCodes::text[],
+                    @AppliedAts::timestamptz[])
+                """;
+
+            var count = order.AppliedPromotions.Count;
+            var ids = new string[count];
+            var tenantIds = new string[count];
+            var orderIds = new string[count];
+            var campaignIds = new string[count];
+            var editorKinds = new string[count];
+            var names = new string[count];
+            var amounts = new decimal[count];
+            var promoCodes = new string?[count];
+            var appliedAts = new DateTimeOffset[count];
+            var orderIdStr = order.Id;
+
+            for (var i = 0; i < count; i++)
+            {
+                var p = order.AppliedPromotions[i];
+                ids[i] = p.Id;
+                tenantIds[i] = order.TenantId;
+                orderIds[i] = orderIdStr;
+                campaignIds[i] = p.CampaignId;
+                editorKinds[i] = p.EditorKind;
+                names[i] = p.Name;
+                amounts[i] = p.Amount;
+                promoCodes[i] = p.PromoCode;
+                appliedAts[i] = now;
+            }
+
+            await conn.ExecuteAsync(new CommandDefinition(insertPromos,
+                new
+                {
+                    Ids = ids,
+                    TenantIds = tenantIds,
+                    OrderIds = orderIds,
+                    CampaignIds = campaignIds,
+                    EditorKinds = editorKinds,
+                    Names = names,
+                    Amounts = amounts,
+                    PromoCodes = promoCodes,
+                    AppliedAts = appliedAts,
                 },
                 tx,
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
         }
     }
+
+    /// <summary>DAI-694 — admin update of one item's fulfillment status. Returns 0 if line/order not found
+    /// or transition is not allowed (server-side guard via expected previous status set).</summary>
+    public async Task<int> UpdateItemFulfillmentStatusAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        string lineId,
+        IReadOnlyList<string> expectedFromStatuses,
+        string newStatus,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var orderGuid))
+            return 0;
+        if (string.IsNullOrWhiteSpace(lineId))
+            return 0;
+        if (expectedFromStatuses is null || expectedFromStatuses.Count == 0)
+            return 0;
+
+        const string sql = """
+            UPDATE "OrderItems" oi
+            SET "FulfillmentStatus" = @NewStatus
+            FROM "Orders" o
+            WHERE oi."Id" = @LineId
+              AND oi."OrderId" = o."Id"
+              AND o."Id" = @OrderId
+              AND o."TenantId" = @TenantId
+              AND o."StoreId" = @StoreId
+              AND oi."FulfillmentStatus" = ANY(@Expected)
+            """;
+
+        var rows = await conn.ExecuteAsync(new CommandDefinition(sql,
+            new
+            {
+                LineId = lineId,
+                OrderId = orderGuid,
+                TenantId = tenantId,
+                StoreId = storeId,
+                Expected = expectedFromStatuses.ToArray(),
+                NewStatus = newStatus,
+            },
+            tx,
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        if (rows > 0)
+        {
+            const string touch = """
+                UPDATE "Orders" SET "UpdatedAt" = @Now
+                WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
+                """;
+            await conn.ExecuteAsync(new CommandDefinition(touch,
+                new { Id = orderGuid, TenantId = tenantId, StoreId = storeId, Now = occurredAt },
+                tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+
+        return rows;
+    }
+
+    /// <summary>DAI-695 — recompute Orders.Status from item states (PartialFulfilled/Delivered/etc.).</summary>
+    public async Task<int> RecalculateOrderStatusAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var orderGuid))
+            return 0;
+
+        const string currentSql = """
+            SELECT "Status" FROM "Orders"
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
+            """;
+        var currentStatus = await conn.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+                currentSql, new { Id = orderGuid, TenantId = tenantId, StoreId = storeId },
+                tx, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        if (currentStatus is null)
+            return 0;
+
+        // Pre-fulfillment statuses are owned by the saga — never overwrite.
+        if (currentStatus is "PaymentPending" or "Confirmed"
+            or "PaymentFailed" or "AuthFailed" or "AddressError" or "StockError" or "SystemError")
+            return 0;
+
+        const string itemsSql = """
+            SELECT "FulfillmentStatus" FROM "OrderItems" WHERE "OrderId" = @OrderId
+            """;
+        var statuses = (await conn.QueryAsync<string>(
+                new CommandDefinition(itemsSql, new { OrderId = orderGuid }, tx, cancellationToken: cancellationToken))
+            .ConfigureAwait(false)).ToList();
+
+        if (statuses.Count == 0)
+            return 0;
+
+        var derived = DeriveOrderStatusFromItems(statuses);
+        if (string.Equals(derived, currentStatus, StringComparison.Ordinal))
+            return 0;
+
+        const string updateSql = """
+            UPDATE "Orders"
+            SET "Status" = @NewStatus, "UpdatedAt" = @Now
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
+            """;
+        return await conn.ExecuteAsync(new CommandDefinition(updateSql,
+                new { Id = orderGuid, TenantId = tenantId, StoreId = storeId, NewStatus = derived, Now = occurredAt },
+                tx, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    private static string DeriveOrderStatusFromItems(IReadOnlyList<string> statuses)
+    {
+        if (statuses.All(s => s == "Cancelled")) return "Cancelled";
+        if (statuses.All(s => s == "Returned")) return "Returned";
+        if (statuses.All(s => s == "Delivered")) return "Delivered";
+        if (statuses.All(s => s == "PickedUp")) return "PickedUp";
+        if (statuses.All(s => s == "Shipped")) return "Shipped";
+        if (statuses.All(s => s == "ReadyForDelivery")) return "ReadyForDelivery";
+
+        var distinct = statuses.Distinct().Count();
+        var hasTerminalProgress = statuses.Any(s =>
+            s is "Delivered" or "Shipped" or "PickedUp" or "Returned" or "Cancelled");
+        if (hasTerminalProgress && distinct > 1)
+            return "PartialFulfilled";
+        return "Processing";
+    }
+
+    /// <summary>DAI-696 — store hashed pickup PIN (issued when item moves to ReadyForDelivery).</summary>
+    public async Task<int> SetItemPickupPinHashAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        string lineId,
+        string pinHash,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var orderGuid))
+            return 0;
+
+        const string sql = """
+            UPDATE "OrderItems" oi
+            SET "PickupPinHash" = @PinHash
+            FROM "Orders" o
+            WHERE oi."Id" = @LineId AND oi."OrderId" = o."Id"
+              AND o."Id" = @OrderId AND o."TenantId" = @TenantId AND o."StoreId" = @StoreId
+              AND oi."FulfillmentStatus" IN ('Allocated','ReadyForDelivery')
+            """;
+
+        return await conn.ExecuteAsync(new CommandDefinition(sql,
+            new { LineId = lineId, OrderId = orderGuid, TenantId = tenantId, StoreId = storeId, PinHash = pinHash },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    /// <summary>DAI-696 — confirm pickup: update fulfillment status + audit columns. Caller must have verified the PIN.</summary>
+    public async Task<int> ConfirmItemPickupAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        string lineId,
+        string pickedUpBy,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var orderGuid))
+            return 0;
+
+        const string sql = """
+            UPDATE "OrderItems" oi
+            SET "FulfillmentStatus" = 'PickedUp',
+                "PickedUpAt" = @Now,
+                "PickedUpBy" = @PickedUpBy
+            FROM "Orders" o
+            WHERE oi."Id" = @LineId AND oi."OrderId" = o."Id"
+              AND o."Id" = @OrderId AND o."TenantId" = @TenantId AND o."StoreId" = @StoreId
+              AND oi."FulfillmentStatus" = 'ReadyForDelivery'
+            """;
+
+        return await conn.ExecuteAsync(new CommandDefinition(sql,
+            new
+            {
+                LineId = lineId,
+                OrderId = orderGuid,
+                TenantId = tenantId,
+                StoreId = storeId,
+                PickedUpBy = string.IsNullOrWhiteSpace(pickedUpBy) ? null : pickedUpBy.Trim(),
+                Now = occurredAt,
+            },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    /// <summary>DAI-696 — fetch line + PIN hash for verification.</summary>
+    public async Task<PickupItemRow?> GetItemForPickupAsync(
+        string tenantId,
+        string storeId,
+        string orderId,
+        string lineId,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (!Guid.TryParse(orderId, out var orderGuid))
+            return null;
+
+        // DeliveryMethod is read from the variant snapshot (pickup if it has fulfillmentMethod=pickup).
+        const string sql = """
+            SELECT oi."FulfillmentStatus" AS FulfillmentStatus,
+                   oi."PickupPinHash" AS PickupPinHash,
+                   COALESCE(oi."VariantSnapshot"->>'fulfillmentMethod','') AS DeliveryMethod
+            FROM "OrderItems" oi
+            JOIN "Orders" o ON o."Id" = oi."OrderId"
+            WHERE oi."Id" = @LineId AND o."Id" = @OrderId
+              AND o."TenantId" = @TenantId AND o."StoreId" = @StoreId
+            """;
+
+        return await conn.QuerySingleOrDefaultAsync<PickupItemRow>(new CommandDefinition(
+            sql,
+            new { LineId = lineId, OrderId = orderGuid, TenantId = tenantId, StoreId = storeId },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public sealed record PickupItemRow(string FulfillmentStatus, string? PickupPinHash, string DeliveryMethod);
 
     public async Task AppendOutboxAsync(IReadOnlyList<Core.Domain.IDomainEvent> events, CancellationToken cancellationToken = default)
     {
@@ -754,6 +1060,175 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
                 tx,
                 cancellationToken: cancellationToken))
             .ConfigureAwait(false);
+    }
+
+    /// <summary>DAI-697 — insert a Pending Return and its line items.</summary>
+    public async Task<(Guid ReturnId, bool Created)> InsertPendingReturnAsync(
+        Guid returnId,
+        Guid orderId,
+        string tenantId,
+        string storeId,
+        Guid idempotencyKey,
+        string reason,
+        string? notes,
+        IReadOnlyList<(Guid Id, string OrderItemId, int Quantity, string? Reason)> items,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (items is null || items.Count == 0)
+            throw new ArgumentException("At least one return item is required.", nameof(items));
+
+        const string insertHeader = """
+            INSERT INTO "Returns" ("Id","OrderId","TenantId","StoreId","IdempotencyKey","Status","Reason","Notes","CreatedAt")
+            VALUES (@Id, @OrderId, @TenantId, @StoreId, @IdempotencyKey, 'Pending', @Reason, @Notes, @Now)
+            ON CONFLICT ("TenantId","StoreId","OrderId","IdempotencyKey")
+            DO NOTHING
+            RETURNING "Id"::uuid
+            """;
+
+        var insertedId = await conn.ExecuteScalarAsync<Guid?>(new CommandDefinition(insertHeader,
+            new
+            {
+                Id = returnId,
+                OrderId = orderId,
+                TenantId = tenantId,
+                StoreId = storeId,
+                IdempotencyKey = idempotencyKey,
+                Reason = reason,
+                Notes = notes,
+                Now = occurredAt,
+            },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        if (!insertedId.HasValue)
+        {
+            const string getExisting = """
+                SELECT "Id"::uuid
+                FROM "Returns"
+                WHERE "TenantId" = @TenantId
+                  AND "StoreId" = @StoreId
+                  AND "OrderId" = @OrderId
+                  AND "IdempotencyKey" = @IdempotencyKey
+                LIMIT 1
+                """;
+            var existingId = await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(getExisting,
+                new { TenantId = tenantId, StoreId = storeId, OrderId = orderId, IdempotencyKey = idempotencyKey },
+                tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            return (existingId, Created: false);
+        }
+
+        const string insertItem = """
+            INSERT INTO "ReturnItems" ("Id","ReturnId","OrderItemId","Quantity","Reason")
+            VALUES (@Id, @ReturnId, @OrderItemId, @Quantity, @Reason)
+            """;
+
+        foreach (var (id, orderItemId, qty, itemReason) in items)
+        {
+            await conn.ExecuteAsync(new CommandDefinition(insertItem,
+                new { Id = id, ReturnId = returnId, OrderItemId = orderItemId, Quantity = qty, Reason = itemReason },
+                tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+
+        await AppendOutboxAsync(
+            [new Core.Domain.ReturnStatusChanged(returnId.ToString(), orderId.ToString(), "", "Pending", occurredAt)],
+            cancellationToken).ConfigureAwait(false);
+
+        return (returnId, Created: true);
+    }
+
+    /// <summary>DAI-697 — transition a Return between expected statuses; emits ReturnStatusChanged + audit fields.</summary>
+    public async Task<int> TransitionReturnAsync(
+        Guid returnId,
+        string tenantId,
+        string storeId,
+        string expectedStatus,
+        string newStatus,
+        string? approvedBy,
+        Guid? refundCaseId,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+
+        const string sql = """
+            UPDATE "Returns"
+            SET "Status" = @NewStatus,
+                "ApprovedBy" = COALESCE(@ApprovedBy, "ApprovedBy"),
+                "ApprovedAt" = CASE
+                    WHEN @NewStatus IN ('Approved','Rejected') AND "ApprovedAt" IS NULL THEN @Now
+                    ELSE "ApprovedAt"
+                END,
+                "CompletedAt" = CASE WHEN @NewStatus = 'Completed' THEN @Now ELSE "CompletedAt" END,
+                "RefundCaseId" = COALESCE(@RefundCaseId, "RefundCaseId")
+            WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId AND "Status" = @Expected
+            RETURNING "OrderId"::uuid
+            """;
+
+        var orderId = await conn.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(sql,
+            new
+            {
+                Id = returnId, TenantId = tenantId, StoreId = storeId,
+                Expected = expectedStatus, NewStatus = newStatus,
+                ApprovedBy = approvedBy, RefundCaseId = refundCaseId, Now = occurredAt,
+            }, tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        if (orderId is null)
+            return 0;
+
+        await AppendOutboxAsync(
+            [new Core.Domain.ReturnStatusChanged(returnId.ToString(), orderId.Value.ToString(), expectedStatus, newStatus, occurredAt)],
+            cancellationToken).ConfigureAwait(false);
+
+        return 1;
+    }
+
+    /// <summary>DAI-697 — increment ReturnedQuantity on a line, flipping FulfillmentStatus to 'Returned' when fully returned.
+    /// Emits a ProductRestocked event so Catalog/Inventory can restock.</summary>
+    public async Task<int> ApplyReturnedQuantityAsync(
+        string tenantId,
+        string storeId,
+        Guid orderId,
+        string lineId,
+        int quantity,
+        Guid returnId,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken = default)
+    {
+        var (conn, tx) = Require();
+        if (quantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(quantity), "quantity must be positive.");
+
+        const string sql = """
+            UPDATE "OrderItems" oi
+            SET "ReturnedQuantity" = oi."ReturnedQuantity" + @Qty,
+                "FulfillmentStatus" = CASE
+                    WHEN oi."ReturnedQuantity" + @Qty >= oi."Quantity" THEN 'Returned'
+                    ELSE oi."FulfillmentStatus"
+                END
+            FROM "Orders" o
+            WHERE oi."Id" = @LineId
+              AND oi."OrderId" = o."Id"
+              AND o."Id" = @OrderId
+              AND o."TenantId" = @TenantId
+              AND o."StoreId" = @StoreId
+              AND oi."FulfillmentStatus" IN ('Delivered','PickedUp','Returned')
+              AND oi."ReturnedQuantity" + @Qty <= oi."Quantity"
+            RETURNING oi."VariantId"
+            """;
+
+        var variantId = await conn.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(sql,
+            new { OrderId = orderId, LineId = lineId, TenantId = tenantId, StoreId = storeId, Qty = quantity },
+            tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        if (variantId is null)
+            return 0;
+
+        await AppendOutboxAsync(
+            [new Core.Domain.ProductRestocked(orderId.ToString(), tenantId, storeId, variantId, quantity, returnId.ToString(), occurredAt)],
+            cancellationToken).ConfigureAwait(false);
+
+        return 1;
     }
 
     /// <summary>DAI-653 — alias for <see cref="UpdateRefundTrackingAsync"/> (refund-case naming).</summary>

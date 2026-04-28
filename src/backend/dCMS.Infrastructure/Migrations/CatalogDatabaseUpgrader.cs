@@ -1,11 +1,15 @@
 using DbUp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace dCMS.Infrastructure.Migrations;
 
 public static class CatalogDatabaseUpgrader
 {
+    // Arbitrary fixed key for the pg_advisory_lock so only one process migrates at a time.
+    private const long AdvisoryLockId = 820_741_671;
+
     public static void Run(IConfiguration configuration, ILogger logger)
     {
         var cs = configuration.GetConnectionString("Catalog");
@@ -17,17 +21,32 @@ public static class CatalogDatabaseUpgrader
 
         EnsureDatabase.For.PostgresqlDatabase(cs);
 
-        var result = DeployChanges.To
-            .PostgresqlDatabase(cs)
-            .WithScriptsEmbeddedInAssembly(typeof(CatalogDatabaseUpgrader).Assembly,
-                name => name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
-            .LogToConsole()
-            .Build()
-            .PerformUpgrade();
+        using var lockConn = new NpgsqlConnection(cs);
+        lockConn.Open();
+        using var lockCmd = lockConn.CreateCommand();
+        lockCmd.CommandText = $"SELECT pg_advisory_lock({AdvisoryLockId})";
+        lockCmd.ExecuteNonQuery();
 
-        if (!result.Successful)
-            throw new InvalidOperationException("Catalog database migration failed.", result.Error);
+        try
+        {
+            var result = DeployChanges.To
+                .PostgresqlDatabase(cs)
+                .WithScriptsEmbeddedInAssembly(typeof(CatalogDatabaseUpgrader).Assembly,
+                    name => name.EndsWith(".sql", StringComparison.OrdinalIgnoreCase))
+                .LogToConsole()
+                .Build()
+                .PerformUpgrade();
 
-        logger.LogInformation("Catalog DbUp finished successfully.");
+            if (!result.Successful)
+                throw new InvalidOperationException("Catalog database migration failed.", result.Error);
+
+            logger.LogInformation("Catalog DbUp finished successfully.");
+        }
+        finally
+        {
+            using var unlockCmd = lockConn.CreateCommand();
+            unlockCmd.CommandText = $"SELECT pg_advisory_unlock({AdvisoryLockId})";
+            unlockCmd.ExecuteNonQuery();
+        }
     }
 }

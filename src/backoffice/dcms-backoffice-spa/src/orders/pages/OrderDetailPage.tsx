@@ -16,14 +16,23 @@ import {
 } from "../icons";
 import {
   cancelOrder,
+  confirmPickup,
+  createReturn,
   deliverOrder,
   getOrderDetail,
   isFailureStatus,
+  issuePickupPin,
   mapApiStatusToUiLabel,
   resolveFailedOrder,
   retryFailedOrder,
   shipOrder,
+  updateItemFulfillmentStatus,
 } from "../api/ordersApi";
+import type { ItemFulfillmentStatus } from "../types";
+import { ItemFulfillmentBadge } from "../components/ItemFulfillmentBadge";
+import { ItemActionsDropdown, type ItemAction } from "../components/ItemActionsDropdown";
+import { OpenReturnDialog } from "../components/OpenReturnDialog";
+import { ConfirmPickupDialog } from "../components/ConfirmPickupDialog";
 
 type OrderMode = "view" | "action";
 
@@ -104,10 +113,10 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
   // Customer edit
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [customer, setCustomer] = useState({
-    name: "Alexander Hamilton",
-    email: "a.hamilton@treasury.gov",
-    phone: "+1 (555) 019-2234",
-    address: "123 Financial Plaza, Floor 14\nNew York City, NY 10005\nUnited States",
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
   });
   const [customerDraft, setCustomerDraft] = useState(customer);
 
@@ -115,8 +124,8 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
   const [editingDelivery, setEditingDelivery] = useState(false);
   const [delivery, setDelivery] = useState({
     orderType: "Delivery" as (typeof ORDER_TYPES)[number],
-    contactName: "Alexander Hamilton",
-    contactNumber: "+1 (555) 019-2234",
+    contactName: "",
+    contactNumber: "",
     cardNo: "VISA ****4321",
     receiptNo: "RCP-2024-001122",
     shippingStatus: "In Transit",
@@ -136,17 +145,18 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
   });
   const [deliveryDraft, setDeliveryDraft] = useState(delivery);
 
-  // Item-level statuses — keyed by lineId, seeded from detail.lines on load
-  const [itemStatuses, setItemStatuses] = useState<Record<string, OrderStatus>>({});
-  const [itemStatusDrafts, setItemStatusDrafts] = useState<Record<string, OrderStatus>>({});
-  const [cancelledItems, setCancelledItems] = useState<Set<string>>(new Set());
-
   // Failure actions
   const [resolveNoteModalOpen, setResolveNoteModalOpen] = useState(false);
   const [resolveNote, setResolveNote] = useState("");
 
   // Remark input
   const [remarkText, setRemarkText] = useState("");
+
+  // DAI-698 — per-item action dialogs
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
+  const [returnInitialLineId, setReturnInitialLineId] = useState<string | null>(null);
+  const [pickupDialog, setPickupDialog] = useState<{ open: boolean; lineId: string }>({ open: false, lineId: "" });
+  const [pinToast, setPinToast] = useState<string | null>(null);
 
   const isLocked = LOCKED_STATUSES.includes(orderStatus);
 
@@ -171,23 +181,24 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
         setDetail(dto);
         setOrderStatus(mapApiStatusToUiLabel(dto.status) as OrderStatus);
 
-        // Seed item statuses from real lines
-        const initialStatuses: Record<string, OrderStatus> = {};
-        for (const line of dto.lines ?? []) {
-          initialStatuses[line.lineId] = "Open Order";
-        }
-        setItemStatuses(initialStatuses);
-        setItemStatusDrafts(initialStatuses);
-
-        // Hydrate customer (Order API does not return full profile yet)
+        // DAI-649: Hydrate customer from snapshot stored on Order at create time.
+        // Falls back to customerId when snapshot is null (orders pre-snapshot column).
         const ship = dto.shippingAddress;
         const addrLines = [ship?.line1, ship?.line2, ship?.city, ship?.region, ship?.postalCode, ship?.countryCode]
           .filter((x): x is string => Boolean((x ?? "").trim()))
           .map((x) => String(x));
+        const fallbackId = String(dto.customerId ?? "");
         setCustomer((prev) => ({
           ...prev,
-          name: String(dto.customerId ?? prev.name),
-          email: String(dto.customerId ?? prev.email),
+          name: dto.customerName?.trim() || fallbackId || prev.name,
+          email: dto.customerEmail?.trim() || fallbackId || prev.email,
+          phone: dto.customerPhone?.trim() || prev.phone,
+          address: addrLines.join("\n") || prev.address,
+        }));
+        setDelivery((prev) => ({
+          ...prev,
+          contactName: dto.customerName?.trim() || fallbackId || prev.contactName,
+          contactNumber: dto.customerPhone?.trim() || prev.contactNumber,
           address: addrLines.join("\n") || prev.address,
         }));
 
@@ -328,39 +339,6 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
     setGroupActionsOpen(false);
   }
 
-  function handleItemStatusDraftChange(sku: string, status: OrderStatus) {
-    setItemStatusDrafts((prev) => ({ ...prev, [sku]: status }));
-  }
-
-  function handleUpdateItemStatus(sku: string) {
-    const newStatus = itemStatusDrafts[sku];
-    const updatedStatuses = { ...itemStatuses, [sku]: newStatus };
-    setItemStatuses(updatedStatuses);
-
-    // Validation: if all items are cancelled, derive order-level status from the most recent update
-    const allCancelled = Object.values(updatedStatuses).every(
-      (s) => s === "Admin Cancelled" || s === "User Cancelled"
-    );
-    if (allCancelled) {
-      setOrderStatus(newStatus as "Admin Cancelled" | "User Cancelled");
-    }
-    console.info(`[Orders] Update item ${sku} → ${newStatus}`);
-  }
-
-  function handleCancelItem(sku: string) {
-    setCancelledItems((prev) => new Set(prev).add(sku));
-    const updatedStatuses = { ...itemStatuses, [sku]: "Admin Cancelled" as OrderStatus };
-    setItemStatuses(updatedStatuses);
-    setItemStatusDrafts((prev) => ({ ...prev, [sku]: "Admin Cancelled" }));
-
-    const allCancelled = Object.values(updatedStatuses).every(
-      (s) => s === "Admin Cancelled" || s === "User Cancelled"
-    );
-    if (allCancelled) {
-      setOrderStatus("Admin Cancelled");
-    }
-  }
-
   function handlePostRemark() {
     if (!remarkText.trim()) return;
     console.info("[Orders] Post remark:", remarkText);
@@ -375,6 +353,69 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
 
   const canEdit = isAction && !isLocked;
 
+  // ── DAI-698 per-item action dispatch ──────────────────────────────────────
+  async function handleItemAction(lineId: string, action: ItemAction) {
+    if (!tenantId || !storeId) return;
+    setActionBusy(true);
+    try {
+      if (action.kind === "transition") {
+        await updateItemFulfillmentStatus(tenantId, storeId, orderId, lineId, action.to, authToken);
+        setActionToast({ kind: "success", message: `Line moved to ${action.to}` });
+        await refetch();
+      } else if (action.kind === "issue_pin") {
+        const { pin } = await issuePickupPin(tenantId, storeId, orderId, lineId, authToken);
+        // Show plaintext PIN to staff once — backend stores hash only.
+        setPinToast(pin);
+      } else if (action.kind === "confirm_pickup") {
+        setPickupDialog({ open: true, lineId });
+      } else if (action.kind === "open_return") {
+        setReturnInitialLineId(lineId);
+        setReturnDialogOpen(true);
+      }
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Action failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function submitConfirmPickup(pin: string, pickedUpBy: string | null) {
+    if (!tenantId || !storeId || !pickupDialog.lineId) return;
+    setActionBusy(true);
+    try {
+      await confirmPickup(tenantId, storeId, orderId, pickupDialog.lineId, pin, pickedUpBy, authToken);
+      setActionToast({ kind: "success", message: "Pickup confirmed" });
+      setPickupDialog({ open: false, lineId: "" });
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Pickup failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function submitOpenReturn(payload: {
+    idempotencyKey: string;
+    reason: import("../api/ordersApi").ReturnReason;
+    notes: string | null;
+    lines: { lineId: string; quantity: number; reason?: import("../api/ordersApi").ReturnReason | null }[];
+  }) {
+    if (!tenantId || !storeId) return;
+    setActionBusy(true);
+    try {
+      const { idempotencyKey, ...body } = payload;
+      const { returnId } = await createReturn(tenantId, storeId, orderId, body, idempotencyKey, authToken);
+      setActionToast({ kind: "success", message: `Return ${returnId} opened (Pending)` });
+      setReturnDialogOpen(false);
+      setReturnInitialLineId(null);
+      await refetch();
+    } catch (e: unknown) {
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Open return failed" });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   // ── Derived line items from API ───────────────────────────────────────────
   const displayedLines = useMemo(() => {
     if (!detail?.lines?.length) return [];
@@ -386,6 +427,8 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
       qty:       l.quantity,
       unitPrice: fmtMoney(l.unitPrice.amount, l.unitPrice.currency),
       total:     fmtMoney(l.lineTotal.amount, l.lineTotal.currency),
+      itemStatus: (l.fulfillmentStatus ?? "open") as ItemFulfillmentStatus,
+      isPickup: ((l.variantSnapshot?.["fulfillmentMethod"] as string | undefined) ?? "") === "pickup",
     }));
   }, [detail?.lines]);
 
@@ -784,8 +827,10 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                     <IconPerson className="h-5 w-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-bold text-on-surface">{customer.name}</p>
-                    <p className="text-[11px] text-on-surface-variant">ID: 8829-3329-XXXX</p>
+                    <p className="text-xs font-bold text-on-surface">{customer.name || "—"}</p>
+                    <p className="text-[11px] text-on-surface-variant font-mono">
+                      ID: {detail?.customerId ?? "—"}
+                    </p>
                   </div>
                 </div>
                 <div className="pt-2">
@@ -1168,10 +1213,7 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                   </tr>
                 )}
                 {displayedLines.map((item) => {
-                  const isCancelled = cancelledItems.has(item.lineId);
-                  const confirmedStatus = itemStatuses[item.lineId] ?? "Open Order";
-                  const draftStatus = itemStatusDrafts[item.lineId] ?? "Open Order";
-                  const isDirty = draftStatus !== confirmedStatus;
+                  const isCancelled = item.itemStatus === "cancelled";
 
                   return (
                     <tr
@@ -1194,53 +1236,19 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                       <td className="py-4 px-5 text-right text-xs text-on-surface-variant font-medium">{item.unitPrice}</td>
                       <td className="py-4 px-5 text-right text-xs font-bold text-on-surface">{item.total}</td>
                       <td className="py-4 px-5 text-center">
-                        {isAction && !isCancelled ? (
-                          <div className="flex flex-col items-center gap-1.5">
-                            <select
-                              className="text-[10px] font-bold bg-surface-container-low border border-outline-variant/20 rounded px-2 py-1 focus:ring-1 focus:ring-primary/40 cursor-pointer"
-                              value={draftStatus}
-                              onChange={(e) =>
-                                handleItemStatusDraftChange(item.lineId, e.target.value as OrderStatus)
-                              }
-                            >
-                              {ORDER_STATUSES.map((s) => (
-                                <option key={s}>{s}</option>
-                              ))}
-                            </select>
-                            {isDirty && (
-                              <button
-                                type="button"
-                                className="text-[10px] font-bold text-white bg-primary hover:bg-primary-container px-2 py-0.5 rounded transition-colors"
-                                onClick={() => handleUpdateItemStatus(item.lineId)}
-                              >
-                                Update
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <span
-                            className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              STATUS_STYLES[confirmedStatus]
-                            }`}
-                          >
-                            {confirmedStatus}
-                          </span>
-                        )}
+                        <ItemFulfillmentBadge status={item.itemStatus} />
                       </td>
                       {isAction && (
                         <td className="py-4 px-5 text-center">
-                          {isCancelled ? (
+                          {isCancelled || item.itemStatus === "cancelled" ? (
                             <span className="text-[10px] text-on-surface-variant italic">Cancelled</span>
                           ) : (
-                            <button
-                              type="button"
-                              className="p-1.5 rounded hover:bg-red-50 text-on-surface-variant hover:text-red-600 transition-all"
-                              aria-label="Cancel item"
-                              title="Cancel item"
-                              onClick={() => handleCancelItem(item.lineId)}
-                            >
-                              <IconCancel className="h-4 w-4" />
-                            </button>
+                            <ItemActionsDropdown
+                              current={item.itemStatus}
+                              isPickup={item.isPickup}
+                              disabled={actionBusy}
+                              onAction={(a) => void handleItemAction(item.lineId, a)}
+                            />
                           )}
                         </td>
                       )}
@@ -1546,6 +1554,48 @@ export function OrderDetailPage({ orderId, mode, onBack, tenantId, storeId, auth
                 disabled={actionBusy}
               >
                 Resolve Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <OpenReturnDialog
+        open={returnDialogOpen}
+        orderId={orderId}
+        lines={detail?.lines ?? []}
+        initialLineId={returnInitialLineId}
+        busy={actionBusy}
+        onClose={() => { setReturnDialogOpen(false); setReturnInitialLineId(null); }}
+        onSubmit={(p) => void submitOpenReturn(p)}
+      />
+
+      <ConfirmPickupDialog
+        open={pickupDialog.open}
+        orderId={orderId}
+        lineId={pickupDialog.lineId}
+        busy={actionBusy}
+        onClose={() => setPickupDialog({ open: false, lineId: "" })}
+        onSubmit={(pin, by) => void submitConfirmPickup(pin, by)}
+      />
+
+      {pinToast && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-3">
+            <h2 className="text-sm font-bold text-on-surface">Pickup PIN issued</h2>
+            <p className="text-xs text-on-surface-variant">
+              Show this PIN to the customer. It will not be displayed again — backend stores only its hash.
+            </p>
+            <p className="text-3xl font-bold tracking-[0.4em] font-mono text-center bg-surface-container-low rounded-lg py-4">
+              {pinToast}
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="px-4 py-2 text-xs font-bold bg-primary text-white rounded-lg"
+                onClick={() => setPinToast(null)}
+              >
+                I noted it
               </button>
             </div>
           </div>

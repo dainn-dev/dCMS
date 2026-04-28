@@ -2,27 +2,45 @@ using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
 using dCMS.Core.Persistence;
 using dCMS.Fulfillment.Api;
+using dCMS.Fulfillment.Api.Migrations;
 using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Catalog;
-using dCMS.Infrastructure;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.RateLimiting;
+using MassTransit;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var catalogCs = builder.Configuration.GetConnectionString("Catalog");
-if (string.IsNullOrWhiteSpace(catalogCs))
-    throw new InvalidOperationException("Configure ConnectionStrings:Catalog (PostgreSQL catalog database).");
+var fulfillmentCs = builder.Configuration.GetConnectionString("Fulfillment");
+if (string.IsNullOrWhiteSpace(fulfillmentCs))
+    throw new InvalidOperationException("Configure ConnectionStrings:Fulfillment.");
 
-builder.Services.AddSingleton<IFulfillmentPersistence>(_ => new SqlFulfillmentPersistence(catalogCs));
+builder.Services.AddHostedService<FulfillmentDbMigrationHostedService>();
 
+builder.Services.AddSingleton<IFulfillmentPersistence>(_ => new SqlFulfillmentPersistence(fulfillmentCs));
+
+// Phase C + P1 #4: audit → local AuditOutbox → MassTransit (at-least-once); AuditLogConsumer (catalog-worker) writes to dcms_catalog.
 builder.Services.AddSingleton<AuditLogChannel>();
-builder.Services.AddSingleton(_ => new SqlAuditLogPersistence(catalogCs));
-builder.Services.AddHostedService<AuditLogBackgroundService>();
+builder.Services.AddSingleton(_ => new AuditOutboxPersistence(fulfillmentCs));
+builder.Services.AddHostedService<AuditOutboxWriterBackgroundService>();
+builder.Services.AddHostedService<AuditOutboxRelayBackgroundService>();
+
+builder.Services.AddMassTransit(bus =>
+{
+    bus.SetKebabCaseEndpointNameFormatter();
+    bus.UsingRabbitMq((context, cfg) =>
+    {
+        var host = builder.Configuration["RabbitMq:Host"] ?? "localhost";
+        var user = builder.Configuration["RabbitMq:User"] ?? "guest";
+        var pass = builder.Configuration["RabbitMq:Pass"] ?? "guest";
+        cfg.Host(host, "/", h => { h.Username(user); h.Password(pass); });
+        cfg.ConfigureEndpoints(context);
+    });
+});
 
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
 
@@ -53,7 +71,6 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
-builder.Services.AddHostedService<CatalogDbMigrationHostedService>();
 
 var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 builder.Services.AddCors(o => o.AddPolicy("api", p =>

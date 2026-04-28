@@ -6,6 +6,7 @@ import { FailedOrdersPage } from "./pages/FailedOrdersPage";
 import { OrderDetailPage } from "./pages/OrderDetailPage";
 import { OrderProcessingPage } from "./pages/OrderProcessingPage";
 import { RefundCasesPage } from "./pages/RefundCasesPage";
+import { ReturnsPage } from "./pages/ReturnsPage";
 
 export function OrdersApp({ tenantId, storeId, authToken }: { tenantId?: string; storeId?: string; authToken?: string }) {
   const [page, setPage] = useState<OrdersPageId>(() => parseOrdersPageFromHash() ?? "order-processing");
@@ -104,6 +105,8 @@ export function OrdersApp({ tenantId, storeId, authToken }: { tenantId?: string;
         />
       )}
       {page === "refund-cases" && <RefundCasesPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
+      {/* DAI-698: RMA inbox — listing + Approve/Reject/Complete actions for cross-order returns. */}
+      {page === "returns" && <ReturnsPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
       {page === "order-detail" && (
         <OrderDetailPage
           orderId={selectedOrderId ?? "EX-99284-B"}

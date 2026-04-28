@@ -65,6 +65,18 @@ public static class DcmsJwtAuthExtensions
                 DcmsRoles.ChainAdmin,
                 DcmsRoles.SuperAdmin));
 
+            o.AddPolicy(DcmsPolicies.ApprovalManage, p => p.RequireAuthenticatedUser().RequireRole(
+                DcmsRoles.BrandManager,
+                DcmsRoles.ChainAdmin,
+                DcmsRoles.SuperAdmin));
+
+            // DAI-684: bulk import — same scope as CatalogWrite (manager-level).
+            o.AddPolicy(DcmsPolicies.CatalogImport, p => p.RequireAuthenticatedUser().RequireRole(
+                DcmsRoles.StoreManager,
+                DcmsRoles.BrandManager,
+                DcmsRoles.ChainAdmin,
+                DcmsRoles.SuperAdmin));
+
             o.AddPolicy(DcmsPolicies.InventoryRead, p => p.RequireAuthenticatedUser().RequireRole(
                 DcmsRoles.StoreStaff,
                 DcmsRoles.StoreManager,
@@ -125,5 +137,29 @@ public static class DcmsJwtAuthExtensions
         if (configuration.IsDcmsAuthEnabled())
             group.AddEndpointFilter<TenantOnlyAccessEndpointFilter>();
         return group;
+    }
+
+    /// <summary>DAI-700 (AC3) — applies brand scope match (route/query brandId vs JWT brand claim) when auth is enabled.</summary>
+    public static RouteGroupBuilder WithBrandAccess(this RouteGroupBuilder group, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            group.AddEndpointFilter<BrandScopeAccessEndpointFilter>();
+        return group;
+    }
+
+    /// <summary>DAI-700 (AC3) — per-endpoint variant of brand scope match for routes outside a dedicated group.</summary>
+    public static RouteHandlerBuilder WithBrandAccess(this RouteHandlerBuilder builder, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            builder.AddEndpointFilter<BrandScopeAccessEndpointFilter>();
+        return builder;
+    }
+
+    /// <summary>DAI-700 (AC4) — applies bulk store scope match by reading <c>storeIds</c> from the JSON body.</summary>
+    public static RouteHandlerBuilder WithStoresFromBodyAccess(this RouteHandlerBuilder builder, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            builder.AddEndpointFilter<StoresFromBodyAccessEndpointFilter>();
+        return builder;
     }
 }

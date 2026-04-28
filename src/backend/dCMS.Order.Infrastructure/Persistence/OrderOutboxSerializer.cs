@@ -23,6 +23,7 @@ internal static class OrderOutboxSerializer
                         x.Currency,
                         lines = x.Lines.Select(l => new { l.VariantId, l.WarehouseId, l.Quantity }),
                         x.OccurredAt,
+                        items = x.SalesLines.Select(s => new { s.ProductId, s.Quantity, s.LineTotal }),
                     },
                     Json)),
             OrderConfirmed x => ("OrderConfirmed", JsonSerializer.Serialize(new { x.OrderId, x.OccurredAt }, Json)),
@@ -41,6 +42,32 @@ internal static class OrderOutboxSerializer
                         x.FailureReason,
                         x.FailureErrorCode,
                         failedAt = x.FailedAt
+                    },
+                    Json)),
+            ProductRestocked x => (
+                "ProductRestocked.v1",
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        x.OrderId,
+                        x.TenantId,
+                        x.StoreId,
+                        x.VariantId,
+                        x.Quantity,
+                        x.ReturnId,
+                        x.OccurredAt,
+                    },
+                    Json)),
+            ReturnStatusChanged x => (
+                "ReturnStatusChanged.v1",
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        x.ReturnId,
+                        x.OrderId,
+                        x.FromStatus,
+                        x.ToStatus,
+                        x.OccurredAt,
                     },
                     Json)),
             _ => throw new InvalidOperationException($"Unknown order domain event {e.GetType().Name}."),

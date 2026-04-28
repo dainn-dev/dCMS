@@ -45,7 +45,13 @@ public sealed class OrderQueryStore
                    "FailureErrorCode",
                    "FailedAt",
                    "RetryCount",
-                   "CreatedAt"
+                   "CustomerName",
+                   "CustomerEmail",
+                   "CustomerPhone",
+                   "CreatedAt",
+                   "OrderDiscount",
+                   "PromoCode",
+                   "PromoCodeId"
             FROM "Orders"
             WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId
             """;
@@ -59,7 +65,10 @@ public sealed class OrderQueryStore
 
         const string itemsSql = """
             SELECT "Id", "VariantId", "ProductId", "Quantity", "UnitPrice", "LineTotal",
-                   "ProductName"::text AS ProductNameJson, "VariantSnapshot"::text AS VariantSnapshotJson
+                   "ProductName"::text AS ProductNameJson, "VariantSnapshot"::text AS VariantSnapshotJson,
+                   "FulfillmentStatus", "ReturnedQuantity",
+                   "PickupPinHash", "PickedUpAt", "PickedUpBy",
+                   "LineDiscount"
             FROM "OrderItems"
             WHERE "OrderId" = @OrderId
             ORDER BY "Id"
@@ -69,7 +78,8 @@ public sealed class OrderQueryStore
             new CommandDefinition(itemsSql, new { OrderId = orderGuid }, cancellationToken: cancellationToken))
             .ConfigureAwait(false);
 
-        var order = MapOrder(row, itemRows);
+        var applied = await LoadAppliedPromotionsAsync(connection, tenantId, orderGuid, cancellationToken).ConfigureAwait(false);
+        var order = MapOrder(row, itemRows, applied);
         return new TimedOrder(order, ToUtcOffset(row.CreatedAt));
     }
 
@@ -90,7 +100,13 @@ public sealed class OrderQueryStore
                    "FailureErrorCode",
                    "FailedAt",
                    "RetryCount",
-                   "CreatedAt"
+                   "CustomerName",
+                   "CustomerEmail",
+                   "CustomerPhone",
+                   "CreatedAt",
+                   "OrderDiscount",
+                   "PromoCode",
+                   "PromoCodeId"
             FROM "Orders"
             WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId AND "IdempotencyKey" = @IdempotencyKey
             """;
@@ -104,7 +120,10 @@ public sealed class OrderQueryStore
 
         const string itemsSql = """
             SELECT "Id", "VariantId", "ProductId", "Quantity", "UnitPrice", "LineTotal",
-                   "ProductName"::text AS ProductNameJson, "VariantSnapshot"::text AS VariantSnapshotJson
+                   "ProductName"::text AS ProductNameJson, "VariantSnapshot"::text AS VariantSnapshotJson,
+                   "FulfillmentStatus", "ReturnedQuantity",
+                   "PickupPinHash", "PickedUpAt", "PickedUpBy",
+                   "LineDiscount"
             FROM "OrderItems"
             WHERE "OrderId" = @OrderId
             ORDER BY "Id"
@@ -114,7 +133,8 @@ public sealed class OrderQueryStore
             new CommandDefinition(itemsSql, new { OrderId = row.Id }, cancellationToken: cancellationToken))
             .ConfigureAwait(false);
 
-        return MapOrder(row, itemRows);
+        var applied = await LoadAppliedPromotionsAsync(connection, tenantId, row.Id, cancellationToken).ConfigureAwait(false);
+        return MapOrder(row, itemRows, applied);
     }
 
     public async Task<OrderListPage> ListOrdersAsync(OrderListQuery query, CancellationToken cancellationToken = default)
@@ -157,7 +177,13 @@ public sealed class OrderQueryStore
                    "FailureErrorCode",
                    "FailedAt",
                    "RetryCount",
-                   "CreatedAt"
+                   "CustomerName",
+                   "CustomerEmail",
+                   "CustomerPhone",
+                   "CreatedAt",
+                   "OrderDiscount",
+                   "PromoCode",
+                   "PromoCodeId"
             FROM "Orders"
             WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId
               AND (@CustomerId IS NULL OR "CustomerId" = @CustomerId)
@@ -197,7 +223,10 @@ public sealed class OrderQueryStore
         const string itemsSql = """
             SELECT "Id", "VariantId", "ProductId", "Quantity", "UnitPrice", "LineTotal",
                    "ProductName"::text AS ProductNameJson, "VariantSnapshot"::text AS VariantSnapshotJson,
-                   "OrderId"
+                   "FulfillmentStatus", "ReturnedQuantity",
+                   "PickupPinHash", "PickedUpAt", "PickedUpBy",
+                   "OrderId",
+                   "LineDiscount"
             FROM "OrderItems"
             WHERE "OrderId" = ANY(@OrderIds)
             ORDER BY "OrderId", "Id"
@@ -209,10 +238,14 @@ public sealed class OrderQueryStore
 
         var itemsByOrder = itemRows.GroupBy(x => x.OrderId).ToDictionary(g => g.Key, g => g.AsEnumerable());
 
+        var promosByOrder = await LoadAppliedPromotionsBatchAsync(connection, query.TenantId, orderGuids, cancellationToken)
+            .ConfigureAwait(false);
+
         var timed = new List<TimedOrder>(rows.Count);
         foreach (var row in rows)
         {
             var items = itemsByOrder.GetValueOrDefault(row.Id) ?? [];
+            var applied = promosByOrder.TryGetValue(row.Id, out var p) ? p : null;
             var order = MapOrder(row, items.Select(x => new OrderItemRow(
                 x.Id,
                 x.VariantId,
@@ -221,7 +254,13 @@ public sealed class OrderQueryStore
                 x.UnitPrice,
                 x.LineTotal,
                 x.ProductNameJson,
-                x.VariantSnapshotJson)));
+                x.VariantSnapshotJson,
+                x.FulfillmentStatus,
+                x.ReturnedQuantity,
+                x.PickupPinHash,
+                x.PickedUpAt,
+                x.PickedUpBy,
+                x.LineDiscount)), applied);
             timed.Add(new TimedOrder(order, ToUtcOffset(row.CreatedAt)));
         }
 
@@ -378,6 +417,11 @@ public sealed class OrderQueryStore
             "address_error" => nameof(Core.Domain.OrderStatus.AddressError),
             "stock_error" => nameof(Core.Domain.OrderStatus.StockError),
             "system_error" => nameof(Core.Domain.OrderStatus.SystemError),
+            // DAI-695 item-derived states
+            "ready_for_delivery" => nameof(Core.Domain.OrderStatus.ReadyForDelivery),
+            "picked_up" => nameof(Core.Domain.OrderStatus.PickedUp),
+            "returned" => nameof(Core.Domain.OrderStatus.Returned),
+            "partial_fulfilled" => nameof(Core.Domain.OrderStatus.PartialFulfilled),
             _ => "",
         };
         return db.Length > 0;
@@ -386,7 +430,8 @@ public sealed class OrderQueryStore
     private static DateTimeOffset ToUtcOffset(DateTime createdAt) =>
         new(DateTime.SpecifyKind(createdAt, DateTimeKind.Utc));
 
-    private static Core.Domain.Order MapOrder(OrderRow row, IEnumerable<OrderItemRow> itemRows)
+    private static Core.Domain.Order MapOrder(OrderRow row, IEnumerable<OrderItemRow> itemRows,
+        IReadOnlyList<Core.Domain.AppliedPromotionSnapshot>? appliedPromotions = null)
     {
         var status = Enum.Parse<Core.Domain.OrderStatus>(row.Status, ignoreCase: true);
         var ship = JsonSerializer.Deserialize<Core.Domain.ShippingAddress>(row.ShippingAddressJson, Json)
@@ -397,6 +442,10 @@ public sealed class OrderQueryStore
             var productName = JsonSerializer.Deserialize<string>(ir.ProductNameJson, Json)
                               ?? ir.ProductNameJson.Trim('"');
             var variantJson = string.IsNullOrWhiteSpace(ir.VariantSnapshotJson) ? "{}" : ir.VariantSnapshotJson;
+            var fulfillment = Enum.TryParse<Core.Domain.OrderItemFulfillmentStatus>(
+                ir.FulfillmentStatus, ignoreCase: true, out var f)
+                ? f : Core.Domain.OrderItemFulfillmentStatus.Open;
+            var pickedAt = ir.PickedUpAt.HasValue ? ToUtcOffset(ir.PickedUpAt.Value) : (DateTimeOffset?)null;
             return new Core.Domain.OrderItem(
                 ir.Id,
                 ir.ProductId,
@@ -404,7 +453,13 @@ public sealed class OrderQueryStore
                 ir.Quantity,
                 new Core.Domain.Money(ir.UnitPrice, row.Currency),
                 productName,
-                variantJson);
+                variantJson,
+                fulfillment,
+                ir.ReturnedQuantity,
+                ir.PickupPinHash,
+                pickedAt,
+                ir.PickedUpBy,
+                ir.LineDiscount);
         }).ToList();
 
         return Core.Domain.Order.FromPersistence(
@@ -420,7 +475,56 @@ public sealed class OrderQueryStore
             row.FailureReason,
             row.FailureErrorCode,
             row.FailedAt.HasValue ? ToUtcOffset(row.FailedAt.Value) : null,
-            row.RetryCount);
+            row.RetryCount,
+            row.CustomerName,
+            row.CustomerEmail,
+            row.CustomerPhone,
+            row.OrderDiscount,
+            row.PromoCode,
+            row.PromoCodeId,
+            appliedPromotions);
+    }
+
+    private static async Task<IReadOnlyList<Core.Domain.AppliedPromotionSnapshot>> LoadAppliedPromotionsAsync(
+        NpgsqlConnection connection, string tenantId, Guid orderId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT "Id", "CampaignId", "EditorKind", "Name", "Amount", "PromoCode"
+            FROM "OrderPromotions"
+            WHERE "TenantId" = @TenantId AND "OrderId" = @OrderId
+            ORDER BY "AppliedAt"
+            """;
+        var rows = await connection.QueryAsync<(string Id, string CampaignId, string EditorKind, string Name, decimal Amount, string? PromoCode)>(
+            new CommandDefinition(sql, new { TenantId = tenantId, OrderId = orderId.ToString() },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return rows.Select(r => new Core.Domain.AppliedPromotionSnapshot(
+            r.Id, r.CampaignId, r.EditorKind, r.Name, r.Amount, r.PromoCode)).ToList();
+    }
+
+    private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Core.Domain.AppliedPromotionSnapshot>>> LoadAppliedPromotionsBatchAsync(
+        NpgsqlConnection connection, string tenantId, Guid[] orderIds, CancellationToken cancellationToken)
+    {
+        if (orderIds.Length == 0)
+            return new Dictionary<Guid, IReadOnlyList<Core.Domain.AppliedPromotionSnapshot>>();
+
+        const string sql = """
+            SELECT "Id", "OrderId", "CampaignId", "EditorKind", "Name", "Amount", "PromoCode"
+            FROM "OrderPromotions"
+            WHERE "TenantId" = @TenantId AND "OrderId" = ANY(@OrderIds)
+            ORDER BY "AppliedAt"
+            """;
+        var orderIdStrings = orderIds.Select(g => g.ToString()).ToArray();
+        var rows = (await connection.QueryAsync<(string Id, string OrderId, string CampaignId, string EditorKind, string Name, decimal Amount, string? PromoCode)>(
+            new CommandDefinition(sql, new { TenantId = tenantId, OrderIds = orderIdStrings },
+                cancellationToken: cancellationToken)).ConfigureAwait(false)).ToList();
+
+        return rows
+            .GroupBy(r => Guid.Parse(r.OrderId))
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<Core.Domain.AppliedPromotionSnapshot>)g.Select(r =>
+                    new Core.Domain.AppliedPromotionSnapshot(r.Id, r.CampaignId, r.EditorKind, r.Name, r.Amount, r.PromoCode))
+                    .ToList());
     }
 
     private sealed record OrderRow(
@@ -437,7 +541,13 @@ public sealed class OrderQueryStore
         string? FailureErrorCode,
         DateTime? FailedAt,
         int RetryCount,
-        DateTime CreatedAt);
+        string? CustomerName,
+        string? CustomerEmail,
+        string? CustomerPhone,
+        DateTime CreatedAt,
+        decimal OrderDiscount = 0m,
+        string? PromoCode = null,
+        string? PromoCodeId = null);
 
     private sealed record OrderItemRow(
         string Id,
@@ -447,7 +557,13 @@ public sealed class OrderQueryStore
         decimal UnitPrice,
         decimal LineTotal,
         string ProductNameJson,
-        string VariantSnapshotJson);
+        string VariantSnapshotJson,
+        string FulfillmentStatus = "Open",
+        int ReturnedQuantity = 0,
+        string? PickupPinHash = null,
+        DateTime? PickedUpAt = null,
+        string? PickedUpBy = null,
+        decimal LineDiscount = 0m);
 
     private sealed record OrderItemRowWithOrder(
         string Id,
@@ -458,7 +574,13 @@ public sealed class OrderQueryStore
         decimal LineTotal,
         string ProductNameJson,
         string VariantSnapshotJson,
-        Guid OrderId);
+        string FulfillmentStatus,
+        int ReturnedQuantity,
+        string? PickupPinHash,
+        DateTime? PickedUpAt,
+        string? PickedUpBy,
+        Guid OrderId,
+        decimal LineDiscount = 0m);
 
     public sealed record RefundCaseOrderPage(IReadOnlyList<RefundCaseOrderRow> Items, string? NextCursor);
 

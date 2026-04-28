@@ -68,6 +68,8 @@ import { RoleFormPage } from "./pages/access/RoleFormPage";
 import { ManageModulesPage } from "./pages/access/ManageModulesPage";
 import { TenantsPage } from "./pages/access/TenantsPage";
 import { TenantFormPage } from "./pages/access/TenantFormPage";
+import { BulkJobsPage } from "./pages/BulkJobsPage";
+import { TemplatesPage } from "./pages/TemplatesPage";
 import type { TenantRow } from "./api/tenantsApi";
 
 type BrandEditData = Pick<BrandListRow, "code" | "name" | "active" | "imageSrc" | "imageAlt">;
@@ -895,13 +897,15 @@ export function EStoreApp({
           authToken={authToken}
         />
       )}
+      {page === "bulk-jobs" && <BulkJobsPage storeId={storeId ?? ""} />}
+      {page === "templates" && <TemplatesPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
       {page === "products" &&
         (productForm.mode === "inventory-import" ? (
-          <ProductInventoryImportPage onBack={() => setProductForm({ mode: "idle" })} />
+          <ProductInventoryImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode === "image-import" ? (
-          <ProductImageImportPage onBack={() => setProductForm({ mode: "idle" })} />
+          <ProductImageImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode === "import" ? (
-          <ProductImportPage onBack={() => setProductForm({ mode: "idle" })} />
+          <ProductImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode !== "idle" ? (
           <EditProductPage
             mode={productForm.mode === "add" ? "add" : "edit"}
@@ -1246,6 +1250,7 @@ export function EStoreApp({
             userId={accessUserForm.mode === "edit" ? accessUserForm.userId : undefined}
             onSave={() => setAccessUserForm({ mode: "idle" })}
             onCancel={() => setAccessUserForm({ mode: "idle" })}
+            authToken={authToken}
           />
         ) : (
           <UsersPage

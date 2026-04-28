@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { ComponentType } from "react";
 import { IconHelp, IconInsertChart, IconShipping, IconTrendingUp } from "../orders/icons";
 
-export type ReportsPageId = "transaction" | "sales" | "operational";
+export type ReportsPageId = "transaction" | "sales" | "abandon-cart" | "restock-subscriptions" | "delivery-slots";
 
 type NavItem = {
   id: ReportsPageId;
@@ -13,7 +13,9 @@ type NavItem = {
 const navItems: NavItem[] = [
   { id: "transaction", label: "Transaction", Icon: IconInsertChart },
   { id: "sales", label: "Sales", Icon: IconTrendingUp },
-  { id: "operational", label: "Operational", Icon: IconShipping },
+  { id: "abandon-cart", label: "Abandon cart", Icon: IconShipping },
+  { id: "restock-subscriptions", label: "Restock", Icon: IconShipping },
+  { id: "delivery-slots", label: "Delivery slots", Icon: IconShipping },
 ];
 
 export const REPORTS_HASH_PAGE_IDS: ReportsPageId[] = navItems.map((item) => item.id);

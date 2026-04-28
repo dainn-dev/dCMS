@@ -1,9 +1,12 @@
 using dCMS.Catalog.Worker.Consumers;
+using dCMS.Catalog.Worker.Imports;
+using dCMS.Catalog.Worker.Imports.Processors;
 using dCMS.Catalog.Worker.Indexing;
 using dCMS.Catalog.Worker.Workers;
 using dCMS.Core.Persistence;
 using dCMS.Core.Search;
 using dCMS.Infrastructure;
+using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Outbox;
 using dCMS.Infrastructure.Search;
@@ -55,6 +58,20 @@ builder.Services.AddSingleton<DebouncedStockProductIndexPublisher>();
 
 builder.Services.AddHttpClient();
 
+// DAI-707 — bulk import infrastructure
+builder.Services.Configure<ImportFileReaderOptions>(builder.Configuration.GetSection("Catalog:S3:ImportFiles"));
+builder.Services.Configure<CatalogMediaPathOptions>(builder.Configuration.GetSection("Catalog:Media"));
+builder.Services.AddSingleton<ImportFileReader>();
+builder.Services.AddSingleton<IImportJobPersistence>(_ => new SqlImportJobPersistence(catalogCs));
+builder.Services.AddSingleton<IImportRowProcessor>(_ => new ProductRowProcessor(catalogCs));
+builder.Services.AddSingleton<IImportRowProcessor>(sp => new ProductImageRowProcessor(
+    catalogCs, sp.GetRequiredService<IHttpClientFactory>(), sp.GetRequiredService<ILogger<ProductImageRowProcessor>>()));
+builder.Services.AddSingleton<IImportRowProcessor>(_ => new InventoryRowProcessor(catalogCs, inventoryCs));
+builder.Services.AddSingleton<IImportRowProcessor>(_ => new PromoCodeRowProcessor(catalogCs));
+
+// Phase C — AuditLogConsumer writes audit rows published by services that don't own dcms_catalog.
+builder.Services.AddSingleton(_ => new SqlAuditLogPersistence(catalogCs));
+
 builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "catalog-worker");
 
 builder.Services.AddHostedService<CatalogDbMigrationHostedService>();
@@ -70,6 +87,8 @@ builder.Services.AddMassTransit(x =>
     x.AddConsumer<ProductPublishedIndexConsumer>();
     x.AddConsumer<ProductArchivedIndexConsumer>();
     x.AddConsumer<StockUpdatedIndexConsumer>();
+    x.AddConsumer<ImportJobConsumer>();
+    x.AddConsumer<AuditLogConsumer>();
 
     x.UsingRabbitMq((context, cfg) =>
     {
@@ -79,6 +98,17 @@ builder.Services.AddMassTransit(x =>
             h.Username(r["RabbitMq:User"] ?? "guest");
             h.Password(r["RabbitMq:Pass"] ?? "guest");
         });
+
+        // DAI-707 (AC6) — per-queue concurrency throttle so bulk imports
+        // never starve the rest of the worker pool.
+        cfg.ReceiveEndpoint("import-job-queued", e =>
+        {
+            e.PrefetchCount = 4;
+            e.ConcurrentMessageLimit = 4;
+            e.UseConcurrencyLimit(4);
+            e.ConfigureConsumer<ImportJobConsumer>(context);
+        });
+
         cfg.ConfigureEndpoints(context);
     });
 });
@@ -88,10 +118,8 @@ builder.Services.AddHostedService(sp => new CatalogOutboxRelayHostedService(
     sp.GetRequiredService<IBus>(),
     sp.GetRequiredService<ILogger<CatalogOutboxRelayHostedService>>()));
 
-builder.Services.AddHostedService(sp => new InventoryOutboxRelayHostedService(
-    new SqlOutboxRelay(inventoryCs),
-    sp.GetRequiredService<IBus>(),
-    sp.GetRequiredService<ILogger<InventoryOutboxRelayHostedService>>()));
+// P1 #3: Inventory outbox relay moved to dCMS.Inventory.Api (the service that owns dcms_inventory).
+// inventoryCs is still used here read-only for SqlProductSearchRepository indexing projection.
 
 builder.Services.AddHostedService<DeadLetterSlackNotifierHostedService>();
 

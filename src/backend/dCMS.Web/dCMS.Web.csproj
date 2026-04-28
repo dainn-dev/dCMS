@@ -7,9 +7,24 @@
 
   <ItemGroup>
     <!-- Umbraco brings Microsoft.Data.SqlClient. appsettings uses localhost:14333 (compose SQL Server publish); in-container compose sets Server=sqlserver,1433. -->
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.17" />
+    <PackageReference Include="Hangfire.SqlServer" Version="1.8.17" />
+    <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.*" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.24" />
     <PackageReference Include="Umbraco.Cms" Version="16.5.1" />
+    <!-- DAI-686: Umbraco schema versioning via uSync -->
+    <PackageReference Include="uSync.Complete" Version="16.1.2" />
     <PackageReference Include="Yarp.ReverseProxy" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
+    <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -36,5 +36,21 @@ public enum OrderStatus
 
     /// <summary>Saga compensation / unhandled exception during state machine.</summary>
     SystemError,
-}
 
+    // ── Item-level fulfillment states (DAI-695) ─────────────────────────────
+    // Order-level rollup derived from per-item FulfillmentStatus. Exposed when
+    // every item shares the corresponding state, or when items are mixed
+    // (PartialFulfilled).
+
+    /// <summary>All items picked + packed; awaiting carrier handoff or pickup.</summary>
+    ReadyForDelivery,
+
+    /// <summary>All items picked up by customer at collection point.</summary>
+    PickedUp,
+
+    /// <summary>All items returned via RMA.</summary>
+    Returned,
+
+    /// <summary>Items split across terminal states (e.g. some Delivered, some Cancelled or Returned).</summary>
+    PartialFulfilled,
+}

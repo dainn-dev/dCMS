@@ -673,65 +673,6 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
-    public async Task<int> CountUnreadNotificationsAsync(string tenantId, string userId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            SELECT COUNT(*)::int
-            FROM "NotificationEvents"
-            WHERE "TenantId" = @TenantId AND "UserId" = @UserId AND "ReadAt" IS NULL
-            """;
-        return await connection.ExecuteScalarAsync<int>(
-            new CommandDefinition(sql, new { TenantId = tenantId, UserId = userId }, cancellationToken: cancellationToken))
-            .ConfigureAwait(false);
-    }
-
-    public async Task<IReadOnlyList<NotificationEventRow>> ListNotificationsForUserAsync(string tenantId, string userId, int limit,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            SELECT "Id", "TenantId", "UserId", "Type", "EntityId", "Message", "ReadAt", "CreatedAt"
-            FROM "NotificationEvents"
-            WHERE "TenantId" = @TenantId AND "UserId" = @UserId
-            ORDER BY "CreatedAt" DESC, "Id" DESC
-            LIMIT @Limit
-            """;
-        var rows = await connection
-            .QueryAsync<NotificationEventRow>(
-                new CommandDefinition(sql, new { TenantId = tenantId, UserId = userId, Limit = limit },
-                    cancellationToken: cancellationToken))
-            .ConfigureAwait(false);
-        return rows.ToList();
-    }
-
-    public async Task<int> MarkAllNotificationsReadAsync(string tenantId, string userId, DateTimeOffset readAt,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            UPDATE "NotificationEvents"
-            SET "ReadAt" = @ReadAt
-            WHERE "TenantId" = @TenantId AND "UserId" = @UserId AND "ReadAt" IS NULL
-            """;
-        return await connection.ExecuteAsync(new CommandDefinition(sql, new { TenantId = tenantId, UserId = userId, ReadAt = readAt },
-                cancellationToken: cancellationToken))
-            .ConfigureAwait(false);
-    }
-
-    public async Task InsertNotificationAsync(string tenantId, string userId, string type, string entityId, string message,
-        DateTimeOffset createdAt, CancellationToken cancellationToken = default)
-    {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            INSERT INTO "NotificationEvents" ("TenantId", "UserId", "Type", "EntityId", "Message", "ReadAt", "CreatedAt")
-            VALUES (@TenantId, @UserId, @Type, @EntityId, @Message, NULL, @CreatedAt)
-            """;
-        await connection.ExecuteAsync(new CommandDefinition(sql,
-            new { TenantId = tenantId, UserId = userId, Type = type, EntityId = entityId, Message = message, CreatedAt = createdAt },
-            cancellationToken: cancellationToken)).ConfigureAwait(false);
-    }
-
     public async Task<StoreCatalogSettingsRow?> GetStoreCatalogSettingsAsync(string tenantId, string storeId,
         CancellationToken cancellationToken = default)
     {

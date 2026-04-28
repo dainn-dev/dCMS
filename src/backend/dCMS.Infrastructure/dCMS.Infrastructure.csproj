@@ -1,7 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
+    <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Promotions.Domain\dCMS.Promotions.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Fulfillment.Domain\dCMS.Fulfillment.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Approvals.Domain\dCMS.Approvals.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Imports.Domain\dCMS.Imports.Domain.csproj" />
     <ProjectReference Include="..\dCMS.Messaging.Contracts\dCMS.Messaging.Contracts.csproj" />
   </ItemGroup>
 

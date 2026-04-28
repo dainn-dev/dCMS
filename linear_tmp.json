@@ -1,0 +1,1 @@
+﻿{"query":"mutation($issueId:String!,$stateId:String!){ issueUpdate(id:$issueId, input:{stateId:$stateId}){ success issue{ identifier state{ name } } } }","variables":{"issueId":"eff35960-c30f-4e5f-97cb-b41b84baf889","stateId":"fdf28b9d-dc07-47a9-8ea9-a54b2f027ac1"}}

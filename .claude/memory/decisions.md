@@ -1,114 +1,228 @@
 # Architectural Decisions
 
-_Thêm decisions vào đây khi chúng được đưa ra._
+---
+
+## Decision: Order workflow state machine
+
+**Date:** 2026-04-25
+
+**Decision:** Order lifecycle được model hóa như state machine gồm Order-level + Item-level statuses.
+
+**Reason:** Legacy system cho thấy item-level fulfillment cực quan trọng với partial shipment / cancellation.
+
+**Statuses:**
+Open, ReadyForDelivery, Processing, Delivered, PickedUp, Returned, Cancelled, PartialFulfilled.
 
 ---
 
-## Decision: Umbraco CMS làm nền tảng backend
+## Decision: Promotions engine rule-based
 
-**Date:** 2026-04-03
-**Decision:** Dùng Umbraco CMS (ASP.NET Core) làm core CMS với custom eCommerce layer xây dựng trên đó.
-**Reason:** Umbraco cung cấp backoffice mạnh cho content management, hỗ trợ headless qua Content Delivery API, ecosystem .NET mature, và có thể extend tự do cho eCommerce features.
-**Alternatives considered:** Shopify (không đủ flexibility), WooCommerce (PHP stack), custom từ đầu (tốn thời gian hơn)
+**Date:** 2026-04-25
 
----
+**Decision:** Promotions implement bằng rule engine thay vì hardcode.
 
-## Decision: Mô hình Siêu thị — Tenant = Siêu thị, hierarchy 4 cấp
-
-**Date:** 2026-04-03 (updated 2026-04-03)
-**Decision:** dCMS theo mô hình siêu thị với hierarchy 4 cấp: **Platform → Siêu thị (Tenant) → Brands → Stores**. Tenant isolation ở cấp Siêu thị — 1 Umbraco instance + isolated DB per Siêu thị (Umbraco); Catalog/Inventory services dùng PostgreSQL với `TenantId` scoping. Brand là layer tổ chức bên trong. Store là đơn vị bán hàng có storefront riêng.
-**Reason:** Phản ánh đúng thực tế kinh doanh — một tập đoàn bán lẻ (Lotte, BigC) có nhiều thương hiệu con, mỗi thương hiệu có nhiều cửa hàng. Isolation tại cấp Siêu thị đủ đảm bảo data security giữa các tập đoàn khác nhau. Brands/Stores trong cùng Siêu thị share Umbraco instance → giảm chi phí vận hành, dễ cross-brand reporting.
-**Alternatives considered:**
-- Isolation per Store (quá tốn resource, khó cross-brand analytics)
-- Isolation per Brand (mất layer tổ chức ở cấp tập đoàn)
-- Flat model không có Brand (không phản ánh thực tế retail)
+**Reason:** Hỗ trợ nhiều loại promotion:
+- Promo code
+- Mix & Match
+- PWP
+- Product Discount
+- After Sales Promo
 
 ---
 
-## Decision: Headless architecture với Next.js storefront
+## Decision: Fulfillment domain tách riêng khỏi Orders
 
-**Date:** 2026-04-03
-**Decision:** Umbraco chạy headless mode, Next.js fetch data qua Content Delivery API và custom Commerce API.
-**Reason:** Tách biệt frontend và backend cho phép storefront scale độc lập, frontend developer tự do về UI, SEO tốt hơn với Next.js SSR/SSG.
-**Alternatives considered:** Umbraco với Razor Views (tightly coupled, khó scale frontend)
+**Date:** 2026-04-25
 
----
+**Decision:** Fulfillment aggregate riêng gồm:
+DeliveryMethod, Slots, PickupLocation, LogisticPartner, Tracking.
 
-## Decision: Elasticsearch cho search
-
-**Date:** 2026-04-03
-**Decision:** Dùng Elasticsearch cho toàn bộ product search và filtering.
-**Reason:** Full-text search mạnh, hỗ trợ faceted filtering phức tạp, scalable, phù hợp với eCommerce catalog lớn. SQL Server full-text search không đủ mạnh cho eCommerce.
-**Alternatives considered:** SQL Server full-text search (limited), Algolia (vendor lock-in + cost)
+**Reason:** Delivery logic evolve độc lập với order/payment.
 
 ---
 
-## Decision: Payment qua API Gateway external
+## Decision: Approval workflow genericized
 
-**Date:** 2026-04-03
-**Decision:** dCMS không xử lý payment trực tiếp — mọi payment request được proxy qua API Gateway external.
-**Reason:** Giảm PCI compliance scope, tách biệt concern, dễ đổi payment provider, bảo mật tốt hơn khi không lưu payment data nhạy cảm trong hệ thống.
-**Alternatives considered:** Tích hợp trực tiếp Stripe/PayPal SDK (tăng compliance burden)
+**Date:** 2026-04-25
 
----
+**Decision:** Dùng generic approval engine cho Product, Content, Campaign, PromoCode.
 
-## Decision: Platform DB tách riêng để quản lý Siêu thị/Brand/Store registry
+**Reason:** Legacy system có nhiều approval module trùng pattern.
 
-**Date:** 2026-04-03 (updated 2026-04-03)
-**Decision:** Platform DB riêng biệt lưu: Siêu thị registry (kèm Umbraco URL + DB connection), Brands, Stores, domain routing (domain → tenantId + storeId), billing, StoreUsers với role per scope (tenant/brand/store level).
-**Reason:** Platform-level data phải tồn tại độc lập với business data của từng Siêu thị. Super Admin cần quản lý cross-tenant mà không access vào từng Umbraco instance. Domain routing phải resolve cực nhanh (< 5ms) từ 1 điểm trung tâm — thường được cache vào Redis.
-**Alternatives considered:** Lưu trong Umbraco DB của từng tenant (không thể cross-query), lưu trong config file (không scale), service discovery thuần túy (thiếu business metadata)
+States:
+Draft → PendingApproval → Approved / Rejected
 
 ---
 
-## Decision: RBAC với dynamic roles, scoped theo cấp (Tenant / Brand / Store)
+## Decision: Reporting read-model architecture
 
-**Date:** 2026-04-03 (updated 2026-04-03)
-**Decision:** RBAC với dynamic role assignment, scoped theo 3 cấp: Tenant-level (Siêu thị), Brand-level, Store-level. Một user có thể có role khác nhau ở các cấp khác nhau.
-**Reason:** Hierarchy 4 cấp đòi hỏi phân quyền tương ứng. Chain Admin cần full access toàn Siêu thị. Brand Manager chỉ quản lý Brand được assign. Store Staff chỉ thao tác Store cụ thể.
-**Role hierarchy:**
-- `SuperAdmin` — platform-wide, quản lý tất cả Siêu thị
-- `ChainAdmin` — full access toàn bộ 1 Siêu thị (tất cả Brands + Stores)
-- `BrandManager` — quản lý 1 Brand và tất cả Stores trong Brand đó
-- `StoreManager` — quản lý products, orders, content của 1 Store cụ thể
-- `StoreStaff` — view orders, process fulfillment, limited actions
-**Scope resolution:** JWT token chứa `{ tenantId, brandId?, storeId?, roles[] }` — middleware verify scope trước khi cho phép action
-**Alternatives considered:** Flat role model (không phản ánh hierarchy), Umbraco built-in groups (không cross-brand/cross-store), hardcoded roles (không scale)
+**Date:** 2026-04-25
+
+**Decision:** Reports chạy trên read models / analytics DB thay vì OLTP.
+
+**Reason:** Sales/report queries nặng, không nên impact transactional DB.
 
 ---
 
-## Decision: Docker cho deployment
+## Decision: Bulk import/export pipeline async
 
-**Date:** 2026-04-03
-**Decision:** Toàn bộ stack được containerize bằng Docker, orchestrate bằng docker-compose cho local dev.
-**Reason:** Consistency giữa environments, dễ scale horizontally, isolate dependencies, CI/CD đơn giản hơn với Docker images.
-**Alternatives considered:** IIS trực tiếp (Windows only, khó scale), Azure App Service (vendor lock-in)
+**Date:** 2026-04-25
 
----
+**Decision:** Product/Image/Inventory import chạy background jobs.
 
-## Decision: Lưu giá tiền dưới dạng integer (smallest currency unit)
-
-**Date:** 2026-04-03
-**Decision:** Tất cả giá trị tiền được lưu dưới dạng integer — đơn vị nhỏ nhất của currency (cents cho USD, đồng cho VND).
-**Reason:** Tránh floating point precision errors trong tính toán tiền tệ, standard practice trong eCommerce.
-**Alternatives considered:** Decimal (vẫn có precision risk), float (không dùng trong financial systems)
+**Reason:** Legacy system có bulk operations lớn, sync request không scale.
 
 ---
 
-## Decision: PostgreSQL + Npgsql cho Catalog/Inventory (Dapper)
+## Decision: Multi-payment support per order
 
-**Date:** 2026-04-12
-**Decision:** Catalog và Inventory persistence dùng **PostgreSQL** với **Npgsql** + **Dapper** (không EF cho runtime paths này). SQL migrations là file `.sql` idempotent (`CREATE IF NOT EXISTS`), versioned theo số `00x_`. Optimistic concurrency cho `VariantStock`: cột bigint **`Revision`** (ứng dụng map vào `VariantStock.RowVersion`), `UPDATE ... SET "Revision" = "Revision" + 1 ... AND "Revision" = @expected RETURNING`.
-**Reason:** Tránh lock-in SQL Server cho microservices headless; Dapper giữ throughput tốt; PG không có `ROWVERSION` — revision counter tương đương pattern optimistic locking.
-**Alternatives considered:** Giữ SQL Server; dùng EF migrations thay vì SQL files (chậm hơn cho hot paths, đổi scope lớn); `xmin` system column (khó map Dapper/portable bằng long).
+**Date:** 2026-04-25 (refined 2026-04-27 with DAI-722)
 
+**Decision:** Một order có thể chứa nhiều payment components: Gateway + Voucher + LoyaltyPoints + GiftCard. Schema: `OrderPayments` (1:1 với `Orders` qua UNIQUE) + `PaymentComponents` (1:N, ordered). Sum invariant `Σ Amount = OrderPayment.Total` enforced ở application code (DAI-722) khi save và khi recompute status — KHÔNG dùng DB trigger để giữ migration nhẹ. Component apply order khi capture: **Voucher → LoyaltyPoints → GiftCard → Gateway** (Vouchers/loyalty consume first, gateway absorbs remainder). Status `OrderPayment.Status` derived từ component states (`Captured` khi all captured, `Failed` khi any failed, `Authorized` khi all auth+, etc).
+
+**Reason:** PDF system support multi payment. Voucher/loyalty là balance-bound nên consume trước để không waste khả dụng nếu gateway fail; gateway-last cho phép retry-only-gateway-leg khi card decline mà không phải re-reserve voucher.
 
 ---
 
-## Decision: Hai lớp phân quyền — Umbraco User Groups vs bảng / RBAC tùy chỉnh (Platform)
+## Decision: Content blocks schema-driven
 
-**Date:** 2026-04-18
-**Decision:** Giữ **hai lớp** tách biệt: (1) **Umbraco IUserGroup + Allowed Sections** — quyết định user có thấy section backoffice tùy chỉnh (E-Store, Orders, …) hay không; (2) **Platform DB + JWT + ASP.NET policies** (assignment kiểu StoreUsers, DcmsRoles / DcmsPolicies) — quyết định quyền nghiệp vụ và scope tenant / brand / store trên API và dữ liệu.
-**Reason:** Umbraco membership mô hình hóa *shell* CMS theo section; RBAC eCommerce cần gán động, đa scope và kiểm tra tại API — không map 1-1 với group Umbraco. Trộn hai concern dễ gây hiểu nhầm CR (“đã vào được SPA = đủ quyền”).
-**Implementation notes:** Grant section qua `GrantDcmsCustomSectionsNotificationHandler` + `DcmsSectionAliases`; API dựa JWT + middleware/policy, không suy luận chỉ từ Umbraco group.
-**Alternatives considered:** Chỉ Umbraco groups cho mọi thứ (quá thô, thiếu scope); chỉ bảng custom (không tích hợp tree/section Umbraco, khó vận hành backoffice).
+**Date:** 2026-04-25
+
+**Decision:** Homepage banners / product blocks / reusable sections dùng schema-driven block editor.
+
+**Reason:** Marketing team cần tự build landing pages không cần dev.
+
+---
+
+## Decision: Search + admin filtering tách biệt
+
+**Date:** 2026-04-25
+
+**Decision:** Customer storefront search dùng Elasticsearch.  
+Admin grids dùng SQL optimized filtering.
+
+**Reason:** Admin cần exact filtering/export, storefront cần relevance ranking.
+
+---
+
+## Decision: Refund cases bounded context
+
+**Date:** 2026-04-25
+
+**Decision:** Refund Case là domain riêng linked với Orders.
+
+**Reason:** Refund workflow có status/history khác order fulfillment.
+
+---
+
+## Decision: Audit trail bắt buộc cho admin actions
+
+**Date:** 2026-04-25
+
+**Decision:** Mọi thay đổi status, remarks, edits đều audit log.
+
+**Reason:** Legacy guide ghi nhận remarks/history xuyên suốt workflow.
+
+---
+
+## Decision: Template system cho communications
+
+**Date:** 2026-04-25
+
+**Decision:** Email / admin / print templates là subsystem riêng.
+
+**Reason:** Packing slip, receipts, confirmations cần customizable templates.
+
+---
+
+## Decision: Promotions evaluator + Order persistence (DAI-679)
+
+**Date:** 2026-04-27
+
+**Decision:** Order API gọi `dCMS.Promotions.Api /evaluate` ngay trước khi tạo lệnh; kết quả (`LineDiscount`, `OrderDiscount`, `PromoCode`, `PromoCodeId`, `AppliedPromotionSnapshot[]`) được persist trong `Order` aggregate qua migration `018_AddOrderPromotionSnapshot.sql`. Idempotency end-to-end được đảm bảo bởi UNIQUE `("TenantId","PromoCodeId","OrderId")` trên `PromoCodeRedemptions` (migration 024).
+
+**Behaviour:**
+- Feature flag `Promotions:Required` bật fail-closed (HTTP 503 PROMOTIONS_UNAVAILABLE) khi evaluate fail; mặc định fail-open (log warning + tiếp tục checkout).
+- Bulk insert `OrderPromotions` qua `UNNEST(...)` (no N+1).
+- Domain invariants: `OrderDiscount ∈ [0, lineSubtotal]`, `LineDiscount ∈ [0, grossLineTotal]`, `Total = max(0, subtotal − lineDiscounts − orderDiscount)`.
+- Prometheus counters: `dcms_orders_promotions_applied_total{tenant}`, `dcms_promotions_evaluate_failures_total{tenant,mode}`.
+
+**Reason:** Cần khả năng audit promotion áp dụng cho từng đơn (báo cáo, hoàn tiền, dispute) đồng thời decoupled khỏi Promotions service — Order service vẫn giữ snapshot đã được "ghim" tại thời điểm checkout.
+
+---
+
+## Decision: Bulk jobs MVP dùng Hangfire + SQL Server (DAI-684)
+
+**Date:** 2026-04-27
+
+**Decision:** Bulk import/export MVP trong Umbraco host (`dCMS.Web`) dùng **Hangfire** với **SQL Server storage** (cùng DB Umbraco). Trạng thái/progress job được lưu riêng trong bảng **`dcms_bulk_jobs`** (Umbraco migration plan `dCMS.Access`), và expose:
+- Dashboard: `/umbraco/dcms/hangfire` (restrict by backoffice auth + optional header key)
+- Backoffice API: `/umbraco/dcms/api/bulk-jobs/*`
+- UI: eStore → Products → **Bulk jobs**
+
+**Progress:** report theo percent (`ProgressProcessed/Total/Percent`) cập nhật theo batch để tránh write-churn.
+
+**Reason:** Backoffice-driven bulk ops cần durable jobs + retry/cancel/monitor (UI “must-have”), vận hành đơn giản khi đặt job storage chung Umbraco SQL Server; đồng thời tránh serialize payload lớn vào Hangfire bằng cách lưu input/output dưới dạng file refs.
+
+---
+
+## Decision: Reports analytics DB tách riêng (DAI-709 / DAI-685)
+
+**Date:** 2026-04-27
+
+**Decision:** Dùng **PostgreSQL analytics DB riêng** (connection `ConnectionStrings:Analytics`) để chứa read-model cho reporting. Projection worker consume Order lifecycle messages (MassTransit) và upsert vào `analytics.*` tables; Reports API chỉ query analytics DB (không chạm OLTP).
+
+**Reason:** Achieve workload isolation (report queries không ảnh hưởng transactional), vẫn giữ được SQL workflow quen thuộc, và dễ scale read independently. MVP tránh ops overhead của columnar; tách DB tốt hơn so với analytics schema trong OLTP.
+
+---
+
+## Decision: Umbraco doctype versioning via uSync.Complete (DAI-686)
+
+**Date:** 2026-04-27
+
+**Decision:** Doctype/datatype/template state của Umbraco được version-control bằng **uSync.Complete 16.1.2** (file-based, dump vào `uSync/v16/`). Production **không** import-on-startup; Development có thể bật `ImportAtStartup=All` + `ExportOnSave`. CI workflow (`.github/workflows/usync-drift.yml`) chạy fresh-DB export và compare với committed files để gate drift.
+
+**Tenant bootstrap:** CLI **`SpawnTenant`** (`src/backend/tools/SpawnTenant`) tạo tenant DB SQL Server (`IF DB_ID(...) IS NULL CREATE DATABASE`), ghi `infra/tenants/<tenant>.env` (Unattended install + `uSync__Settings__ImportAtStartup=All`), verify connection, optional compose-up + healthcheck wait.
+
+**Doctype catalog:** 8 element/composition types đặc tả trong `docs/usync/doctypes-spec.md` (HomepageMainBanner, HomepageSubBanner, ProductBlock, NavigationMenu, LandingPage, WysiwygPage, ReusableSection, EmbeddedVideo); aliases PascalCase, tabs `Content/SEO/Settings`, Block Grid blocks documented per doctype.
+
+**Reason:** Spec-only over hand-authored XML — DataType GUIDs + Umbraco version stamps cần round-trip an toàn từ một DB thật, viết tay XML rủi ro lệch và corrupt content. CLI tách provisioning ra khỏi Umbraco host để spawn tenant không cần manual install wizard.
+
+---
+
+## Decision: Email/Notification template engine — Scriban + Postgres + MassTransit (DAI-687)
+
+**Date:** 2026-04-27
+
+**Decision:** Notification.Api owns templates CRUD + render preview; Notification.Worker dispatches qua MassTransit `EmailQueuedV1`. **Scriban** là template engine (sandboxed: `EnableRelaxedMemberAccess=false`, `LoopLimit=10000`, `RecursiveLimit=128`, không expose .NET objects — chỉ JSON model bridge). Templates lưu Postgres (`Templates` table, migration `025_CreateTemplates.sql`) với 4-tier locale fallback (tenant+locale → tenant+default → global+locale → global+default) qua SQL CASE-ORDER + `LIMIT 1`. Email pipeline: `EmailQueuedConsumer` → `IIdempotencyService` lock + processed check → `EnsureDeliveryRowAsync` (queued) → render → MailKit SMTP với Polly 3-retry → `MarkSentAsync`/`MarkFailedAsync` (delivery log `EmailDeliveries`, migration `026`).
+
+**Multi-tenancy unique scope:** unique index `(COALESCE("TenantId",''), "Key", "Locale", "Channel")` để `NULL` (global) và empty string collapse — upsert idempotent.
+
+**Reason:** Scriban an toàn hơn Razor (no compile-then-execute, có loop/recursion limits), JSON-only model loại bỏ risk leak `.NET` reflection. Locale fallback ở SQL layer (CASE-ORDER) đơn giản hơn 4 round-trips và xử lý đúng ưu tiên ở mọi tenant.
+
+**Tests:** `dCMS.Tests/Integration/Notification/TemplateRendererIntegrationTests.cs` — 9 Testcontainers tests covering 4 fallback tiers, model rendering, missing-template + parse-error fallback, COALESCE-tenant upsert idempotency.
+
+---
+
+## Decision: Generic Approval Engine — strategy pattern + central ApprovalRequest aggregate (DAI-688)
+
+**Date:** 2026-04-27
+
+**Decision:** Approval workflow tách khỏi mỗi entity domain (Product/Campaign/PromoCode/Content) bằng một service riêng `dCMS.Approval.Api` (port 5009) backed by `ApprovalRequests` table (migration `027_CreateApprovalRequests.sql`). Mỗi domain implement `IApprovalSubject` (`EntityType`, `ValidateAsync`, `ApplyAsync`) — registry resolve theo `EntityType` (case-insensitive). API: POST `/approvals` (Submit), POST `{id}/approve|reject|request-changes`, POST `bulk-approve`, GET list.
+
+**Side effects:**
+- Campaign/PromoCode subjects giữ legacy `WorkflowState` column in sync (compat layer cho 1 release)
+- Product subject flip `Products.IsActive` (true on Approve, false on Reject/RequestChanges) — column thêm qua `028_AddProductActivation.sql`; ES indexer sẽ subscribe sau (DAI-720 follow-up)
+
+**Reason:** Trước đó mỗi entity có cột `WorkflowState` riêng + state-machine ad-hoc trong service tương ứng — bulk approval gần như không thể, audit trail rời rạc. Centralizing vào một bảng + strategy pattern cho phép:
+- Bulk approve cross-entity (UI một dashboard duy nhất)
+- History JSONB log unified (`[{state, by, at, notes}]`)
+- Thêm entity mới (Content/Banner) chỉ cần implement subject — không cần migration column mới
+
+**State machine:** `Draft → PendingApproval → Approved | Rejected | ChangesRequested`. Transition guard tại `TryTransitionAsync(expectedState='PendingApproval', ...)` — optimistic concurrency.
+
+**DAI-721 Content subject — webhook over in-process:** `ContentApprovalSubject` chạy trong `dCMS.Approval.Api` nhưng `IContentService` chỉ available trong Umbraco host (`dCMS.Web`). Thay vì duplicate registry, subject HTTP-POST tới `/umbraco/dcms/api/content-approval/{publish|unpublish}` với `X-Internal-Api-Key` (SHA-256 fixed-time compare). `dCMS.Web` host:
+- `ContentPublishingApprovalHandler` (INotificationAsyncHandler) cancels publish khi doctype alias nằm trong `ContentApproval:ApprovalRequiredDoctypes`, submit approval request qua `ApprovalApiClient` → `dCMS.Approval.Api`.
+- `ApprovalGate` (AsyncLocal flag) bật khi callback controller publish — handler thấy bypass, skip cancel ⇒ publish thực sự xảy ra. Loop-safe.
+
+**Reason:** Tránh share registry cross-process; tận dụng cùng pattern `X-Internal-Api-Key` đã dùng cho Inventory internal endpoints; AsyncLocal bypass đơn giản hơn so với phân biệt "trigger by approval vs trigger by user" trong Umbraco notification context.

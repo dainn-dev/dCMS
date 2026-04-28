@@ -10,6 +10,7 @@ import {
   fetchAllOrdersForExport,
   fetchOrders,
   isFailureStatus,
+  mapUiStatusToApiFilter,
   resolveFailedOrder,
   retryFailedOrder,
   type OrderFilters,
@@ -17,6 +18,7 @@ import {
 import type { FailedOrder, FailedOrderStatus, Order } from "../types";
 
 const STATUS_ORDER: FailedOrderStatus[] = [...FAILURE_STATUSES];
+const FAILURE_STATUS_API_FILTER = FAILURE_STATUSES.map(mapUiStatusToApiFilter).join(",");
 
 type FilterId = "all" | FailedOrderStatus;
 
@@ -92,8 +94,8 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
   const [countsKey, setCountsKey] = useState<string>("");
 
   const filters: OrderFilters = useMemo(() => {
-    if (statusFilter === "all") return { status: FAILURE_STATUSES.join(",") };
-    return { status: statusFilter };
+    if (statusFilter === "all") return { status: FAILURE_STATUS_API_FILTER };
+    return { status: mapUiStatusToApiFilter(statusFilter) };
   }, [statusFilter]);
 
   const refresh = useCallback(async () => {
@@ -147,7 +149,7 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
           const out = await fetchOrders(
             tenantId,
             storeId,
-            { status: FAILURE_STATUSES.join(",") },
+            { status: FAILURE_STATUS_API_FILTER },
             { cursor, limit: 100 },
             authToken
           );

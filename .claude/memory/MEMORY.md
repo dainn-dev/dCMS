@@ -34,6 +34,7 @@ Status: Planning + scaffold US-1…US-13 trong `src/backend/` (2026-04-12) + Bac
 - **US-13** `DAI-276` Umbraco 13 section `dCMSCatalog` + wizard Step 1–5 + review/publish (`DAI-281…287`); workflow preference localStorage
 
 **M2 Orders — Order.Api (port TBD):**
+- `DAI-722` (DAI-689 epic) **Multi-tender payment domain** (2026-04-27): migration `020_CreateOrderPaymentsMultiTender.sql` (`OrderPayments` + `PaymentComponents`, sum invariant code-enforced), domain `dCMS.Order.Core/Domain/Payments/` (`PaymentComponentType`, `PaymentComponentState`, `PaymentComponent`, `OrderPayment` with `Plan(orderId, total, tenders)` + `EnsureSumInvariant` + `RecomputeStatus`), `OrderPaymentRepository` (Dapper upsert), `OrderPaymentQueryStore` (read view), GET `/api/orders/{orderId}/payment` endpoint. Component apply order: Voucher → LoyaltyPoints → GiftCard → Gateway. Tests: `Unit/Payments/OrderPaymentTests.cs` (8 tests). DAI-723 + DAI-724 (Voucher.Api/Loyalty.Api + saga orchestration) deferred.
 - `DAI-637` Failed-order recovery — POST `/api/orders/{id}/retry-failure` + `/resolve-failure`; failure states `PaymentFailed|AuthFailed|AddressError|StockError|SystemError` trên `Orders.Status`; migrations `010_CreateOrderFailures.sql` + `011_AddOrderFailureContextColumns.sql`
 - `DAI-651/652/653/654/656` **Refund Cases** (2026-04-23/24):
   - Persistence: migration `012_AddOrderRefundTrackingColumns.sql` (cột `RefundStatus`, `RefundRemark`, `RefundedAt` trên `Orders`) — **không** có bảng `RefundCases` riêng; view = Cancelled order + latest qualifying PaymentTransaction
@@ -60,6 +61,38 @@ Status: Planning + scaffold US-1…US-13 trong `src/backend/` (2026-04-12) + Bac
 - `DAI-669` **Tenants + Users** SPA (2026-04-24) — `tenantsApi.ts`, `usersApi.ts` (cookie session, `credentials:"include"`, Umbraco `BackOfficeAccess` policy, no Bearer), `TenantsPage` / `TenantFormPage` / `UsersPage` / `UserFormPage` / `ChangePasswordModal` wired. Extra form fields (branding, categories…) UI-only cho đến khi API mở rộng
 - `DAI-670` **Roles** SPA (2026-04-24) — `rolesApi.ts` (`/umbraco/dcms/api/roles` GET/POST/PUT/DELETE + permissions GET + PUT per module); `RolesPage` / `RoleFormPage` / `ManageModulesPage` dùng `authToken` (demo `accessRoles` bỏ); module matrix = fixed template merged với API rows
 
+**DAI-684 Bulk import/export async background jobs (Hangfire):**
+- Hangfire wired in `dCMS.Web` (SQL Server storage = Umbraco DB), Dashboard: `/umbraco/dcms/hangfire`
+- Umbraco DB table `dcms_bulk_jobs` (migration plan `dCMS.Access` → `access-v1.2`) để lưu status/progress + input/output refs
+- Backoffice APIs: `POST /umbraco/dcms/api/bulk-jobs/catalog-import` (CSV upload), `POST /umbraco/dcms/api/bulk-jobs/orders-export` (date range), `GET /umbraco/dcms/api/bulk-jobs` list/status, `POST /{id}/cancel|retry`, `GET /{id}/download`
+- eStore UI: Products → Bulk jobs (progress bar + download/retry/cancel)
+- Catalog-side parallel impl: `dCMS.Catalog.Worker/Imports/` (XlsxStreamReader, ImportJobConsumer, 4 row processors); migration `025_CreateImportJobs.sql`; tests `Unit/Catalog/Imports/{XlsxStreamReader,ImportJobConsumerResume}Tests.cs` ✓
+
+**DAI-685 Reports analytics DB tách riêng:**
+- Analytics PostgreSQL service riêng (`ConnectionStrings:Analytics`); projection worker `dCMS.Reports.Worker` consume Order events; Reports API chỉ query analytics
+- Tables `analytics.orders_daily`, `analytics.sales_by_product`, `analytics.cart_events`, `analytics.restock_subscriptions` (migration `001_CreateAnalyticsTables.sql`)
+- `AnalyticsReportQueryStore` + routes Sales/AbandonCart/RestockSubscriptions; YARP gateway `/gateway/v1/reports/`
+- Tests: `Integration/Reports/AnalyticsReportQueryStoreIntegrationTests.cs` (6 Testcontainers tests) + SPA `reportsApi.test.ts` (10 vitest cases) ✓
+
+**DAI-686 Umbraco doctypes versioning via uSync:**
+- uSync.Complete 16.1.2 trong `dCMS.Web`; CI drift workflow `.github/workflows/usync-drift.yml`
+- Doctype catalog spec: `docs/usync/doctypes-spec.md` (8 types: HomepageMainBanner, SubBanner, ProductBlock, NavigationMenu, LandingPage, WysiwygPage, ReusableSection, EmbeddedVideo)
+- CLI **`SpawnTenant`** (`src/backend/tools/SpawnTenant`) — bootstrap tenant DB + `infra/tenants/<tenant>.env` (Unattended install + `uSync__Settings__ImportAtStartup=All`)
+
+**DAI-688 Generic Approval Engine (epic done 2026-04-27):**
+- DAI-718 foundation done — `dCMS.Approval.Api` (port 5009, gateway `/gateway/v1/approvals/`), `dCMS.Core/Approvals/` (`IApprovalSubject`, `ApprovalAction`, `ApprovalState`, `ApprovalHistoryEntry`), `dCMS.Infrastructure/Approvals/SqlApprovalRequestPersistence`, migration `027_CreateApprovalRequests.sql`. Routes: POST `/api/v1/tenants/{tenantId}/approvals`, GET list, POST `{id}/approve|reject|request-changes`, POST `bulk-approve`. Policy `DcmsPolicies.ApprovalManage` = `approval:manage`.
+- DAI-719 done — `CampaignApprovalSubject` + `PromoCodeApprovalSubject` (kept legacy `WorkflowState` in sync via `ApplyAsync`).
+- DAI-720 done — `ProductApprovalSubject` (sets `Products.IsActive=true` on Approve, `false` on Reject/RequestChanges, no-op on Submit); migration `028_AddProductActivation.sql` (+ `IX_Products_Tenant_IsActive`).
+- DAI-721 done — `ContentApprovalSubject` (HTTP webhook to `dCMS.Web` because Approval.Api can't reach Umbraco's `IContentService` directly): on Approve POST `/umbraco/dcms/api/content-approval/publish`, on Reject/RequestChanges POST `/unpublish`. Auth via `X-Internal-Api-Key` (SHA-256 fixed-time compare); config `ContentApproval:{CallbackUrl,ApiKey,ApprovalApiUrl,ApprovalRequiredDoctypes}`. `ContentPublishingApprovalHandler` (in `dCMS.Web/ContentApproval/`) cancels backoffice publish for doctype aliases listed in `ContentApproval:ApprovalRequiredDoctypes` and POSTs an approval request to `dCMS.Approval.Api`; `ApprovalGate` AsyncLocal bypass prevents loop when callback performs the actual publish. Tests: `Unit/Approval/ContentApprovalSubjectTests.cs` (7 tests) — all passing.
+
+**DAI-687 Email/Notification template engine:**
+- `dCMS.Notification.Api` (Scriban renderer + Templates CRUD) + `dCMS.Notification.Worker` (`EmailQueuedConsumer`)
+- Scriban sandbox: `EnableRelaxedMemberAccess=false`, `LoopLimit=10000`, `RecursiveLimit=128`, JSON-only model bridge (`ScribanModel`)
+- Postgres `Templates` table với 4-tier locale fallback (`TemplateRepository.GetResolvedAsync`); unique scope `(COALESCE("TenantId",''),"Key","Locale","Channel")`; migrations `025_CreateTemplates.sql` + `026_CreateEmailDeliveryLog.sql`
+- Email pipeline: idempotency lock + `EmailDeliveries` log (queued→sent/failed) + MailKit SMTP với Polly 3-retry; envelope `EmailQueuedV1`
+- SPA: `TemplatesPage` + `templatesApi.ts` (gateway `/gateway/v1/notifications/`)
+- Tests: `Integration/Notification/TemplateRendererIntegrationTests.cs` (9 Testcontainers tests) ✓
+
 **Active branch:** main
 
 ---
@@ -77,7 +110,7 @@ Status: Planning + scaffold US-1…US-13 trong `src/backend/` (2026-04-12) + Bac
 - `src/backend/dCMS.Promotions.Api/` — Campaigns + Promo codes routes (tenant-scoped)
 - `src/backend/dCMS.Order.Api/` — Orders REST + refund cases + failure recovery
 - `src/backend/dCMS.Catalog.Worker/` — Outbox → RabbitMQ; MediatR index + Redis invalidation
-- `src/backend/dCMS.Web/` — **Umbraco 13** host (`Umbraco.Cms` 13.13.1): sections `dCMSCatalog`, Access controllers (`DcmsUser|Role|Tenant`), SPA dist (`App_Plugins/DcmsV16/dist/{approval|estore|orders|reports|dashboard}-spa.{js,css,map}`), Access migrations (SQL Server)
+- `src/backend/dCMS.Web/` — **Umbraco** host (`Umbraco.Cms` 16.5.1): sections `dCMSCatalog`, Access controllers (`DcmsUser|Role|Tenant`), Bulk jobs (`DcmsBulkJobsController`, Hangfire dashboard `/umbraco/dcms/hangfire`), SPA dist (`App_Plugins/DcmsV16/dist/{approval|estore|orders|reports|dashboard}-spa.{js,css,map}`), Access migrations (SQL Server)
 - `src/backend/dCMS.Tests/` — xUnit + FluentAssertions + Moq + SkippableFact + Testcontainers (PG/ES); `Integration/Catalog/PendingApprovalsPersistenceIntegrationTests.cs`
 - `src/backend/dCMS.Order.Tests/` — `Unit/OrderListCursorCodecTests.cs`, `Unit/RefundCasePaymentRulesTests.cs`, `Unit/RefundCaseStatusMapsTests.cs`, `Integration/RefundCasesApiIntegrationTests.cs`, `Integration/OrderServicePostgresIntegrationTests.cs`
 - `src/backoffice/dcms-backoffice-spa/` — React SPA (build → `dCMS.Web/App_Plugins/DcmsV16/dist/`): `estore` (catalog mgmt + promotions + access), `approval` (products/campaigns/promo-codes), `orders` (orders + refund cases), `reports`, `dashboard`; `estore/api/gatewayConfig.ts` centralised gateway base URLs

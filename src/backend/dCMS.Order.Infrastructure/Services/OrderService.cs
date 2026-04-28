@@ -75,7 +75,8 @@ public sealed class OrderService : IOrderService
             l.Quantity,
             l.UnitPrice,
             l.ProductNameSnapshot,
-            l.VariantSnapshotJson)).ToList();
+            l.VariantSnapshotJson,
+            lineDiscount: l.LineDiscount)).ToList();
 
         var placementLines = command.Lines
             .Select(l => new Core.Domain.OrderPlacedLine(l.VariantId, l.WarehouseId, l.Quantity))
@@ -89,7 +90,14 @@ public sealed class OrderService : IOrderService
             items,
             placementLines,
             command.ShippingAddress,
-            command.OccurredAt);
+            command.OccurredAt,
+            command.CustomerName,
+            command.CustomerEmail,
+            command.CustomerPhone,
+            command.OrderDiscount,
+            command.PromoCode,
+            command.PromoCodeId,
+            command.AppliedPromotions);
 
         var events = order.DomainEvents.ToArray();
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelOrder, fetchOrders, getOrder } from "./ordersApi";
+import { cancelOrder, fetchOrders, getOrder, getOrderDetail } from "./ordersApi";
 
 function mockFetchOnce(json: unknown, ok = true, status = 200) {
   globalThis.fetch = vi.fn(async () => {
@@ -67,6 +67,54 @@ describe("ordersApi", () => {
     expect(o.status).toBe("Delivered");
     expect(o.shippingAddressLine1).toBe("A");
     expect(o.shippingPostalCode).toBe("1");
+  });
+
+  it("getOrder() maps customer snapshot (DAI-649)", async () => {
+    mockFetchOnce({
+      orderId: "550e8400-e29b-41d4-a716-446655440000",
+      tenantId: "TEN",
+      storeId: "STORE",
+      customerId: "cust-1",
+      customerName: "Jane Doe",
+      customerEmail: "jane@example.com",
+      customerPhone: "+1-555-0100",
+      status: "Delivered",
+      total: { amount: 10, currency: "USD" },
+      paymentIntentId: null,
+      createdAt: "2026-01-02T00:00:00Z",
+      shippingAddress: null,
+      shipment: null,
+      lines: [],
+    });
+
+    const o = await getOrder("TEN", "STORE", "550e8400-e29b-41d4-a716-446655440000");
+    expect(o.customerName).toBe("Jane Doe");
+    expect(o.customerEmail).toBe("jane@example.com");
+    expect(o.customerContactNo).toBe("+1-555-0100");
+  });
+
+  it("getOrderDetail() returns null snapshot fields when backend omits them (legacy orders)", async () => {
+    mockFetchOnce({
+      orderId: "550e8400-e29b-41d4-a716-446655440000",
+      tenantId: "TEN",
+      storeId: "STORE",
+      customerId: "cust-1",
+      customerName: null,
+      customerEmail: null,
+      customerPhone: null,
+      status: "Delivered",
+      total: { amount: 10, currency: "USD" },
+      paymentIntentId: null,
+      createdAt: "2026-01-02T00:00:00Z",
+      shippingAddress: null,
+      shipment: null,
+      lines: [],
+    });
+
+    const dto = await getOrderDetail("TEN", "STORE", "550e8400-e29b-41d4-a716-446655440000");
+    expect(dto.customerName).toBeNull();
+    expect(dto.customerEmail).toBeNull();
+    expect(dto.customerPhone).toBeNull();
   });
 
   it("cancelOrder() POSTs reason body", async () => {

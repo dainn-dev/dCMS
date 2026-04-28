@@ -66,6 +66,22 @@ services:
       retries: 20
       start_period: 15s
 
+  # DAI-685: Dedicated analytics DB for reports read-model (isolate from OLTP).
+  postgres-analytics:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dcms
+      POSTGRES_PASSWORD: Your_password123
+      POSTGRES_DB: dcms_analytics
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dcms -d dcms_analytics -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     ports:
@@ -101,13 +117,19 @@ services:
       start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Promotions: "Host=postgres;Port=5432;Database=dcms_promotions;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+      InternalPromotions__ApiKey: "dcms-local-internal-promotions-key-min-32-characters!"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      rabbitmq:
         condition: service_started
 
   fulfillment-api:
@@ -124,13 +146,159 @@ services:
       start_period: 45s
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Fulfillment: "Host=postgres;Port=5432;Database=dcms_fulfillment;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+
+  reports-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.reports-api
+    ports:
+      - "5007:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Enabled: "false"
+      ConnectionStrings__Analytics: "Host=postgres-analytics;Port=5432;Database=dcms_analytics;Username=dcms;Password=Your_password123"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres-analytics:
+        condition: service_healthy
+
+  notification-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.notification-api
+    ports:
+      - "5008:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Enabled: "false"
+      ConnectionStrings__Notification: "Host=postgres;Port=5432;Database=dcms_notification;Username=dcms;Password=Your_password123"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.notification-worker
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Notification: "Host=postgres;Port=5432;Database=dcms_notification;Username=dcms;Password=Your_password123"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+      # Configure SMTP in non-dev (or set Smtp:Host to enable sending)
+      Smtp__Host: "${SMTP_HOST:-}"
+      Smtp__Port: "${SMTP_PORT:-587}"
+      Smtp__User: "${SMTP_USER:-}"
+      Smtp__Pass: "${SMTP_PASS:-}"
+      Smtp__From: "${SMTP_FROM:-no-reply@dcms.local}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+
+  approval-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.approval-api
+    ports:
+      - "5009:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Enabled: "false"
+      ConnectionStrings__Approval: "Host=postgres;Port=5432;Database=dcms_approval;Username=dcms;Password=Your_password123"
+      Promotions__BaseUrl: "http://promotions-api:8080"
+      Catalog__BaseUrl: "http://catalog-api:8080"
+      InternalPromotions__ApiKey: "dcms-local-internal-promotions-key-min-32-characters!"
+      InternalCatalog__ApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  voucher-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.voucher-api
+    ports:
+      - "5010:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Enabled: "false"
+      ConnectionStrings__Voucher: "Host=postgres;Port=5432;Database=dcms_voucher;Username=dcms;Password=Your_password123"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Password: "guest"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+
+  loyalty-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.loyalty-api
+    ports:
+      - "5011:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Enabled: "false"
+      ConnectionStrings__Loyalty: "Host=postgres;Port=5432;Database=dcms_loyalty;Username=dcms;Password=Your_password123"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Password: "guest"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_started
 
   gateway:
@@ -146,14 +314,15 @@ services:
       retries: 5
       start_period: 20s
     environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      Auth__Enabled: "true"
+      ASPNETCORE_ENVIRONMENT: Development
+      Auth__Enabled: "false"
       Auth__JwtSigningKey: "${JWT_SIGNING_KEY:-dcms-local-dev-signing-key-min-32-chars!!}"
       Auth__Issuer: "dcms-gateway"
       Auth__Audience: "dcms-services"
       Auth__InternalTokenTtlSeconds: "300"
       Cors__AllowedOrigins__0: "http://localhost:3000"
       Cors__AllowedOrigins__1: "http://localhost:5000"
+      Cors__AllowedOrigins__2: "http://localhost:5080"
       RateLimiting__PermitLimit: "500"
       RateLimiting__WindowSeconds: "60"
       ReverseProxy__Clusters__catalog-cluster__Destinations__default__Address: "http://catalog-api:8080"
@@ -161,6 +330,11 @@ services:
       ReverseProxy__Clusters__inventory-cluster__Destinations__default__Address: "http://inventory-api:8080"
       ReverseProxy__Clusters__promotions-cluster__Destinations__default__Address: "http://promotions-api:8080"
       ReverseProxy__Clusters__fulfillment-cluster__Destinations__default__Address: "http://fulfillment-api:8080"
+      ReverseProxy__Clusters__reports-cluster__Destinations__default__Address: "http://reports-api:8080"
+      ReverseProxy__Clusters__notification-cluster__Destinations__default__Address: "http://notification-api:8080"
+      ReverseProxy__Clusters__approvals-cluster__Destinations__default__Address: "http://approval-api:8080"
+      ReverseProxy__Clusters__vouchers-cluster__Destinations__default__Address: "http://voucher-api:8080"
+      ReverseProxy__Clusters__loyalty-cluster__Destinations__default__Address: "http://loyalty-api:8080"
     depends_on:
       catalog-api:
         condition: service_healthy
@@ -171,6 +345,16 @@ services:
       promotions-api:
         condition: service_healthy
       fulfillment-api:
+        condition: service_healthy
+      reports-api:
+        condition: service_healthy
+      notification-api:
+        condition: service_healthy
+      approval-api:
+        condition: service_healthy
+      voucher-api:
+        condition: service_healthy
+      loyalty-api:
         condition: service_healthy
 
   catalog-api:
@@ -190,6 +374,7 @@ services:
       ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
       Elasticsearch__Url: "http://elasticsearch:9200"
+      InternalCatalog__ApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres:
@@ -214,13 +399,17 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Inventory: "Host=postgres;Port=5432;Database=dcms_inventory;Username=dcms;Password=Your_password123"
-      ConnectionStrings__Audit: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
       Cors__AllowedOrigins__0: "http://localhost:3000"
       InternalInventory__ApiKey: "dcms-local-internal-inventory-key-min-32-characters!!"
     depends_on:
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   order-api:
     build:
@@ -297,13 +486,46 @@ services:
       Umbraco__CMS__WebRouting__UmbracoApplicationUrl: "http://localhost:8080/"
       ConnectionStrings__umbracoDbDSN: "Server=sqlserver,1433;Database=Umbraco;User Id=sa;Password=Umbraco_Dev_2026!;TrustServerCertificate=True;Encrypt=True"
       ConnectionStrings__umbracoDbDSN_ProviderName: "Microsoft.Data.SqlClient"
+      # DAI-705: internal load test endpoint guard key.
+      Dcms__Access__LoadTestKey: "${DCMS_LOADTEST_KEY:-dcms-loadtest-key}"
+      # DAI-705: enable startup seed for permission cache load test (off in production).
+      Dcms__Access__LoadTestSeedEnabled: "${DCMS_LOADTEST_SEED:-false}"
+      # DAI-683: permission cache backing
+      ConnectionStrings__Redis: "redis:6379"
+      # DAI-684: bulk jobs (Hangfire workers use Catalog + Order PostgreSQL)
+      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
     volumes:
       - umbraco_data:/app/umbraco/Data
     depends_on:
       sqlserver:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
       umbraco-db-init:
         condition: service_completed_successfully
+
+  k6-permission-cache:
+    profiles: ["loadtest"]
+    image: grafana/k6:0.50.0
+    depends_on:
+      umbraco-web:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      BASE_URL: "http://umbraco-web:8080"
+      LOADTEST_KEY: "${DCMS_LOADTEST_KEY:-dcms-loadtest-key}"
+      VUS: "${K6_VUS:-2000}"
+      DURATION: "${K6_DURATION:-60s}"
+      USER_ID: "${K6_USER_ID:-1}"
+      MODULE: "${K6_MODULE:-orders}"
+      ACTION: "${K6_ACTION:-view}"
+      K6_OUT: "json=/results/permission-cache-runs.json"
+    volumes:
+      - ./loadtests:/scripts:ro
+      - ./loadtests/results:/results:rw
+    entrypoint: ["k6", "run", "--summary-export=/results/permission-cache-summary.json", "/scripts/permission-cache.js"]
 
   catalog-worker:
     build:
@@ -329,6 +551,25 @@ services:
       redis:
         condition: service_started
       elasticsearch:
+        condition: service_started
+
+  reports-worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.reports-worker
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Analytics: "Host=postgres-analytics;Port=5432;Database=dcms_analytics;Username=dcms;Password=Your_password123"
+      Catalog__BaseUrl: "http://catalog-api:8080"
+      Catalog__InternalApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__User: "guest"
+      RabbitMq__Pass: "guest"
+      RabbitMq__ManagementBaseUrl: "http://rabbitmq:15672"
+    depends_on:
+      postgres-analytics:
+        condition: service_healthy
+      rabbitmq:
         condition: service_started
 
   m1-domain-tests:

@@ -32,6 +32,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
 
         var tid = user.FindFirst(DcmsClaims.TenantId)?.Value;
         var sid = user.FindFirst(DcmsClaims.StoreId)?.Value;
+        var allowedStores = DcmsScopeClaimParser.ParseCsvClaim(user.FindFirst(DcmsClaims.StoreIds)?.Value);
         if (string.IsNullOrWhiteSpace(tid))
         {
             return Results.Json(
@@ -47,12 +48,29 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
         }
 
         if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager))
+        {
+            // If token explicitly constrains store scope, enforce it; else allow all stores within tenant (backward compat).
+            if (allowedStores.Count > 0 && !allowedStores.Contains(storeHeader!, StringComparer.Ordinal))
+            {
+                return Results.Json(
+                    new { error = new { code = "FORBIDDEN", message = "Token does not grant access to X-Store-Id." } },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
             return await next(context);
+        }
 
         if (string.IsNullOrWhiteSpace(sid))
         {
             return Results.Json(
                 new { error = new { code = "FORBIDDEN", message = "Token is missing store_id claim." } },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // If token explicitly constrains store scope, enforce it for store-scoped roles too.
+        if (allowedStores.Count > 0 && !allowedStores.Contains(storeHeader!, StringComparer.Ordinal))
+        {
+            return Results.Json(
+                new { error = new { code = "FORBIDDEN", message = "Token does not grant access to X-Store-Id." } },
                 statusCode: StatusCodes.Status403Forbidden);
         }
 

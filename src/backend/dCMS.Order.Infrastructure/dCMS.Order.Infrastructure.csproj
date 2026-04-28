@@ -28,9 +28,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\dCMS.Core\dCMS.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
     <ProjectReference Include="..\dCMS.Order.Core\dCMS.Order.Core.csproj" />
+    <ProjectReference Include="..\dCMS.Promotions.Contracts\dCMS.Promotions.Contracts.csproj" />
+    <!-- DAI-702 — TenantScopeAnalyzer (build-time only, not a runtime dep). -->
+    <ProjectReference Include="..\dCMS.Analyzers\dCMS.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="..\dCMS.Analyzers\dcms.analyzers.json" Link="dcms.analyzers.json" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,4 +1,5 @@
 using dCMS.Web.Access.Migrations;
+using dCMS.Web.Access.Caching;
 using dCMS.Web.Access.Services;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Composing;
@@ -16,6 +17,21 @@ public sealed class DcmsAccessComposer : IComposer
 {
     public void Compose(IUmbracoBuilder builder)
     {
+        builder.Services.AddHttpContextAccessor();
+        builder.Services.AddMemoryCache();
+        builder.Services.AddOptions<PermissionCacheOptions>()
+            .Bind(builder.Config.GetSection(PermissionCacheOptions.SectionName));
+
+        // Cluster-safe permission cache: Redis if configured, otherwise in-memory only.
+        var redisCs = builder.Config.GetConnectionString("Redis");
+        if (!string.IsNullOrWhiteSpace(redisCs))
+        {
+            builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(_ =>
+                StackExchange.Redis.ConnectionMultiplexer.Connect(redisCs));
+        }
+
+        builder.Services.AddSingleton<IPermissionCache, PermissionCache>();
+
         // Register the permission service as scoped (one-per-request).
         builder.Services.AddScoped<IPermissionService, PermissionService>();
 
@@ -50,6 +66,10 @@ internal sealed class RunAccessMigrationHandler
         CancellationToken cancellationToken)
     {
         if (_runtimeState.Level != RuntimeLevel.Run)
+            return;
+
+        var currentState = _keyValueService.GetValue($"Umbraco.Migrations.{AccessModuleMigrationPlan.PlanName}");
+        if (currentState == AccessModuleMigrationPlan.CurrentFinalState)
             return;
 
         var upgrader = new Upgrader(new AccessModuleMigrationPlan());
