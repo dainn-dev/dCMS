@@ -1,0 +1,61 @@
+name: Build (Backoffice + Backend)
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "src/backend/**"
+      - "src/backoffice/**"
+      - ".github/workflows/build-backoffice-backend.yml"
+  pull_request:
+    paths:
+      - "src/backend/**"
+      - "src/backoffice/**"
+      - ".github/workflows/build-backoffice-backend.yml"
+
+jobs:
+  backoffice:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backoffice/dcms-backoffice-spa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/backoffice/dcms-backoffice-spa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: backoffice-dist
+          path: src/backoffice/dcms-backoffice-spa/dist/
+          retention-days: 7
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore
+        run: dotnet restore dCMS.sln
+
+      - name: Build (skip SPA build)
+        run: dotnet build dCMS.sln -c Release --no-restore /p:SkipFrontendBuild=true
+
