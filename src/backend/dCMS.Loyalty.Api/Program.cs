@@ -69,4 +69,4 @@ app.MapLoyaltyRoutes();
 app.MapGet("/", () => Results.Text("dCMS.Loyalty.Api\n", "text/plain"));
 app.Run();
 
-public partial class Program;
+internal partial class Program;

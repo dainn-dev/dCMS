@@ -32,4 +32,4 @@ public sealed record LoyaltyReserveResult(bool Success, string? ErrorCode, strin
 public sealed record LoyaltyCaptureResult(bool Success, string? ErrorCode, string? ErrorMessage, LoyaltyHoldRow? Hold);
 public sealed record LoyaltyReleaseResult(bool Success, string? ErrorCode, string? ErrorMessage, LoyaltyHoldRow? Hold);
 public sealed record LoyaltyRefundResult(bool Success, string? ErrorCode, string? ErrorMessage, LoyaltyHoldRow? Hold);
-public sealed record ExpiredLoyaltyHoldRow(Guid HoldId, string TenantId, string CustomerId, Guid OrderId, decimal Amount, DateTimeOffset ExpiresAt);
+public sealed record ExpiredLoyaltyHoldRow(Guid HoldId, string TenantId, string CustomerId, Guid OrderId, decimal Amount, DateTime ExpiresAt);

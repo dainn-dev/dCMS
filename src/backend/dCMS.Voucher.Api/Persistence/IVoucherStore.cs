@@ -32,4 +32,4 @@ public sealed record CaptureResult(bool Success, string? ErrorCode, string? Erro
 public sealed record ReleaseResult(bool Success, string? ErrorCode, string? ErrorMessage, VoucherHoldRow? Hold);
 public sealed record RefundResult(bool Success, string? ErrorCode, string? ErrorMessage, VoucherHoldRow? Hold);
 public sealed record BalanceView(string Code, decimal FaceValue, decimal RemainingValue, decimal HeldValue, string Currency, string Status);
-public sealed record ExpiredHoldRow(Guid HoldId, string TenantId, Guid VoucherId, Guid OrderId, decimal Amount, DateTimeOffset ExpiresAt);
+public sealed record ExpiredHoldRow(Guid HoldId, string TenantId, Guid VoucherId, Guid OrderId, decimal Amount, DateTime ExpiresAt);

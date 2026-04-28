@@ -69,4 +69,4 @@ app.MapVoucherRoutes();
 app.MapGet("/", () => Results.Text("dCMS.Voucher.Api\n", "text/plain"));
 app.Run();
 
-public partial class Program;
+internal partial class Program;
