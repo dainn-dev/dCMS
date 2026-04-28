@@ -19,20 +19,25 @@ public sealed class OrderReportQueryStore
         string tenantId, string storeId, DateOnly dateFrom, DateOnly dateTo,
         CancellationToken ct = default)
     {
+        // DAI-689: Group by PaymentComponents.Type (Voucher / LoyaltyPoints / GiftCard / Gateway)
+        // — one row per tender. Multi-tender orders contribute their per-component amount to each
+        // bucket. Orders without a multi-tender plan are bucketed under 'Unknown'.
         const string sql = """
             SELECT
-                COALESCE(pt."PaymentMethod", 'Unknown') AS PaymentMethod,
-                COUNT(DISTINCT o."Id") AS TransactionCount,
-                SUM(o."Total") AS TotalAmount,
+                COALESCE(pc."Type", 'Unknown') AS PaymentMethod,
+                COUNT(DISTINCT o."Id")::int AS TransactionCount,
+                SUM(COALESCE(pc."Amount", o."Total")) AS TotalAmount,
                 o."Currency" AS Currency
             FROM "Orders" o
-            LEFT JOIN "PaymentTransactions" pt ON pt."OrderId" = o."Id"
+            LEFT JOIN "OrderPayments" op ON op."OrderId" = o."Id"
+            LEFT JOIN "PaymentComponents" pc ON pc."OrderPaymentId" = op."Id"
+                AND pc."State" IN ('Captured', 'Authorized', 'Refunded')
             WHERE o."TenantId" = @TenantId
               AND (@StoreId = '' OR o."StoreId" = @StoreId)
               AND o."CreatedAt" >= @DateFrom AND o."CreatedAt" < @DateTo
               AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed')
-            GROUP BY pt."PaymentMethod", o."Currency"
-            ORDER BY SUM(o."Total") DESC
+            GROUP BY COALESCE(pc."Type", 'Unknown'), o."Currency"
+            ORDER BY SUM(COALESCE(pc."Amount", o."Total")) DESC
             """;
 
         await using var conn = new NpgsqlConnection(_connectionString);
@@ -106,21 +111,24 @@ public sealed class OrderReportQueryStore
         string? paymentMethod,
         CancellationToken ct = default)
     {
+        // DAI-689: Each multi-tender component is one row (matches the spec note about split tender).
         const string sql = """
             SELECT
                 o."Id" AS OrderId,
-                pt."PaymentMethod" AS PaymentMethod,
-                pt."Amount" AS Amount,
-                pt."Currency" AS Currency,
-                pt."PaymentIntentId" AS TransactionRef,
-                pt."CreatedAt" AS Date
+                pc."Type" AS PaymentMethod,
+                pc."Amount" AS Amount,
+                o."Currency" AS Currency,
+                COALESCE(pc."ExternalRef", pc."Reference", '') AS TransactionRef,
+                pc."CreatedAt" AS Date
             FROM "Orders" o
-            INNER JOIN "PaymentTransactions" pt ON pt."OrderId" = o."Id"
+            INNER JOIN "OrderPayments" op ON op."OrderId" = o."Id"
+            INNER JOIN "PaymentComponents" pc ON pc."OrderPaymentId" = op."Id"
             WHERE o."TenantId" = @TenantId
               AND (@StoreId = '' OR o."StoreId" = @StoreId)
               AND o."CreatedAt" >= @DateFrom AND o."CreatedAt" < @DateTo
-              AND (@PaymentMethod IS NULL OR pt."PaymentMethod" = @PaymentMethod)
-            ORDER BY pt."CreatedAt" DESC
+              AND pc."State" IN ('Captured', 'Authorized', 'Refunded')
+              AND (@PaymentMethod IS NULL OR pc."Type" = @PaymentMethod)
+            ORDER BY pc."CreatedAt" DESC
             LIMIT 500
             """;
 

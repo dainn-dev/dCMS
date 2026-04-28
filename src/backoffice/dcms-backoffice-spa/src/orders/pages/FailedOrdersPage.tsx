@@ -22,6 +22,11 @@ const FAILURE_STATUS_API_FILTER = FAILURE_STATUSES.map(mapUiStatusToApiFilter).j
 
 type FilterId = "all" | FailedOrderStatus;
 
+const STATUS_OPTIONS: Array<{ value: FilterId; label: string }> = [
+  { value: "all", label: "All statuses" },
+  ...STATUS_ORDER.map((s) => ({ value: s as FilterId, label: s })),
+];
+
 type Props = {
   tenantId?: string;
   storeId?: string;
@@ -87,11 +92,19 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
-  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [actionToast, setActionToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [resolveConfirmOpen, setResolveConfirmOpen] = useState(false);
   const [retryHintOpen, setRetryHintOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [tabCounts, setTabCounts] = useState<Record<string, number>>(() => ({ all: 0 }));
   const [countsKey, setCountsKey] = useState<string>("");
+
+  // Auto-dismiss toast after 3s (matches OrderProcessingPage pattern).
+  useEffect(() => {
+    if (!actionToast) return;
+    const t = setTimeout(() => setActionToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [actionToast]);
 
   const filters: OrderFilters = useMemo(() => {
     if (statusFilter === "all") return { status: FAILURE_STATUS_API_FILTER };
@@ -126,7 +139,7 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
   }, [refresh]);
 
   // Accurate tab counts: scan ALL failure statuses using cursor pagination (limit=100).
-  // Cached by tenant/store so switching tabs doesn't re-fetch counts.
+  // Cached by tenant/store so switching filters doesn't re-fetch counts.
   useEffect(() => {
     if (!tenantId || !storeId) {
       setTabCounts({ all: 0 });
@@ -173,8 +186,6 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
     };
   }, [tenantId, storeId, authToken, countsKey]);
 
-  const filteredRows = rows;
-
   const columns = useMemo(
     () => createFailedOrderColumns(onViewFailedOrder),
     [onViewFailedOrder]
@@ -204,7 +215,7 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
       }
     }
     setActionBusy(false);
-    setToast(
+    setActionToast(
       failed === 0
         ? { kind: "success", message: `${action === "retry" ? "Retry queued" : "Resolved"} for ${succeeded} order(s)` }
         : { kind: "error", message: `${succeeded} succeeded, ${failed} failed` }
@@ -230,11 +241,13 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
     }
   }
 
-  async function doExport() {
+  async function runExport() {
     if (!tenantId || !storeId) {
-      setToast({ kind: "error", message: "Missing tenantId / storeId for export." });
+      setActionToast({ kind: "error", message: "Missing tenantId / storeId for export." });
       return;
     }
+    setExporting(true);
+    setError(null);
     try {
       const { rows, limited, total } = await fetchAllOrdersForExport(tenantId, storeId, filters, authToken, {
         limit: 5000,
@@ -243,12 +256,14 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
       const failureRows = rows.filter((r) => isFailureStatus(r.status)).map(orderToFailedOrder);
       exportFailedOrdersToCsv(failureRows);
       if (limited) {
-        setToast({ kind: "error", message: `Export limited to first 5000 rows (total ${total}). Refine filters.` });
+        setError(`Export limited to first 5000 rows (total ${total}). Refine filters.`);
       } else {
-        setToast({ kind: "success", message: `Exported ${failureRows.length} row(s)` });
+        setActionToast({ kind: "success", message: `Exported ${failureRows.length} row(s)` });
       }
     } catch (e) {
-      setToast({ kind: "error", message: e instanceof Error ? e.message : "Export failed" });
+      setActionToast({ kind: "error", message: e instanceof Error ? e.message : "Export failed" });
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -261,108 +276,78 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
             <span className="mx-2">/</span>
             <span className="text-primary">Failed Orders</span>
           </nav>
-          <h1 className="text-2xl font-bold tracking-tight text-on-surface font-headline">
-            Failed Orders
-          </h1>
-          <p className="text-sm text-on-surface-variant mt-1">
-            Monitor and resolve order failures and payment issues.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-on-surface font-headline">Failed Orders</h1>
+          <p className="text-sm text-on-surface-variant mt-1">Monitor and resolve order failures and payment issues</p>
         </div>
+
         <div className="flex items-center gap-3">
+          <select
+            className="h-10 rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as FilterId)}
+            disabled={!tenantId || !storeId}
+            aria-label="Status filter"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label} ({tabCounts[o.value] ?? 0})
+              </option>
+            ))}
+          </select>
           <button
             type="button"
-            disabled={!tenantId || !storeId}
-            className="px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors rounded-lg flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-            onClick={doExport}
+            className="px-4 py-2 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors rounded-lg flex items-center gap-2 disabled:opacity-40"
+            onClick={() => void runExport()}
+            disabled={!tenantId || !storeId || exporting}
           >
             <IconDownload />
-            Export
+            {exporting ? "Exporting…" : "Export"}
           </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-outline-variant/25">
-        <button
-          type="button"
-          onClick={() => setStatusFilter("all")}
-          aria-pressed={statusFilter === "all"}
-          className={`px-3 py-2.5 text-xs font-bold uppercase tracking-wide border-b-2 -mb-px transition-colors ${
-            statusFilter === "all"
-              ? "border-primary text-primary"
-              : "border-transparent text-on-surface-variant hover:text-on-surface"
-          }`}
-        >
-          All{" "}
-          <span className="ml-1 tabular-nums opacity-80">({tabCounts.all})</span>
-        </button>
-        {STATUS_ORDER.map((id) => {
-          const active = statusFilter === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setStatusFilter(id)}
-              aria-pressed={active}
-              className={`px-3 py-2.5 text-xs font-bold uppercase tracking-wide border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                active
-                  ? "border-primary text-primary"
-                  : "border-transparent text-on-surface-variant hover:text-on-surface"
-              }`}
-            >
-              {id}{" "}
-              <span className="ml-1 tabular-nums opacity-80">({tabCounts[id] ?? 0})</span>
-            </button>
-          );
-        })}
-      </div>
+      {actionToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-6 py-3 shadow-2xl">
+          <p className={`text-sm font-semibold ${actionToast.kind === "error" ? "text-error" : "text-on-surface"}`}>
+            {actionToast.message}
+          </p>
+        </div>
+      )}
 
       {!tenantId || !storeId ? (
-        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-6 text-sm text-on-surface-variant">
+        <div className="mt-6 rounded-xl border border-outline-variant/20 bg-surface-container-lowest p-6 text-sm text-on-surface-variant">
           Select a tenant + store to view failed orders.
         </div>
       ) : (
-        <div className="space-y-3">
-          {loading && (
-            <div className="text-xs text-on-surface-variant">Loading failed orders…</div>
-          )}
+        <>
           {error && (
-            <div className="rounded-lg border border-error/30 bg-error-container/40 p-3 text-xs text-on-error-container">
+            <div className="mt-6 rounded-xl border border-error/25 bg-error/5 px-5 py-4 text-sm text-error">
               {error}
             </div>
           )}
-          {toast && (
-            <div
-              className={`rounded-lg border p-3 text-xs ${
-                toast.kind === "success"
-                  ? "border-secondary/30 bg-secondary-container/30 text-on-secondary-container"
-                  : "border-error/30 bg-error-container/40 text-on-error-container"
-              }`}
-              onClick={() => setToast(null)}
-            >
-              {toast.message}
-            </div>
-          )}
 
-          <DataTable
-            columns={columns}
-            data={filteredRows}
-            defaultHiddenColumns={["processedBy", "tags", "deliveryOption", "fulfilledDate", "failureReason"]}
-            columnLabels={FAILED_ORDER_COLUMN_LABELS}
-            globalFilterPlaceholder="Search by order, customer, status…"
-            getRowId={(row) => row.orderId}
-            rowSelection={rowSelection}
-            onRowSelectionChange={setRowSelection}
-            footerMode="loadMore"
-            loading={loading || loadingMore}
-            loadMore={{
-              disabled: loading || loadingMore || nextCursor === null,
-              label: nextCursor ? (loadingMore ? "Loading…" : "Load more") : "No more",
-              onClick: () => void loadMore(),
-            }}
-          />
+          <div className="mt-6">
+            <DataTable
+              columns={columns}
+              data={rows}
+              defaultHiddenColumns={["processedBy", "tags", "deliveryOption", "fulfilledDate", "failureReason"]}
+              columnLabels={FAILED_ORDER_COLUMN_LABELS}
+              globalFilterPlaceholder="Search by order, customer, status…"
+              getRowId={(row) => row.orderId}
+              rowSelection={rowSelection}
+              onRowSelectionChange={setRowSelection}
+              loading={(loading || loadingMore) && rows.length === 0}
+              footerMode="loadMore"
+              loadMore={{
+                onClick: () => void loadMore(),
+                disabled: loading || loadingMore || nextCursor === null,
+                label: nextCursor ? (loadingMore ? "Loading…" : "Load more") : "No more",
+              }}
+            />
+          </div>
 
           {selectedCount > 0 && (
-            <div className="sticky bottom-3 z-30 flex flex-wrap items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-3 shadow-lg ring-1 ring-black/5 transition-opacity duration-200">
+            <div className="sticky bottom-3 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-3 shadow-lg ring-1 ring-black/5 transition-opacity duration-200">
               <span className="text-xs font-medium text-on-surface">
                 <span className="font-bold tabular-nums text-primary">{selectedCount}</span>
                 {` order${selectedCount === 1 ? "" : "s"} selected`}
@@ -399,7 +384,7 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
               </div>
             </div>
           )}
-        </div>
+        </>
       )}
 
       <ConfirmResolveFailedOrdersDialog

@@ -7,7 +7,6 @@ import {
   IconBolt,
   IconBox,
   IconChevronDown,
-  IconDownload,
   IconGrid,
   IconGroup,
   IconHelp,
@@ -27,7 +26,6 @@ export type EStorePageId =
   | "brand-configuration"
   | "categories"
   | "products"
-  | "bulk-jobs"
   | "product-best-sellers"
   | "product-category-assignment"
   | "product-configuration"
@@ -59,7 +57,6 @@ const navItems: NavItem[] = [
   { id: "brand-configuration", label: "Brand Configuration", Icon: IconTune, nestUnderBrands: true },
   { id: "categories", label: "Categories", Icon: IconGrid },
   { id: "products", label: "Products", Icon: IconBox },
-  { id: "bulk-jobs", label: "Bulk jobs", Icon: IconDownload, nestUnderProducts: true },
   { id: "product-best-sellers", label: "Best Seller Settings", Icon: IconTrendingUp, nestUnderProducts: true },
   { id: "product-category-assignment", label: "Category Assignment", Icon: IconAccountTree, nestUnderProducts: true },
   { id: "product-configuration", label: "Product Configuration", Icon: IconTune, nestUnderProducts: true },

@@ -12,6 +12,28 @@ function resolveUrl(path) {
   }
 }
 
+/**
+ * Reuses /umbraco/dcms/api/estore/context which returns { tenantId, storeId, authToken }.
+ * @returns {Promise<{ tenantId?: string, storeId?: string, authToken?: string }>}
+ */
+async function fetchReportsContext() {
+  try {
+    const res = await fetch("/umbraco/dcms/api/estore/context", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return {};
+    const json = await res.json();
+    const out = {};
+    if (json.tenantId) out.tenantId = String(json.tenantId);
+    if (json.storeId) out.storeId = String(json.storeId);
+    if (json.authToken) out.authToken = String(json.authToken);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export default class DcmsReportsSectionElement extends UmbElementMixin(HTMLElement) {
   /** @type {HTMLElement | null} */
   #host = null;
@@ -33,6 +55,8 @@ export default class DcmsReportsSectionElement extends UmbElementMixin(HTMLEleme
     if (!this.#host) return;
 
     try {
+      const reportsContext = await fetchReportsContext();
+
       const cssUrl = resolveUrl(SPA_CSS);
       const cssRes = await fetch(cssUrl, { method: "GET", credentials: "same-origin" });
       if (!cssRes.ok) throw new Error(`GET ${cssUrl} -> ${cssRes.status} ${cssRes.statusText}`);
@@ -48,7 +72,7 @@ export default class DcmsReportsSectionElement extends UmbElementMixin(HTMLEleme
       if (!jsRes.ok) throw new Error(`GET ${jsUrl} -> ${jsRes.status} ${jsRes.statusText}`);
 
       this.#spa = await import(/* @vite-ignore */ SPA_JS);
-      this.#spa?.mount?.(this.#host);
+      this.#spa?.mount?.(this.#host, reportsContext);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (this.#host) {

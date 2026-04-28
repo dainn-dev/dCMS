@@ -66,7 +66,7 @@ export async function fetchTransactionSummary(
   token?: string,
 ): Promise<TransactionSummaryRow[]> {
   const params = dateParams(filters);
-  const res = await fetch(`${ORDERS_BASE}/reports/transactions/summary?${params}`, {
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/transactions/summary?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
@@ -97,7 +97,7 @@ export async function fetchTransactionDetails(
   if (filters.paymentMethod && filters.paymentMethod !== "all") params.set("paymentMethod", filters.paymentMethod);
   if (pagination?.cursor) params.set("cursor", pagination.cursor);
   if (pagination?.limit) params.set("limit", String(pagination.limit));
-  const res = await fetch(`${ORDERS_BASE}/reports/transactions/details?${params}`, {
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/transactions/details?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
@@ -122,7 +122,7 @@ export async function fetchEcommercePayments(
 ): Promise<EcommercePaymentRow[]> {
   const params = dateParams(filters);
   if (filters.paymentMethod && filters.paymentMethod !== "all") params.set("paymentMethod", filters.paymentMethod);
-  const res = await fetch(`${ORDERS_BASE}/reports/transactions/ecommerce?${params}`, {
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/transactions/ecommerce?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
@@ -149,7 +149,7 @@ export async function fetchSalesByCategory(
 ): Promise<SalesByCategoryRow[]> {
   const params = dateParams(filters);
   if (filters.brandCode && filters.brandCode !== "all") params.set("brandCode", filters.brandCode);
-  const res = await fetch(`${ORDERS_BASE}/reports/sales/by-category?${params}`, {
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/sales/by-category?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
@@ -174,7 +174,7 @@ export async function fetchSalesByProduct(
   const params = dateParams(filters);
   if (filters.brandCode && filters.brandCode !== "all") params.set("brandCode", filters.brandCode);
   if (filters.categoryId && filters.categoryId !== "all") params.set("categoryId", filters.categoryId);
-  const res = await fetch(`${ORDERS_BASE}/reports/sales/by-product?${params}`, {
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/sales/by-product?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
@@ -197,7 +197,7 @@ export async function fetchSalesByTenant(
   token?: string,
 ): Promise<SalesByTenantRow[]> {
   const params = dateParams(filters);
-  const res = await fetch(`${ORDERS_BASE}/reports/sales/by-tenant?${params}`, {
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/sales/by-tenant?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, undefined, token),
   });

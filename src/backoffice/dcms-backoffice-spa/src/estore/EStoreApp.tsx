@@ -68,7 +68,6 @@ import { RoleFormPage } from "./pages/access/RoleFormPage";
 import { ManageModulesPage } from "./pages/access/ManageModulesPage";
 import { TenantsPage } from "./pages/access/TenantsPage";
 import { TenantFormPage } from "./pages/access/TenantFormPage";
-import { BulkJobsPage } from "./pages/BulkJobsPage";
 import { TemplatesPage } from "./pages/TemplatesPage";
 import type { TenantRow } from "./api/tenantsApi";
 
@@ -897,7 +896,6 @@ export function EStoreApp({
           authToken={authToken}
         />
       )}
-      {page === "bulk-jobs" && <BulkJobsPage storeId={storeId ?? ""} />}
       {page === "templates" && <TemplatesPage tenantId={tenantId} storeId={storeId} authToken={authToken} />}
       {page === "products" &&
         (productForm.mode === "inventory-import" ? (
