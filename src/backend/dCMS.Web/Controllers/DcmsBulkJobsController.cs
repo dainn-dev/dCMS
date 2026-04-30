@@ -56,7 +56,7 @@ public sealed class DcmsBulkJobsController : ControllerBase
         if (user is null) return Unauthorized(Env("Not authenticated."));
 
         if (file is null || file.Length == 0)
-            return BadRequest(Env("CSV file is required."));
+            return BadRequest(Env("File is required (.csv or .xlsx)."));
 
         var jobId = Guid.NewGuid();
         BulkJobFileStorage.EnsureJobDir(_env.ContentRootPath, tenantId, jobId);
@@ -83,6 +83,55 @@ public sealed class DcmsBulkJobsController : ControllerBase
 
         BulkJobMetrics.Started.WithLabels(tenantId, BulkJobKinds.CatalogImport).Inc();
         var hf = BackgroundJob.Enqueue<CatalogBulkJobRunner>(x => x.RunAsync(tenantId, jobId));
+        await _repo.SetHangfireJobIdAsync(tenantId, jobId, hf, ct).ConfigureAwait(false);
+
+        return Ok(new { data = new { jobId = jobId.ToString(), hangfireJobId = hf }, meta = (object?)null, error = (object?)null });
+    }
+
+    // ── POST brand-import ──────────────────────────────────────────────────
+    [HttpPost("brand-import")]
+    [RequestSizeLimit(MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadBytes)]
+    public async Task<IActionResult> StartBrandImport([FromForm] IFormFile? file, [FromForm] string? storeId, CancellationToken ct)
+    {
+        if (_services.GetService<IBrandPersistence>() is null)
+            return StatusCode(503, Env("Catalog connection is not configured on this host; brand import is unavailable."));
+
+        var tenantId = TenantId;
+        if (string.IsNullOrWhiteSpace(tenantId))
+            return BadRequest(Env("Dcms:Estore:TenantId is not configured."));
+
+        var user = _security.BackOfficeSecurity?.CurrentUser;
+        if (user is null) return Unauthorized(Env("Not authenticated."));
+
+        if (file is null || file.Length == 0)
+            return BadRequest(Env("File is required (.csv or .xlsx)."));
+
+        var jobId = Guid.NewGuid();
+        BulkJobFileStorage.EnsureJobDir(_env.ContentRootPath, tenantId, jobId);
+        var fullPath = BulkJobFileStorage.GetInputFilePath(_env.ContentRootPath, tenantId, jobId);
+        await using (var fs = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            await file.CopyToAsync(fs, ct).ConfigureAwait(false);
+
+        var rel = BulkJobFileStorage.GetInputRelativeKey(tenantId, jobId);
+        var now = DateTimeOffset.UtcNow;
+        await _repo.InsertAsync(new BulkJobRecord
+        {
+            Id = jobId,
+            TenantId = tenantId,
+            StoreId = string.IsNullOrWhiteSpace(storeId) ? null : storeId.Trim(),
+            JobKind = BulkJobKinds.BrandImport,
+            RequestedByUserId = user.Id,
+            Status = "queued",
+            ProgressProcessed = 0,
+            ProgressTotal = 0,
+            ProgressPercent = 0,
+            InputBlobRef = rel,
+            CreatedAt = now,
+        }, ct).ConfigureAwait(false);
+
+        BulkJobMetrics.Started.WithLabels(tenantId, BulkJobKinds.BrandImport).Inc();
+        var hf = BackgroundJob.Enqueue<BrandBulkJobRunner>(x => x.RunAsync(tenantId, jobId));
         await _repo.SetHangfireJobIdAsync(tenantId, jobId, hf, ct).ConfigureAwait(false);
 
         return Ok(new { data = new { jobId = jobId.ToString(), hangfireJobId = hf }, meta = (object?)null, error = (object?)null });
@@ -237,6 +286,12 @@ public sealed class DcmsBulkJobsController : ControllerBase
         else if (j.JobKind == BulkJobKinds.OrdersExport)
         {
             hf = BackgroundJob.Enqueue<OrdersBulkJobRunner>(x => x.RunAsync(tenantId, id));
+        }
+        else if (j.JobKind == BulkJobKinds.BrandImport)
+        {
+            if (_services.GetService<IBrandPersistence>() is null)
+                return StatusCode(503, Env("Catalog is not configured."));
+            hf = BackgroundJob.Enqueue<BrandBulkJobRunner>(x => x.RunAsync(tenantId, id));
         }
         else
             return BadRequest(Env("Unknown job kind."));

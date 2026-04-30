@@ -1,4 +1,5 @@
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Loyalty.Api.Migrations;
 using dCMS.Loyalty.Api.Persistence;
@@ -19,6 +20,8 @@ if (builder.Configuration.IsDcmsAuthEnabled())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
 else
     builder.Services.AddAuthorization();
+
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -60,6 +63,8 @@ if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
+
+app.UseDcmsImpersonationAudit();
 
 app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();

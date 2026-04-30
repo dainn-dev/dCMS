@@ -23,4 +23,10 @@ public static class DcmsPolicies
 
     /// <summary>DAI-631: manage order failures (support / store operations).</summary>
     public const string OrderFailureManage = "order:failure-manage";
+
+    /// <summary>DAI-752 (US-5) — only HQ ClientAdmin (or SuperAdmin) may invoke chain-wide endpoints.</summary>
+    public const string ClientAdminOnly = "identity:client-admin";
+
+    /// <summary>DAI-752 (US-5) — TenantAdmin (or above) within their tenant. ClientAdmin without an active impersonation is rejected.</summary>
+    public const string TenantAdminOrAbove = "identity:tenant-admin-or-above";
 }

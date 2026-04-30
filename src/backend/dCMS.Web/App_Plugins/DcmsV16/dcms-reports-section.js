@@ -13,7 +13,8 @@ function resolveUrl(path) {
 }
 
 /**
- * Reuses /umbraco/dcms/api/estore/context which returns { tenantId, storeId, authToken }.
+ * Reuses /umbraco/dcms/api/estore/context to resolve { tenantId, storeId, authToken }
+ * for the active backoffice user — same pattern as dcms-orders-section.
  * @returns {Promise<{ tenantId?: string, storeId?: string, authToken?: string }>}
  */
 async function fetchReportsContext() {
@@ -56,7 +57,6 @@ export default class DcmsReportsSectionElement extends UmbElementMixin(HTMLEleme
 
     try {
       const reportsContext = await fetchReportsContext();
-
       const cssUrl = resolveUrl(SPA_CSS);
       const cssRes = await fetch(cssUrl, { method: "GET", credentials: "same-origin" });
       if (!cssRes.ok) throw new Error(`GET ${cssUrl} -> ${cssRes.status} ${cssRes.statusText}`);

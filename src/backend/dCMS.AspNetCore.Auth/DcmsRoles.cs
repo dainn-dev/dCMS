@@ -7,7 +7,22 @@ public static class DcmsRoles
     public const string Customer = "Customer";
 
     public const string SuperAdmin = "SuperAdmin";
+
+    /// <summary>
+    /// DAI-752 (US-5) — chain-wide HQ admin. JWT carries <c>client_id</c> only, no <c>tenant_id</c>.
+    /// Read-only across all tenants under the client; must impersonate to perform writes.
+    /// </summary>
+    public const string ClientAdmin = "ClientAdmin";
+
+    /// <summary>
+    /// DAI-752 (US-5) — full write within a single tenant. JWT carries both <c>client_id</c>
+    /// and <c>tenant_id</c>. Successor to ChainAdmin for tenant-scoped administration.
+    /// </summary>
+    public const string TenantAdmin = "TenantAdmin";
+
+    /// <summary>Legacy tenant-wide admin role; kept for compatibility with pre-DAI-752 tokens.</summary>
     public const string ChainAdmin = "ChainAdmin";
+
     public const string BrandManager = "BrandManager";
     public const string StoreManager = "StoreManager";
     public const string StoreStaff = "StoreStaff";

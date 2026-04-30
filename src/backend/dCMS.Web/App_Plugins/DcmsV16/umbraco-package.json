@@ -739,6 +739,23 @@
           "match": "Umb.Section.Content"
         }
       ]
+    },
+    {
+      "type": "dashboard",
+      "alias": "Dcms.Dashboard.Hangfire",
+      "name": "Background Jobs",
+      "element": "/App_Plugins/DcmsV16/dcms-hangfire-dashboard.js",
+      "weight": 11,
+      "meta": {
+        "label": "Background Jobs",
+        "pathname": "dcms-hangfire"
+      },
+      "conditions": [
+        {
+          "alias": "Umb.Condition.SectionAlias",
+          "match": "Umb.Section.Content"
+        }
+      ]
     }
   ]
 }

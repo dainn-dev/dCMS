@@ -1,4 +1,5 @@
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Order.Api.Routes;
@@ -19,6 +20,8 @@ else
         o.AddPolicy(DcmsPolicies.OrderFailureManage, p => p.RequireAssertion(_ => true));
     });
 }
+
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
@@ -56,6 +59,8 @@ if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
+
+app.UseDcmsImpersonationAudit();
 
 app.UseMiddleware<IdempotencyMiddleware>();
 app.MapHealthChecks("/health");

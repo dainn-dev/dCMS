@@ -40,7 +40,9 @@ public sealed class DcmsBulkJobsComposer : IComposer
         if (!string.IsNullOrWhiteSpace(catalogCs))
         {
             builder.Services.TryAddSingleton<ICatalogPersistence>(_ => new SqlCatalogPersistence(catalogCs!));
+            builder.Services.TryAddSingleton<IBrandPersistence>(_ => new SqlBrandPersistence(catalogCs!));
             builder.Services.AddScoped<CatalogBulkJobRunner>();
+            builder.Services.AddScoped<BrandBulkJobRunner>();
         }
 
         builder.Services.AddScoped<IBulkJobRepository, SqlBulkJobRepository>();
@@ -56,6 +58,8 @@ public sealed class DcmsBulkJobsComposer : IComposer
                     {
                         Authorization = [new DcmsBackOfficeHangfireAuthorizationFilter()],
                         IgnoreAntiforgeryToken = true,
+                        // Hide the "Back to site" link — dashboard is embedded inside the Umbraco backoffice.
+                        AppPath = null,
                     }),
             });
         });

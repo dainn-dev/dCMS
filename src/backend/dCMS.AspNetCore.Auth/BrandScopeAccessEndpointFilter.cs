@@ -32,7 +32,9 @@ public sealed class BrandScopeAccessEndpointFilter : IEndpointFilter
         if (user.IsInRole(DcmsRoles.ChainAdmin))
             return await next(context); // ChainAdmin operates across all brands within tenant.
 
+#pragma warning disable CS0618 // Obsolete BrandIds — kept until US-5 (Users module) lands.
         var allowedBrands = DcmsScopeClaimParser.ParseCsvClaim(user.FindFirst(DcmsClaims.BrandIds)?.Value);
+#pragma warning restore CS0618
         if (allowedBrands.Count == 0 || !allowedBrands.Contains(brand!, StringComparer.Ordinal))
             return Forbid("FORBIDDEN", "Token does not grant access to the requested brand.");
 

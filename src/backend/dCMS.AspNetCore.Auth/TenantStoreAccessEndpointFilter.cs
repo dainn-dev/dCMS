@@ -30,7 +30,9 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
 
         var tid = user.FindFirst(DcmsClaims.TenantId)?.Value;
         var sid = user.FindFirst(DcmsClaims.StoreId)?.Value;
+#pragma warning disable CS0618 // Obsolete StoreIds — kept until US-5 (Users module) lands.
         var allowedStores = DcmsScopeClaimParser.ParseCsvClaim(user.FindFirst(DcmsClaims.StoreIds)?.Value);
+#pragma warning restore CS0618
         if (!string.Equals(tid, tenantRoute, StringComparison.Ordinal))
         {
             return Results.Json(

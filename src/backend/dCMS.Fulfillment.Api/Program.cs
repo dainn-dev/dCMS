@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Core.Persistence;
 using dCMS.Fulfillment.Api;
 using dCMS.Fulfillment.Api.Migrations;
@@ -43,6 +44,7 @@ builder.Services.AddMassTransit(bus =>
 });
 
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
@@ -129,6 +131,7 @@ app.UseForwardedHeaders();
 app.UseCors("api");
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
+app.UseDcmsImpersonationAudit();
 app.UseMiddleware<AuditMiddleware>();
 app.UseRateLimiter();
 

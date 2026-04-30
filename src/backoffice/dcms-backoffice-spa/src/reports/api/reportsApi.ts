@@ -41,6 +41,15 @@ export type ReportFilters = {
   memberQuery?: string;
   paymentMethod?: string;
   slotId?: string;
+  receiptNumber?: string;
+  source?: string;
+  orderPromoCode?: string;
+  itemPromoCode?: string;
+  rebatesCode?: string;
+  paymentType?: string;
+  billingCountry?: string;
+  membershipType?: string;
+  membershipTier?: string;
 };
 
 function dateParams(filters: ReportFilters): URLSearchParams {
@@ -77,12 +86,22 @@ export async function fetchTransactionSummary(
 
 export type TransactionDetailRow = {
   orderId: string;
+  receiptNumber: string | null;
   date: string;
   member: string;
+  customerName: string | null;
+  customerEmail: string | null;
   store: string;
   status: string;
   amount: number;
+  taxAmount: number;
+  orderDiscount: number;
   currency: string;
+  orderPromoCode: string | null;
+  billingCountry: string | null;
+  campaigns: string[];
+  itemPromoCodes: string[];
+  paymentType: string;
 };
 
 export async function fetchTransactionDetails(
@@ -95,6 +114,10 @@ export async function fetchTransactionDetails(
   if (filters.memberQuery) params.set("memberQuery", filters.memberQuery);
   if (filters.brandCode && filters.brandCode !== "all") params.set("brandCode", filters.brandCode);
   if (filters.paymentMethod && filters.paymentMethod !== "all") params.set("paymentMethod", filters.paymentMethod);
+  if (filters.orderPromoCode) params.set("orderPromoCode", filters.orderPromoCode);
+  if (filters.itemPromoCode) params.set("itemPromoCode", filters.itemPromoCode);
+  if (filters.paymentType && filters.paymentType !== "all") params.set("paymentType", filters.paymentType);
+  if (filters.billingCountry && filters.billingCountry !== "all") params.set("billingCountry", filters.billingCountry);
   if (pagination?.cursor) params.set("cursor", pagination.cursor);
   if (pagination?.limit) params.set("limit", String(pagination.limit));
   const res = await fetch(`${ORDERS_BASE}/orders/reports/transactions/details?${params}`, {
@@ -104,6 +127,37 @@ export async function fetchTransactionDetails(
   await checkOk(res);
   const body: ApiEnvelope<TransactionDetailRow[], { nextCursor: string | null }> = await res.json();
   return { rows: body.data ?? [], nextCursor: body.meta?.nextCursor ?? null };
+}
+
+export type TransactionsOverviewRow = {
+  totalTransactions: number;
+  totalAmount: number;
+  totalTax: number;
+  totalDiscount: number;
+  uniqueCustomers: number;
+  averageOrderValue: number;
+  distinctMonths: number;
+  distinctDays: number;
+  topDayAmount: number | null;
+  topDayTransactions: number | null;
+  topDayDate: string | null;
+  averageMonthlyAmount: number;
+  averageDailyAmount: number;
+};
+
+export async function fetchTransactionsOverview(
+  tenantId: string,
+  filters: ReportFilters,
+  token?: string,
+): Promise<TransactionsOverviewRow | null> {
+  const params = dateParams(filters);
+  const res = await fetch(`${ORDERS_BASE}/orders/reports/transactions/overview?${params}`, {
+    credentials: "same-origin",
+    headers: headers(tenantId, filters.storeId, token),
+  });
+  await checkOk(res);
+  const body: ApiEnvelope<TransactionsOverviewRow> = await res.json();
+  return body.data ?? null;
 }
 
 export type EcommercePaymentRow = {

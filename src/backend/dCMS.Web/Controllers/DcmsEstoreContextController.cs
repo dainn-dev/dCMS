@@ -34,6 +34,13 @@ public sealed class DcmsEstoreContextController : ControllerBase
         var tenantId = estoreSection["TenantId"]?.Trim();
         var storeId  = estoreSection["StoreId"]?.Trim();
 
+        // DAI-748: every JWT carries a static client_id derived from Dcms:Client.Id.
+        // Missing config is a deployment misconfiguration → fail fast with a clear message.
+        var clientId = _configuration.GetSection("Dcms:Client")["Id"]?.Trim();
+        if (string.IsNullOrWhiteSpace(clientId))
+            throw new InvalidOperationException(
+                "Dcms:Client.Id is required. Set it in appsettings (e.g. \"Dcms\": { \"Client\": { \"Id\": \"aeon\" } }) — every dCMS deployment is bound to a single client.");
+
         // Mint a gateway service token when auth is configured.
         // Key must match Gateway's Auth:JwtSigningKey.
         var authSection  = _configuration.GetSection("Dcms:Auth");
@@ -48,11 +55,12 @@ public sealed class DcmsEstoreContextController : ControllerBase
         {
             authToken = MintServiceToken(
                 signingKey, issuer, audience, ttlSeconds,
-                tenantId, storeId);
+                clientId, tenantId, storeId);
         }
 
         return Ok(new
         {
+            clientId,
             tenantId  = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId,
             storeId   = string.IsNullOrWhiteSpace(storeId)  ? null : storeId,
             authToken,
@@ -61,7 +69,7 @@ public sealed class DcmsEstoreContextController : ControllerBase
 
     private static string MintServiceToken(
         string signingKey, string issuer, string audience, int ttlSeconds,
-        string? tenantId, string? storeId)
+        string clientId, string? tenantId, string? storeId)
     {
         var key         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -71,6 +79,7 @@ public sealed class DcmsEstoreContextController : ControllerBase
         {
             new(JwtRegisteredClaimNames.Sub,  "umbraco-backoffice"),
             new(JwtRegisteredClaimNames.Jti,  Guid.NewGuid().ToString()),
+            new(DcmsClaims.ClientId, clientId),
             // Grant all dCMS roles so the backoffice token passes every downstream policy
             // (CatalogRead/Write, InventoryRead/Write, OrderAccess, etc.)
             new(ClaimTypes.Role, "ChainAdmin"),
