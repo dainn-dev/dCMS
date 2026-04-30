@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using Microsoft.OpenApi.Models;
 using dCMS.Core.Pricing;
 using dCMS.Inventory.Api.Internal;
@@ -32,6 +33,7 @@ if (string.IsNullOrWhiteSpace(inventoryCs))
 builder.Services.AddSingleton<IInventoryStockPersistence>(_ => new SqlStockPersistence(inventoryCs));
 builder.Services.AddScoped<StockService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
@@ -156,6 +158,7 @@ app.UseForwardedHeaders();
 app.UseCors("api");
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
+app.UseDcmsImpersonationAudit();
 app.UseMiddleware<AuditMiddleware>();
 app.UseRateLimiter();
 app.UseMiddleware<IdempotencyMiddleware>();

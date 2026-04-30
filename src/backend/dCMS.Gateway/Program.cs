@@ -38,12 +38,64 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title   = "dCMS Gateway API",
         Version = "v1",
-        Description = "Aggregated OpenAPI spec — all backoffice and storefront routes proxied through dCMS.Gateway.",
+        Description = """
+            Aggregated OpenAPI spec for **dCMS** — a multi-tenant headless eCommerce platform.
+
+            All backoffice and storefront routes are proxied through `dCMS.Gateway` (YARP reverse proxy).
+            The gateway provides:
+
+            - **Authentication** — validates incoming JWT, mints short-lived internal tokens (`Auth:InternalTokenTtlSeconds`), forwards `tenant_id` + `roles` claims downstream.
+            - **Rate limiting** — fixed-window partitioned by `tenant_id` claim or remote IP (defaults: 500 req / 60 s).
+            - **CORS** — origins controlled by `Cors:AllowedOrigins`.
+            - **Health & metrics** — `GET /health`, `GET /metrics` (Prometheus).
+
+            ### Routing convention
+
+            | Audience    | Prefix                   | Description                                              |
+            |-------------|--------------------------|----------------------------------------------------------|
+            | Backoffice  | `/gateway/v1/{service}/` | Authenticated admin & operator routes.                   |
+            | Storefront  | `/storefront/v1/`        | Public + customer routes (catalog, orders).              |
+
+            ### Tenant scoping
+
+            Every request must include the tenant context. For backoffice callers this is the `tenant_id`
+            claim on the JWT; for service-to-service calls the `X-Tenant-Id` header is honored. Cross-tenant
+            access is rejected at the gateway.
+
+            ### Error envelope
+
+            All responses use the dCMS envelope shape:
+
+            ```json
+            { "data": <payload-or-null>, "meta": <metadata-or-null>, "error": <{code,message}-or-null> }
+            ```
+
+            Common error codes: `unauthorized`, `forbidden`, `validation_failed`, `not_found`,
+            `rate_limit_exceeded`, `internal_error`.
+            """,
+        Contact = new OpenApiContact
+        {
+            Name  = "dCMS Platform Team",
+            Email = "platform@dcms.local",
+        },
+        License = new OpenApiLicense { Name = "Proprietary — internal use only" },
     });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT",
-        Description = "dCMS JWT token.",
+        Description = """
+            dCMS JWT bearer token.
+
+            **Backoffice flow:** obtain via the Auth service after a backoffice login. The token carries
+            `tenant_id`, `user_id`, and `roles` claims; the gateway validates the signature, then mints a
+            short-lived **internal** JWT (`Auth:InternalTokenTtlSeconds`) it forwards to upstream services
+            on the `Authorization` header. Clients never see the internal token.
+
+            **Storefront flow:** for customer-facing endpoints, the token is issued after customer login
+            and carries `customer_id` plus the active `tenant_id` (selected store).
+
+            Send as: `Authorization: Bearer <token>`.
+            """,
     });
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
@@ -134,32 +186,60 @@ app.UseExceptionHandler(errApp => errApp.Run(async ctx =>
 app.MapGet("/health",
     () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))
     .AllowAnonymous()
-    .DisableRateLimiting();
+    .DisableRateLimiting()
+    .WithName("gateway-health")
+    .WithTags("gateway")
+    .WithSummary("Gateway liveness probe.")
+    .WithDescription("Returns `{ data: { status: \"ok\" } }` whenever the gateway process is alive. Does not validate upstream service health — use `/metrics` or per-service `/health` for deep checks.");
 
 // ── Swagger — aggregated specs + UI ──────────────────────────────────────────
 // GET /swagger                          → Swagger UI (multi-spec dropdown)
-// GET /swagger/backoffice/swagger.json  → merged backoffice spec (/gateway/v1/...)
+// GET /swagger/gateway/swagger.json     → gateway's own minimal spec (health/metrics + global info)
+// GET /swagger/backoffice/swagger.json  → merged backoffice spec  (/gateway/v1/...)
 // GET /swagger/storefront/swagger.json  → merged storefront spec (/storefront/v1/...)
+// Serve the gateway-only Swashbuckle doc explicitly so it doesn't shadow the aggregator routes below.
+app.MapGet("/swagger/gateway/swagger.json",
+    (Swashbuckle.AspNetCore.Swagger.ISwaggerProvider provider) =>
+    {
+        var doc = provider.GetSwagger("gateway");
+        using var sw = new StringWriter();
+        doc.SerializeAsV3(new Microsoft.OpenApi.Writers.OpenApiJsonWriter(sw));
+        return Results.Text(sw.ToString(), "application/json");
+    })
+    .AllowAnonymous().DisableRateLimiting()
+    .WithName("gateway-spec")
+    .WithDescription("Gateway-only OpenAPI 3 spec — describes /health, /metrics, and global security/info.");
+
 app.MapGet("/swagger/backoffice/swagger.json",
     async (GatewaySwaggerAggregator agg, CancellationToken ct) =>
         Results.Text(await agg.GetBackofficeSpecAsync(ct), "application/json"))
-    .AllowAnonymous().DisableRateLimiting();
+    .AllowAnonymous().DisableRateLimiting()
+    .WithName("backoffice-spec")
+    .WithDescription("Aggregated OpenAPI 3 spec covering every backoffice route exposed under /gateway/v1/.");
 
 app.MapGet("/swagger/storefront/swagger.json",
     async (GatewaySwaggerAggregator agg, CancellationToken ct) =>
         Results.Text(await agg.GetStorefrontSpecAsync(ct), "application/json"))
-    .AllowAnonymous().DisableRateLimiting();
+    .AllowAnonymous().DisableRateLimiting()
+    .WithName("storefront-spec")
+    .WithDescription("Aggregated OpenAPI 3 spec for public + customer routes under /storefront/v1/.");
 
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/backoffice/swagger.json",  "Backoffice API — all services");
-    c.SwaggerEndpoint("/swagger/storefront/swagger.json",  "Storefront API — public + customer");
-    c.RoutePrefix   = "swagger";
-    c.DocumentTitle = "dCMS Gateway — API Docs";
+    c.SwaggerEndpoint("/swagger/gateway/swagger.json",     "Gateway — overview, health, metrics");
+    c.SwaggerEndpoint("/swagger/backoffice/swagger.json",  "Backoffice API — all services (/gateway/v1)");
+    c.SwaggerEndpoint("/swagger/storefront/swagger.json",  "Storefront API — public + customer (/storefront/v1)");
+    c.RoutePrefix          = "swagger";
+    c.DocumentTitle        = "dCMS Gateway — API Docs";
+    c.HeadContent          = "<style>.swagger-ui .topbar { background-color: #1f2937; }</style>";
     c.DisplayRequestDuration();
     c.EnableFilter();
+    c.EnableDeepLinking();
+    c.EnableTryItOutByDefault();
     c.DefaultModelsExpandDepth(-1);
+    c.DefaultModelExpandDepth(2);
     c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
+    c.SupportedSubmitMethods(SubmitMethod.Get, SubmitMethod.Post, SubmitMethod.Put, SubmitMethod.Patch, SubmitMethod.Delete);
 });
 
 // ── Prometheus metrics ────────────────────────────────────────────────────────

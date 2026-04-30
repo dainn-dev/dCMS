@@ -52,6 +52,10 @@ public interface ICatalogPersistence
     Task<CatalogCategoryRow?> GetCategoryByIdAsync(int id, string tenantId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Lookup category by tenant + slug. Used by bulk import to resolve parent by Code.</summary>
+    Task<CatalogCategoryRow?> GetCategoryBySlugAsync(string tenantId, string slug,
+        CancellationToken cancellationToken = default);
+
     /// <summary>True if a category in this tenant already uses <paramref name="slug"/> (excludes <paramref name="excludeId"/>).</summary>
     Task<bool> CategorySlugExistsAsync(string tenantId, string slug, int? excludeId,
         CancellationToken cancellationToken = default);

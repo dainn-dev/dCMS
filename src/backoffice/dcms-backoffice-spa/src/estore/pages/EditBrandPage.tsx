@@ -328,17 +328,24 @@ export function EditBrandPage({
   const [mobileImageSrc, setMobileImageSrc] = useState("");
   const actionsRef = useRef<HTMLDivElement>(null);
 
-  // Additional-info field values (keyed by field.id)
-  const [additionalValues, setAdditionalValues] = useState<Record<string, string | string[]>>(() =>
+  // Additional-info field values (keyed by field.id).
+  // WYSIWYG fields store a per-locale HTML map (Record<string,string>) so they
+  // round-trip through the same shape as MultiLangLexicalRichText emits.
+  type AdditionalValue = string | string[] | Record<string, string>;
+  const [additionalValues, setAdditionalValues] = useState<Record<string, AdditionalValue>>(() =>
     Object.fromEntries(
       additionalFields.map((f) => [
         f.id,
-        f.controlType === "Multiple Select" ? [] : "",
+        f.controlType === "Multiple Select"
+          ? []
+          : f.controlType === "WYSIWYG (Text Area)"
+          ? ({} as Record<string, string>)
+          : "",
       ])
     )
   );
 
-  function setAdditionalValue(id: string, val: string | string[]) {
+  function setAdditionalValue(id: string, val: AdditionalValue) {
     setAdditionalValues((prev) => ({ ...prev, [id]: val }));
   }
 
@@ -416,7 +423,13 @@ export function EditBrandPage({
     try {
       const cleaned: Record<string, unknown> = {};
       for (const [id, val] of Object.entries(additionalValues)) {
-        const isEmpty = val === "" || (Array.isArray(val) && val.length === 0);
+        const isEmpty =
+          val === "" ||
+          (Array.isArray(val) && val.length === 0) ||
+          (typeof val === "object" &&
+            val !== null &&
+            !Array.isArray(val) &&
+            Object.values(val as Record<string, string>).every((v) => !v?.trim()));
         if (!isEmpty) cleaned[id] = val;
       }
       additionalInfoStr = JSON.stringify(cleaned);
@@ -1184,6 +1197,8 @@ const SECTION_ORDER = [
   "SEO Configuration",
 ] as const;
 
+type OtherTabValue = string | string[] | Record<string, string>;
+
 function OtherTab({
   fields,
   values,
@@ -1192,8 +1207,8 @@ function OtherTab({
   onSave,
 }: {
   fields: BrandAdditionalField[];
-  values: Record<string, string | string[]>;
-  onChange: (id: string, val: string | string[]) => void;
+  values: Record<string, OtherTabValue>;
+  onChange: (id: string, val: OtherTabValue) => void;
   isAdd: boolean;
   onSave: () => void;
 }) {
@@ -1247,14 +1262,22 @@ function OtherTab({
               {section}
             </h4>
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              {rows.map((field) => (
-                <AdditionalFieldInput
-                  key={field.id}
-                  field={field}
-                  value={values[field.id] ?? (field.controlType === "Multiple Select" ? [] : "")}
-                  onChange={(val) => onChange(field.id, val)}
-                />
-              ))}
+              {rows.map((field) => {
+                const fallback: OtherTabValue =
+                  field.controlType === "Multiple Select"
+                    ? []
+                    : field.controlType === "WYSIWYG (Text Area)"
+                    ? ({} as Record<string, string>)
+                    : "";
+                return (
+                  <AdditionalFieldInput
+                    key={field.id}
+                    field={field}
+                    value={values[field.id] ?? fallback}
+                    onChange={(val) => onChange(field.id, val)}
+                  />
+                );
+              })}
             </div>
           </div>
         ))}
@@ -1296,11 +1319,15 @@ function AdditionalFieldInput({
   onChange,
 }: {
   field: BrandAdditionalField;
-  value: string | string[];
-  onChange: (val: string | string[]) => void;
+  value: string | string[] | Record<string, string>;
+  onChange: (val: string | string[] | Record<string, string>) => void;
 }) {
   const strVal = typeof value === "string" ? value : "";
   const arrVal = Array.isArray(value) ? value : [];
+  const mapVal =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, string>)
+      : {};
   const requiredMark = field.required ? (
     <span className="text-error ml-0.5">*</span>
   ) : null;
@@ -1321,12 +1348,16 @@ function AdditionalFieldInput({
 
       case "WYSIWYG (Text Area)":
         return (
-          <textarea
-            className={`${inputBase2} resize-y min-h-[96px]`}
-            value={strVal}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={field.columnLabel}
-            required={field.required}
+          <MultiLangLexicalRichText
+            label=""
+            defaultValues={mapVal}
+            onValuesChange={(next) => onChange(next)}
+            placeholders={{
+              en: field.columnLabel,
+              vn: field.columnLabel,
+              zh: field.columnLabel,
+              ja: field.columnLabel,
+            }}
           />
         );
 
@@ -1416,9 +1447,12 @@ function AdditionalFieldInput({
         </label>
       )}
       {renderControl()}
-      {field.required && strVal === "" && arrVal.length === 0 && (
-        <p className="text-[10px] text-error">Required field</p>
-      )}
+      {field.required &&
+        strVal === "" &&
+        arrVal.length === 0 &&
+        Object.values(mapVal).every((v) => !v?.trim()) && (
+          <p className="text-[10px] text-error">Required field</p>
+        )}
     </div>
   );
 }

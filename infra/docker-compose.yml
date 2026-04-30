@@ -275,6 +275,34 @@ services:
       rabbitmq:
         condition: service_started
 
+  identity-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.identity-api
+    ports:
+      - "5180:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Identity: "Host=postgres;Port=5432;Database=dcms_identity;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Redis: "redis:6379"
+      Dcms__Client__Id: "${DCMS_CLIENT_ID:-aeon}"
+      Auth__Enabled: "true"
+      Auth__JwtSigningKey: "${JWT_SIGNING_KEY:-dcms-local-dev-signing-key-min-32-chars!!}"
+      Auth__Issuer: "dcms-gateway"
+      Auth__Audience: "dcms-services"
+      Cors__AllowedOrigins__0: "http://localhost:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   loyalty-api:
     build:
       context: ..
@@ -335,6 +363,7 @@ services:
       ReverseProxy__Clusters__approvals-cluster__Destinations__default__Address: "http://approval-api:8080"
       ReverseProxy__Clusters__vouchers-cluster__Destinations__default__Address: "http://voucher-api:8080"
       ReverseProxy__Clusters__loyalty-cluster__Destinations__default__Address: "http://loyalty-api:8080"
+      ReverseProxy__Clusters__identity-cluster__Destinations__default__Address: "http://identity-api:8080"
     depends_on:
       catalog-api:
         condition: service_healthy
@@ -355,6 +384,8 @@ services:
       voucher-api:
         condition: service_healthy
       loyalty-api:
+        condition: service_healthy
+      identity-api:
         condition: service_healthy
 
   catalog-api:

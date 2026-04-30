@@ -14,6 +14,7 @@ export type CategoryPayload = {
   slug: string;
   parentId?: number | null;
   sortOrder?: number;
+  code?: string;
   active?: boolean;
   publishFrom?: string | null;   // ISO datetime string
   publishUntil?: string | null;  // ISO datetime string
@@ -47,6 +48,7 @@ type CategoryDto = {
   name: string;
   slug: string;
   sortOrder: number;
+  code: string;
   active: boolean;
   publishFrom: string | null;
   publishUntil: string | null;

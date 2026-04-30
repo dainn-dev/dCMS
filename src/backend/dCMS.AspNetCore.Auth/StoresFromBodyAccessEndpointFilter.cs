@@ -35,7 +35,9 @@ public sealed class StoresFromBodyAccessEndpointFilter : IEndpointFilter
         if (string.IsNullOrWhiteSpace(tid))
             return Forbid("FORBIDDEN", "Token is missing tenant_id claim.");
 
+#pragma warning disable CS0618 // Obsolete StoreIds — kept until US-5 (Users module) lands.
         var allowedStores = DcmsScopeClaimParser.ParseCsvClaim(user.FindFirst(DcmsClaims.StoreIds)?.Value);
+#pragma warning restore CS0618
 
         // ChainAdmin / BrandManager: allowed across all stores within tenant unless their token narrows scope.
         if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager))

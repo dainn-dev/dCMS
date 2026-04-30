@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using dCMS.Catalog.Api;
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Catalog.Api.Attributes;
 using dCMS.Catalog.Api.Brands;
 using dCMS.Catalog.Api.Categories;
@@ -95,8 +96,11 @@ builder.Services.AddScoped<IProductNotificationSink, ProductNotificationSink>();
 builder.Services.Configure<InternalCatalogOptions>(
     builder.Configuration.GetSection(InternalCatalogOptions.SectionName));
 builder.Services.AddSingleton<IBrandPersistence>(_ => new SqlBrandPersistence(catalogCs));
+builder.Services.AddSingleton<IBranchPersistence>(_ => new SqlBranchPersistence(catalogCs));
+builder.Services.AddSingleton<IStorefrontTenantValidator, BranchPersistenceTenantValidator>();
 builder.Services.AddScoped<ProductService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
     sp.GetRequiredService<IConfiguration>(),
@@ -134,6 +138,18 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true
             }));
+    // DAI-750 / US-3: storefront branch endpoints — anonymous, IP-keyed, 60 req/min.
+    options.AddPolicy("PublicStorefrontBranches", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
 });
 
 var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -142,7 +158,10 @@ builder.Services.AddCors(o => o.AddPolicy("api", p =>
     if (origins.Length == 0)
         p.SetIsOriginAllowed(_ => false);
     else
-        p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
+        p.WithOrigins(origins)
+         .AllowAnyHeader()
+         .WithExposedHeaders("Vary")
+         .AllowAnyMethod();
 }));
 
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -200,8 +219,10 @@ app.UseForwardedHeaders();
 app.UseCors("api");
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
+app.UseDcmsImpersonationAudit();
 app.UseMiddleware<AuditMiddleware>();
 app.UseRateLimiter();
+app.UseDcmsStorefrontTenantBinder();
 app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapBrandRoutes(builder.Configuration);
@@ -214,6 +235,7 @@ app.MapImportJobRoutes(builder.Configuration);
 app.MapCategoryRoutes(builder.Configuration);
 app.MapVariantAxesRoutes(builder.Configuration);
 app.MapPublicProductRoutes();
+app.MapStorefrontBranchRoutes(builder.Configuration);
 app.MapInternalCatalogRoutes(catalogCs);
 
 app.MapGet("/health", () => Results.Json(new { data = new { status = "ok" }, meta = (object?)null, error = (object?)null }))

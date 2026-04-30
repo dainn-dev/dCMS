@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Core.Persistence;
 using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Catalog;
@@ -53,6 +54,7 @@ builder.Services.AddSingleton<IPromotionEvaluator, PromotionEvaluator>();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 var redisCs = builder.Configuration.GetConnectionString("Redis");
@@ -164,6 +166,7 @@ app.UseForwardedHeaders();
 app.UseCors("api");
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
+app.UseDcmsImpersonationAudit();
 app.UseMiddleware<AuditMiddleware>();
 app.UseRateLimiter();
 

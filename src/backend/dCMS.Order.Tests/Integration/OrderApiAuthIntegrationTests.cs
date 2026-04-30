@@ -263,8 +263,10 @@ public sealed class OrderApiAuthIntegrationTests(OrderApiAuthFixture fx)
             new(ClaimTypes.Role, role),
         };
 
+#pragma warning disable CS0618 // Obsolete StoreIds — kept until US-5 (Users module) lands.
         if (storeIds is { Count: > 0 })
             claims.Add(new Claim(DcmsClaims.StoreIds, string.Join(",", storeIds)));
+#pragma warning restore CS0618
 
         var token = new JwtSecurityToken(
             issuer: "dcms",

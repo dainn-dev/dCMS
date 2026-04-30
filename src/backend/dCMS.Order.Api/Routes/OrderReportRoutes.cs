@@ -20,6 +20,12 @@ public static class OrderReportRoutes
             .RequireAuthorization(DcmsPolicies.OrderAccess)
             .WithTenantStoreHeaderAccess(app.Configuration);
 
+        app.MapGet("/api/orders/reports/transactions/overview", GetTransactionsOverview)
+            .WithName("GetTransactionsOverview")
+            .WithTags("reports")
+            .RequireAuthorization(DcmsPolicies.OrderAccess)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
         app.MapGet("/api/orders/reports/transactions/details", GetTransactionDetails)
             .WithName("GetTransactionDetails")
             .WithTags("reports")
@@ -92,6 +98,22 @@ public static class OrderReportRoutes
         return EnvelopeOk(rows);
     }
 
+    private static async Task<IResult> GetTransactionsOverview(
+        HttpContext http,
+        [FromServices] OrderReportQueryStore reports,
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        CancellationToken ct)
+    {
+        if (!TryGetTenantStore(http, out var tenantId, out var storeId))
+            return EnvelopeError(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (!TryParseDateRange(dateFrom, dateTo, out var df, out var dt))
+            return EnvelopeError(400, "INVALID_DATE_RANGE", "dateFrom and dateTo query params are required (yyyy-MM-dd).");
+
+        var row = await reports.GetTransactionsOverviewAsync(tenantId, storeId, df, dt, ct).ConfigureAwait(false);
+        return EnvelopeOk(row);
+    }
+
     private static async Task<IResult> GetTransactionDetails(
         HttpContext http,
         [FromServices] OrderReportQueryStore reports,
@@ -100,6 +122,15 @@ public static class OrderReportRoutes
         [FromQuery] string? memberQuery,
         [FromQuery] string? brandCode,
         [FromQuery] string? paymentMethod,
+        [FromQuery] string? receiptNumber,
+        [FromQuery] string? source,
+        [FromQuery] string? orderPromoCode,
+        [FromQuery] string? itemPromoCode,
+        [FromQuery] string? rebatesCode,
+        [FromQuery] string? paymentType,
+        [FromQuery] string? billingCountry,
+        [FromQuery] string? membershipType,
+        [FromQuery] string? membershipTier,
         [FromQuery] string? cursor,
         [FromQuery] int? limit,
         CancellationToken ct)
@@ -109,8 +140,29 @@ public static class OrderReportRoutes
         if (!TryParseDateRange(dateFrom, dateTo, out var df, out var dt))
             return EnvelopeError(400, "INVALID_DATE_RANGE", "dateFrom and dateTo query params are required (yyyy-MM-dd).");
 
+        // PR1: filters whose backing columns/services land in PR2/PR3 reject explicitly rather than silently drop.
+        if (!string.IsNullOrWhiteSpace(receiptNumber))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "receiptNumber filter is available after PR2 (receipt sequence rollout).");
+        if (!string.IsNullOrWhiteSpace(source))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "source filter is available after PR2 (storefront telemetry rollout).");
+        if (!string.IsNullOrWhiteSpace(rebatesCode))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "rebatesCode filter is reserved; rebate domain not yet implemented.");
+        if (!string.IsNullOrWhiteSpace(membershipType))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "membershipType filter is available after PR3 (Loyalty Membership domain rollout).");
+        if (!string.IsNullOrWhiteSpace(membershipTier))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "membershipTier filter is available after PR3 (Loyalty Membership domain rollout).");
+
+        var filter = new TransactionDetailFilter(
+            MemberQuery: memberQuery,
+            BrandCode: brandCode,
+            PaymentMethod: paymentMethod,
+            OrderPromoCode: orderPromoCode,
+            ItemPromoCode: itemPromoCode,
+            BillingCountry: billingCountry,
+            PaymentType: paymentType);
+
         var lim = limit.HasValue ? Math.Clamp(limit.Value, 1, 100) : 50;
-        var page = await reports.GetTransactionDetailsAsync(tenantId, storeId, df, dt, memberQuery, brandCode, paymentMethod, cursor, lim, ct)
+        var page = await reports.GetTransactionDetailsAsync(tenantId, storeId, df, dt, filter, cursor, lim, ct)
             .ConfigureAwait(false);
         return EnvelopeOk(page.Items, new { nextCursor = page.NextCursor });
     }

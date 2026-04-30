@@ -84,7 +84,6 @@ function CategoryNameField({
       label="Category Name (Multi-language)"
       defaultValues={{
         en: isAddMode ? "" : defaultEnValue,
-        zh: isAddMode ? "" : "@12% 折扣",
       }}
       placeholders={{ en: "e.g. Men, Women, Kids", vn: "Tên danh mục", zh: "中文名称", ja: "カテゴリ名" }}
     />
@@ -812,6 +811,57 @@ export function CategoriesPage({
 
   const editNodeName =
     mode.kind === "edit" ? (findNodeName(treeData, mode.nodeId) ?? "Category") : "";
+
+  type CategoryDtoShape = {
+    code?: string;
+    active?: boolean;
+    publishFrom?: string | null;
+    publishUntil?: string | null;
+    imageMenuUrl?: string;
+    imagePageUrl?: string;
+    imageThumbUrl?: string;
+    showInNav?: boolean;
+    showInBrands?: boolean;
+    customNavUrl?: string;
+    navSortPriority?: number;
+    breakNavColumn?: boolean;
+    defaultSort?: string;
+    noRecommendations?: boolean;
+    metaTitleJson?: string;
+    metaKeywordsJson?: string;
+    metaDescJson?: string;
+    restrictAccess?: boolean;
+    accessApp?: string;
+    accessMemberType?: string;
+    accessMemberTier?: string;
+  };
+  const editDto: CategoryDtoShape | null = useMemo(() => {
+    if (mode.kind !== "edit") return null;
+    const ref = findNodeRef(treeData, mode.nodeId);
+    return (ref as unknown as { _dto?: CategoryDtoShape } | null)?._dto ?? null;
+  }, [mode, treeData]);
+
+  function parseLocaleJson(raw: string | undefined): Record<string, string> {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+    } catch { return {}; }
+  }
+  const metaTitleMap = useMemo(() => parseLocaleJson(editDto?.metaTitleJson), [editDto]);
+  const metaKeywordsMap = useMemo(() => parseLocaleJson(editDto?.metaKeywordsJson), [editDto]);
+  const metaDescMap = useMemo(() => parseLocaleJson(editDto?.metaDescJson), [editDto]);
+
+  const editNodeCode = editDto?.code ?? "";
+
+  function toLocalDateTime(iso: string | null | undefined): string {
+    if (!iso) return "";
+    // <input type="datetime-local"> expects YYYY-MM-DDTHH:mm without timezone
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
   const addParentName =
     isAddMode && mode.parentId ? findNodeName(treeData, mode.parentId) : null;
 
@@ -827,9 +877,11 @@ export function CategoriesPage({
       : `add-${mode.parentId ?? "root"}`;
 
   useEffect(() => {
-    setImgMenuSrc("");
-    setImgThumbSrc("");
-    setImgCategoryPageSrc(isAddMode ? "" : DEFAULT_EDIT_CATEGORY_PAGE_IMG);
+    setImgMenuSrc(isAddMode ? "" : (editDto?.imageMenuUrl ?? ""));
+    setImgThumbSrc(isAddMode ? "" : (editDto?.imageThumbUrl ?? ""));
+    setImgCategoryPageSrc(isAddMode ? "" : (editDto?.imagePageUrl ?? DEFAULT_EDIT_CATEGORY_PAGE_IMG));
+    setRestrictAccess(isAddMode ? false : (editDto?.restrictAccess ?? false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formKey, isAddMode]);
 
   useEffect(() => {
@@ -1131,7 +1183,7 @@ export function CategoriesPage({
                       <span className="text-xs font-medium text-on-surface-variant">Active:</span>
                       <input
                         type="checkbox"
-                        defaultChecked
+                        defaultChecked={isAddMode ? true : (editDto?.active ?? true)}
                         className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary/20"
                       />
                       <span className="text-xs font-semibold text-primary">Yes</span>
@@ -1170,7 +1222,7 @@ export function CategoriesPage({
                       <label className={labelBase}>Internal Identifier</label>
                       <input
                         className={`${inputBase} ${isAddMode ? "bg-surface-container text-on-surface-variant" : ""}`}
-                        defaultValue={isAddMode ? "" : "CAT-2023-REBATE-12"}
+                        defaultValue={isAddMode ? "" : editNodeCode}
                         placeholder={isAddMode ? "Auto-generated on save" : ""}
                         readOnly={isAddMode}
                       />
@@ -1227,7 +1279,7 @@ export function CategoriesPage({
                       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                         <input
                           type="checkbox"
-                          defaultChecked
+                          defaultChecked={isAddMode ? true : (editDto?.showInNav ?? true)}
                           className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                         />
                         <div>
@@ -1240,6 +1292,7 @@ export function CategoriesPage({
                       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                         <input
                           type="checkbox"
+                          defaultChecked={isAddMode ? false : (editDto?.showInBrands ?? false)}
                           className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                         />
                         <div>
@@ -1266,7 +1319,7 @@ export function CategoriesPage({
                         <input
                           type="datetime-local"
                           className={inputBase}
-                          defaultValue=""
+                          defaultValue={isAddMode ? "" : toLocalDateTime(editDto?.publishFrom)}
                         />
                         <p className="text-[10px] text-on-surface-variant">
                           Date &amp; time the category starts appearing on eStore.
@@ -1282,7 +1335,7 @@ export function CategoriesPage({
                         <input
                           type="datetime-local"
                           className={inputBase}
-                          defaultValue=""
+                          defaultValue={isAddMode ? "" : toLocalDateTime(editDto?.publishUntil)}
                         />
                         <p className="text-[10px] text-on-surface-variant">
                           Date &amp; time the category is removed from eStore. Leave blank for no expiry.
@@ -1300,7 +1353,7 @@ export function CategoriesPage({
                         <input
                           type="number"
                           className={`${inputBase} w-36`}
-                          defaultValue={10}
+                          defaultValue={isAddMode ? 10 : (editDto?.navSortPriority ?? 10)}
                           min={1}
                         />
                         <p className="text-[10px] text-on-surface-variant">
@@ -1312,7 +1365,7 @@ export function CategoriesPage({
                         <input
                           className={inputBase}
                           placeholder="/category/custom-path"
-                          defaultValue={isAddMode ? "" : ""}
+                          defaultValue={isAddMode ? "" : (editDto?.customNavUrl ?? "")}
                         />
                         <p className="text-[10px] text-on-surface-variant">
                           Override the default URL for this category in the navigation menu.
@@ -1322,6 +1375,7 @@ export function CategoriesPage({
                     <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                       <input
                         type="checkbox"
+                        defaultChecked={isAddMode ? false : (editDto?.breakNavColumn ?? false)}
                         className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                       />
                       <div>
@@ -1344,6 +1398,7 @@ export function CategoriesPage({
                     <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                       <input
                         type="checkbox"
+                        defaultChecked={isAddMode ? false : (editDto?.noRecommendations ?? false)}
                         className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                       />
                       <div>
@@ -1386,7 +1441,7 @@ export function CategoriesPage({
                     <h3 className={sectionHeading}>Default Sort Order</h3>
                     <div className="max-w-xs space-y-2">
                       <label className={labelBase}>Default Sort Option</label>
-                      <select className={inputBase} defaultValue="bestseller">
+                      <select className={inputBase} defaultValue={isAddMode ? "bestseller" : (editDto?.defaultSort || "bestseller")}>
                         <option value="latest">Latest</option>
                         <option value="price-asc">Price (Low – High)</option>
                         <option value="price-desc">Price (High – Low)</option>
@@ -1427,7 +1482,10 @@ export function CategoriesPage({
                     <MultiLangInput
                       label="Meta Title"
                       defaultValues={{
-                        en: isAddMode ? "" : "Shop @12%rebate Category Online | Exclusive Deals",
+                        en: isAddMode ? "" : (metaTitleMap.en ?? ""),
+                        vn: isAddMode ? "" : (metaTitleMap.vn ?? metaTitleMap.vi ?? ""),
+                        zh: isAddMode ? "" : (metaTitleMap.zh ?? ""),
+                        ja: isAddMode ? "" : (metaTitleMap.ja ?? ""),
                       }}
                       placeholders={{
                         en: isAddMode ? "e.g. Shop Electronics Online | Best Deals" : "",
@@ -1440,7 +1498,10 @@ export function CategoriesPage({
                     <MultiLangInput
                       label="Meta Keywords"
                       defaultValues={{
-                        en: isAddMode ? "" : "rebate, deals, cashback, enterprise savings",
+                        en: isAddMode ? "" : (metaKeywordsMap.en ?? ""),
+                        vn: isAddMode ? "" : (metaKeywordsMap.vn ?? metaKeywordsMap.vi ?? ""),
+                        zh: isAddMode ? "" : (metaKeywordsMap.zh ?? ""),
+                        ja: isAddMode ? "" : (metaKeywordsMap.ja ?? ""),
                       }}
                       placeholders={{
                         en: "Comma-separated keywords, e.g. electronics, gadgets, tech",
@@ -1454,9 +1515,10 @@ export function CategoriesPage({
                       label="Meta Description"
                       rows={3}
                       defaultValues={{
-                        en: isAddMode
-                          ? ""
-                          : "Discover huge savings in our rebate category. Browse high-quality items with guaranteed 12% cash back for enterprise members.",
+                        en: isAddMode ? "" : (metaDescMap.en ?? ""),
+                        vn: isAddMode ? "" : (metaDescMap.vn ?? metaDescMap.vi ?? ""),
+                        zh: isAddMode ? "" : (metaDescMap.zh ?? ""),
+                        ja: isAddMode ? "" : (metaDescMap.ja ?? ""),
                       }}
                       placeholders={{
                         en: isAddMode ? "Describe this category for search engines..." : "",
@@ -1477,17 +1539,17 @@ export function CategoriesPage({
                       <p className="truncate text-sm font-medium text-blue-700">
                         {isAddMode
                           ? "Category Title | Your Store Name"
-                          : "Shop @12%rebate Category Online | Exclusive Deals"}
+                          : (metaTitleMap.en || `${editNodeName} | Your Store`)}
                       </p>
                       <p className="truncate text-xs text-green-700">
                         {isAddMode
                           ? "https://example.com/category/new-category"
-                          : "https://example.com/category/@12-percent-rebate"}
+                          : `https://example.com/category/${(findNodeRef(treeData, mode.kind === "edit" ? mode.nodeId : "")?.name ?? editNodeName).toLowerCase().replace(/\s+/g, "-")}`}
                       </p>
                       <p className="text-xs leading-tight text-on-surface-variant">
                         {isAddMode
                           ? "Your meta description will appear here once filled in above."
-                          : "Discover huge savings in our rebate category. Browse high-quality items with guaranteed 12% cash back for enterprise members."}
+                          : (metaDescMap.en || "Your meta description will appear here once filled in above.")}
                       </p>
                     </div>
                   </div>
@@ -1515,7 +1577,7 @@ export function CategoriesPage({
                       <div className="grid grid-cols-1 gap-5 rounded-lg border border-primary/15 bg-primary/5 p-5 md:grid-cols-3">
                         <div className="space-y-2">
                           <label className={labelBase}>Application</label>
-                          <select className={inputBase} defaultValue="">
+                          <select className={inputBase} defaultValue={isAddMode ? "" : (editDto?.accessApp ?? "")}>
                             <option value="">All Applications</option>
                             <option value="website">Website</option>
                             <option value="mobile">Mobile App</option>
@@ -1526,7 +1588,7 @@ export function CategoriesPage({
                         </div>
                         <div className="space-y-2">
                           <label className={labelBase}>Member Type</label>
-                          <select className={inputBase} defaultValue="">
+                          <select className={inputBase} defaultValue={isAddMode ? "" : (editDto?.accessMemberType ?? "")}>
                             <option value="">All Member Types</option>
                             <option value="retail">Retail</option>
                             <option value="wholesale">Wholesale</option>
@@ -1538,7 +1600,7 @@ export function CategoriesPage({
                         </div>
                         <div className="space-y-2">
                           <label className={labelBase}>Member Tier</label>
-                          <select className={inputBase} defaultValue="">
+                          <select className={inputBase} defaultValue={isAddMode ? "" : (editDto?.accessMemberTier ?? "")}>
                             <option value="">All Tiers</option>
                             <option value="bronze">Bronze</option>
                             <option value="silver">Silver</option>

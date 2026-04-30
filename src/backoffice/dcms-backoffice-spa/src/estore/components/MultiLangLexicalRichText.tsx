@@ -17,6 +17,7 @@ import {
 type Props = {
   label: string;
   defaultValues?: Record<string, string>;
+  onValuesChange?: (values: Record<string, string>) => void;
   placeholders?: Record<string, string>;
   hint?: string;
   autoFocus?: boolean;
@@ -185,13 +186,14 @@ function NativeRichText({
 export function MultiLangLexicalRichText({
   label,
   defaultValues,
+  onValuesChange,
   placeholders,
   hint,
   autoFocus = false,
   className = "",
 }: Props) {
   const { languages, resolvedIso, setActiveIso, values, currentValue, setValue } =
-    useLangField(defaultValues);
+    useLangField(defaultValues, onValuesChange);
 
   const placeholder =
     placeholders?.[langKey(resolvedIso)] ?? placeholders?.[resolvedIso] ?? "";
