@@ -1,6 +1,5 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import {
-  IconAccountTree,
   IconChevronDown,
   IconChevronUp,
   IconDelete,
@@ -135,14 +134,6 @@ export function createBrandColumns(
             onClick={() => onEditBrand?.(row.original)}
           >
             <IconEdit className="text-lg" />
-          </button>
-          <button
-            type="button"
-            className="p-1.5 hover:bg-surface-variant rounded transition-colors text-on-surface-variant hover:text-primary"
-            aria-label="Brand hierarchy"
-            onClick={() => console.info("[Brands] Tree", row.original.code)}
-          >
-            <IconAccountTree className="h-4 w-4" />
           </button>
           <button
             type="button"

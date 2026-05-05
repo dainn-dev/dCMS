@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { BrandListRow } from "../brands-columns";
 import type {
   BrandAdditionalField,
@@ -12,9 +12,12 @@ import {
   IconCalendarToday,
   IconCheckCircle,
   IconChevronDown,
+  IconChevronRight,
   IconClose,
   IconDelete,
   IconFactCheck,
+  IconFolder,
+  IconFolderOpen,
   IconGroup,
   IconHistory,
   IconImage,
@@ -25,7 +28,10 @@ import {
   IconMoreHoriz,
   IconSave,
   IconSearch,
+  IconTag,
   IconTune,
+  IconUnfoldLess,
+  IconUnfoldMore,
   IconVisibility,
 } from "../../orders/icons";
 
@@ -61,125 +67,195 @@ type Props = {
   onSave?: (row: BrandListRow, additionalInfo: string) => void;
 };
 
-// ── Mock category list (mirrors CategoriesPage INITIAL_TREE) ─────────────
-const MOCK_CATEGORIES = [
-  "@12%rebate",
-  "Sub-category A",
-  "Sub-category B",
-  "1-12-REBATE",
-  "Anniversary",
-  "CGCategory",
-  "Electronics",
-  "Furniture",
+// ── Mock categories (tree, mirrors CategoriesPage hierarchy style) ─────────
+type CategoryTreeNode = { id: string; name: string; children?: CategoryTreeNode[] };
+
+const MOCK_CATEGORY_TREE: CategoryTreeNode[] = [
+  {
+    id: "c1",
+    name: "@12%rebate",
+    children: [
+      { id: "c1a", name: "Sub-category A" },
+      { id: "c1b", name: "Sub-category B" },
+    ],
+  },
+  { id: "c2", name: "1-12-REBATE" },
+  { id: "c3", name: "Anniversary" },
+  { id: "c4", name: "CGCategory" },
+  {
+    id: "c5",
+    name: "Electronics",
+    children: [
+      { id: "c5a", name: "Phones & Tablets" },
+      { id: "c5b", name: "Laptops & Computers" },
+      { id: "c5c", name: "Audio & Headphones" },
+    ],
+  },
+  { id: "c6", name: "Furniture" },
 ];
 
-// ── Category Picker ────────────────────────────────────────────────────────
-function CategoryPicker({
-  selected,
-  onChange,
-}: {
-  selected: string[];
-  onChange: (next: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+function findCategoryName(tree: CategoryTreeNode[], id: string): string | undefined {
+  for (const n of tree) {
+    if (n.id === id) return n.name;
+    if (n.children?.length) {
+      const found = findCategoryName(n.children, id);
+      if (found) return found;
     }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  }
+  return undefined;
+}
 
-  const filtered = MOCK_CATEGORIES.filter((c) =>
-    c.toLowerCase().includes(search.toLowerCase())
-  );
+function collectExpandableCategoryIds(tree: CategoryTreeNode[], acc: string[] = []): string[] {
+  for (const n of tree) {
+    if (n.children?.length) {
+      acc.push(n.id);
+      collectExpandableCategoryIds(n.children, acc);
+    }
+  }
+  return acc;
+}
 
-  const toggle = (cat: string) => {
-    onChange(
-      selected.includes(cat)
-        ? selected.filter((c) => c !== cat)
-        : [...selected, cat]
+function CategoryTreePicker({
+  tree,
+  selectedIds,
+  onToggle,
+  filter,
+}: {
+  tree: CategoryTreeNode[];
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+  filter: string;
+}) {
+  const allExpandableIds = useMemo(() => collectExpandableCategoryIds(tree), [tree]);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(allExpandableIds));
+
+  const filterLower = filter.trim().toLowerCase();
+
+  const nodeMatches = (n: CategoryTreeNode): boolean => {
+    if (!filterLower) return true;
+    if (n.name.toLowerCase().includes(filterLower)) return true;
+    return n.children?.some(nodeMatches) ?? false;
+  };
+
+  // When filtering, force-expand all so deep matches are visible.
+  const expandedEffective = filterLower ? new Set(allExpandableIds) : expanded;
+
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const renderNode = (node: CategoryTreeNode, depth = 0): React.ReactNode => {
+    if (!nodeMatches(node)) return null;
+    const hasChildren = Boolean(node.children?.length);
+    const isOpen = hasChildren && expandedEffective.has(node.id);
+    const isChecked = selectedIds.includes(node.id);
+
+    const rowCls = `group flex w-full items-center gap-1 rounded p-1.5 text-[13px] transition-colors cursor-pointer select-none ${
+      isChecked
+        ? "bg-primary/10 text-primary font-semibold"
+        : "text-on-surface-variant hover:bg-surface-container-high"
+    }`;
+
+    if (!hasChildren) {
+      return (
+        <div key={node.id} style={{ marginLeft: depth ? 24 : 0 }}>
+          <label className={rowCls}>
+            <span className="inline-flex w-5 shrink-0" aria-hidden />
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={() => onToggle(node.id)}
+              className="h-3.5 w-3.5 shrink-0 accent-primary"
+            />
+            <IconTag className="h-4 w-4 shrink-0 opacity-80" />
+            <span className="truncate">{node.name}</span>
+          </label>
+        </div>
+      );
+    }
+
+    return (
+      <div key={node.id} className={depth ? "mt-1" : ""}>
+        <label className={rowCls}>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 hover:bg-surface-container-high"
+            aria-expanded={isOpen}
+            onClick={(e) => {
+              e.preventDefault();
+              toggleExpand(node.id);
+            }}
+          >
+            {isOpen ? (
+              <IconChevronDown className="h-4 w-4" />
+            ) : (
+              <IconChevronRight className="h-4 w-4" />
+            )}
+          </button>
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={() => onToggle(node.id)}
+            className="h-3.5 w-3.5 shrink-0 accent-primary"
+          />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            {isOpen ? (
+              <IconFolderOpen className="h-4 w-4 shrink-0 text-primary/80" />
+            ) : (
+              <IconFolder className="h-4 w-4 shrink-0 text-primary/60" />
+            )}
+            <span className="truncate">{node.name}</span>
+          </span>
+        </label>
+        {isOpen && node.children && (
+          <div className="ml-6 mt-1 space-y-1 border-l border-outline-variant/30 pl-2">
+            {node.children.map((child) => renderNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
     );
   };
 
+  const visibleRoots = tree.filter(nodeMatches);
+
   return (
-    <div ref={containerRef} className="relative space-y-1.5">
-      {/* Selected chips */}
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {selected.map((cat) => (
-            <span
-              key={cat}
-              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary"
-            >
-              {cat}
-              <button
-                type="button"
-                aria-label={`Remove ${cat}`}
-                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                onClick={() => toggle(cat)}
-              >
-                <IconClose className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          ))}
+    <div className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
+      <div className="flex items-center justify-between border-b border-outline-variant/10 px-3 py-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+          Hierarchy
+        </span>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high"
+            title="Expand all"
+            onClick={() => setExpanded(new Set(allExpandableIds))}
+          >
+            <IconUnfoldMore className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high"
+            title="Collapse all"
+            onClick={() => setExpanded(new Set())}
+          >
+            <IconUnfoldLess className="h-3.5 w-3.5" />
+          </button>
         </div>
-      )}
-
-      {/* Search input */}
-      <div className="relative">
-        <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
-        <input
-          type="text"
-          className={`${inputBase} pl-8 pr-3`}
-          placeholder="Type category name to search..."
-          value={search}
-          onFocus={() => setOpen(true)}
-          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
-        />
       </div>
-
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-52 overflow-y-auto rounded-lg border border-outline-variant/20 bg-surface shadow-xl">
-          {filtered.length === 0 ? (
-            <p className="px-4 py-3 text-xs italic text-on-surface-variant">
-              No categories match "{search}"
-            </p>
-          ) : (
-            filtered.map((cat) => {
-              const checked = selected.includes(cat);
-              return (
-                <label
-                  key={cat}
-                  className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors hover:bg-surface-container-high ${
-                    checked ? "bg-primary/5 font-semibold text-primary" : "text-on-surface"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggle(cat)}
-                    className="h-3.5 w-3.5 accent-primary shrink-0"
-                  />
-                  {cat}
-                </label>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {selected.length === 0 && !open && (
-        <p className="text-[10px] text-on-surface-variant">
-          Click the box above to assign categories.
-        </p>
-      )}
+      <div className="max-h-64 space-y-1 overflow-y-auto p-2">
+        {visibleRoots.length === 0 ? (
+          <p className="px-2 py-4 text-center text-[11px] italic text-on-surface-variant">
+            No categories match &ldquo;{filter}&rdquo;.
+          </p>
+        ) : (
+          visibleRoots.map((n) => renderNode(n))
+        )}
+      </div>
     </div>
   );
 }
@@ -388,9 +464,26 @@ export function EditBrandPage({
   const codeValue = isAdd ? autoCode : brandCode;
 
   // Categories state
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    isAdd ? [] : ["Luxury", "Fragrance"]
-  );
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>(isAdd ? [] : ["c5", "c1a"]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(e.target as Node)) {
+        setCategoryOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function toggleCategory(id: string) {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
 
   // Recommendations state
   const [excludedBrands, setExcludedBrands] = useState<string[]>([]);
@@ -676,10 +769,68 @@ export function EditBrandPage({
 
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>Categories</label>
-                  <CategoryPicker
-                    selected={selectedCategories}
-                    onChange={setSelectedCategories}
-                  />
+                  <div ref={categoryPickerRef} className="relative space-y-2">
+                    {selectedCategoryIds.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedCategoryIds.map((id) => {
+                          const name = findCategoryName(MOCK_CATEGORY_TREE, id) ?? id;
+                          return (
+                            <span
+                              key={id}
+                              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary"
+                            >
+                              {name}
+                              <button
+                                type="button"
+                                aria-label={`Remove ${name}`}
+                                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+                                onClick={() => toggleCategory(id)}
+                              >
+                                <IconClose className="h-2.5 w-2.5" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className={`${inputBase} flex items-center justify-between gap-2 text-left`}
+                      onClick={() => setCategoryOpen((v) => !v)}
+                    >
+                      <span className={selectedCategoryIds.length ? "text-on-surface" : "italic text-on-surface-variant"}>
+                        {selectedCategoryIds.length
+                          ? `${selectedCategoryIds.length} selected`
+                          : "Click to choose categories"}
+                      </span>
+                      <IconChevronDown
+                        className={`h-4 w-4 shrink-0 text-outline transition-transform ${categoryOpen ? "rotate-180" : ""}`}
+                      />
+                    </button>
+
+                    {categoryOpen && (
+                      <div className="absolute left-0 right-0 top-full z-40 mt-1 rounded-lg border border-outline-variant/20 bg-surface shadow-xl p-2">
+                        <div className="relative mb-2">
+                          <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
+                          <input
+                            type="text"
+                            className={`${inputBase} pl-8 pr-3`}
+                            placeholder="Filter categories..."
+                            value={categoryFilter}
+                            onChange={(e) => setCategoryFilter(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
+                        <CategoryTreePicker
+                          tree={MOCK_CATEGORY_TREE}
+                          selectedIds={selectedCategoryIds}
+                          onToggle={toggleCategory}
+                          filter={categoryFilter}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

@@ -17,6 +17,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconChevronUp,
+  IconClose,
   IconCloudUpload,
   IconDelete,
   IconDownload,
@@ -53,6 +54,121 @@ const btnFooterGhost =
   "text-on-surface-variant font-bold text-xs uppercase tracking-widest px-6 py-2 hover:bg-surface-container-high rounded-md transition-colors";
 const btnFooterPrimary =
   "px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2";
+
+/** Same mock catalog as `EditCampaignPage` — replace when product listing API exists. */
+const MOCK_FEATURED_PRODUCTS = [
+  "Vantage Series 5 Watch (WT-550-B)",
+  "Echo-Noise Headphones (AU-102-S)",
+  "SwiftRun Pro Z (FT-99-R)",
+];
+
+function FeaturedProductSearchablePicker({
+  label,
+  options,
+  selected,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = options.filter((o) => o.toLowerCase().includes(search.toLowerCase()));
+
+  function toggle(opt: string) {
+    onChange(selected.includes(opt) ? selected.filter((s) => s !== opt) : [...selected, opt]);
+  }
+
+  return (
+    <div ref={ref} className="relative space-y-1.5">
+      <label className={`${labelBase} mb-1`}>{label}</label>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((s) => (
+            <span
+              key={s}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold uppercase text-primary"
+            >
+              {s}
+              <button
+                type="button"
+                onClick={() => toggle(s)}
+                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+                aria-label={`Remove ${s}`}
+              >
+                <IconClose className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs transition-colors hover:border-primary/30 focus:outline-none focus:ring-1 focus:ring-primary"
+      >
+        <IconSearch className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" />
+        <span className={selected.length === 0 ? "flex-1 text-left text-on-surface-variant/60" : "flex-1 text-left text-on-surface"}>
+          {selected.length === 0 ? (placeholder ?? `Search ${label.toLowerCase()}…`) : `${selected.length} selected`}
+        </span>
+        <IconChevronDown className={`h-3.5 w-3.5 shrink-0 text-on-surface-variant transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-[60] mt-1 w-full overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
+          <div className="border-b border-outline-variant/10 p-2">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded bg-surface-container-low px-2.5 py-1.5 text-xs outline-none placeholder:text-on-surface-variant/50"
+            />
+          </div>
+          <div className="max-h-44 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-3 text-center text-xs text-on-surface-variant">No results</p>
+            ) : (
+              filtered.map((opt) => (
+                <label
+                  key={opt}
+                  className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-surface-container transition-colors select-none"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    toggle(opt);
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 accent-primary shrink-0 pointer-events-none"
+                    checked={selected.includes(opt)}
+                    readOnly
+                  />
+                  <span className="text-xs text-on-surface">{opt}</span>
+                </label>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export type CatNode = {
   id: string;
@@ -531,6 +647,8 @@ export function CategoriesPage({
   const [sortParentId, setSortParentId] = useState<string | null>(null);
   const [sortDraftIds, setSortDraftIds] = useState<string[]>([]);
   const [promoteListingOpen, setPromoteListingOpen] = useState(false);
+  const [featuredProducts, setFeaturedProducts] = useState<string[]>([]);
+  const [featuredProductsDraft, setFeaturedProductsDraft] = useState<string[]>([]);
   const [imgMenuSrc, setImgMenuSrc] = useState("");
   const [imgCategoryPageSrc, setImgCategoryPageSrc] = useState("");
   const [imgThumbSrc, setImgThumbSrc] = useState("");
@@ -852,6 +970,11 @@ export function CategoriesPage({
   const metaKeywordsMap = useMemo(() => parseLocaleJson(editDto?.metaKeywordsJson), [editDto]);
   const metaDescMap = useMemo(() => parseLocaleJson(editDto?.metaDescJson), [editDto]);
 
+  // Live meta states (drive Google Search Preview while typing)
+  const [metaTitleLive, setMetaTitleLive] = useState<Record<string, string>>({});
+  const [metaKeywordsLive, setMetaKeywordsLive] = useState<Record<string, string>>({});
+  const [metaDescLive, setMetaDescLive] = useState<Record<string, string>>({});
+
   const editNodeCode = editDto?.code ?? "";
 
   function toLocalDateTime(iso: string | null | undefined): string {
@@ -883,6 +1006,28 @@ export function CategoriesPage({
     setRestrictAccess(isAddMode ? false : (editDto?.restrictAccess ?? false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formKey, isAddMode]);
+
+  // When switching category / mode, seed live meta state from DTO so preview starts correct.
+  useEffect(() => {
+    setMetaTitleLive({
+      en: isAddMode ? "" : (metaTitleMap.en ?? ""),
+      vn: isAddMode ? "" : (metaTitleMap.vn ?? metaTitleMap.vi ?? ""),
+      zh: isAddMode ? "" : (metaTitleMap.zh ?? ""),
+      ja: isAddMode ? "" : (metaTitleMap.ja ?? ""),
+    });
+    setMetaKeywordsLive({
+      en: isAddMode ? "" : (metaKeywordsMap.en ?? ""),
+      vn: isAddMode ? "" : (metaKeywordsMap.vn ?? metaKeywordsMap.vi ?? ""),
+      zh: isAddMode ? "" : (metaKeywordsMap.zh ?? ""),
+      ja: isAddMode ? "" : (metaKeywordsMap.ja ?? ""),
+    });
+    setMetaDescLive({
+      en: isAddMode ? "" : (metaDescMap.en ?? ""),
+      vn: isAddMode ? "" : (metaDescMap.vn ?? metaDescMap.vi ?? ""),
+      zh: isAddMode ? "" : (metaDescMap.zh ?? ""),
+      ja: isAddMode ? "" : (metaDescMap.ja ?? ""),
+    });
+  }, [formKey, isAddMode, metaTitleMap, metaKeywordsMap, metaDescMap]);
 
   useEffect(() => {
     if (!sortModalOpen) return;
@@ -1423,12 +1568,19 @@ export function CategoriesPage({
                     <div className="flex items-center gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4">
                       <div className="flex-1">
                         <p className="text-[13px] font-semibold text-on-surface">Featured Products</p>
-                        <p className="text-[11px] text-on-surface-variant">0 products selected</p>
+                        <p className="text-[11px] text-on-surface-variant">
+                          {featuredProducts.length === 0
+                            ? "No products selected"
+                            : `${featuredProducts.length} product${featuredProducts.length !== 1 ? "s" : ""} selected`}
+                        </p>
                       </div>
                       <button
                         type="button"
                         className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
-                        onClick={() => setPromoteListingOpen(true)}
+                        onClick={() => {
+                          setFeaturedProductsDraft(featuredProducts);
+                          setPromoteListingOpen(true);
+                        }}
                       >
                         <IconOpenInNew className="h-3.5 w-3.5 shrink-0" />
                         View Listing
@@ -1487,6 +1639,7 @@ export function CategoriesPage({
                         zh: isAddMode ? "" : (metaTitleMap.zh ?? ""),
                         ja: isAddMode ? "" : (metaTitleMap.ja ?? ""),
                       }}
+                      onValuesChange={setMetaTitleLive}
                       placeholders={{
                         en: isAddMode ? "e.g. Shop Electronics Online | Best Deals" : "",
                         vn: isAddMode ? "VD: Mua sắm điện tử | Ưu đãi tốt nhất" : "",
@@ -1503,6 +1656,7 @@ export function CategoriesPage({
                         zh: isAddMode ? "" : (metaKeywordsMap.zh ?? ""),
                         ja: isAddMode ? "" : (metaKeywordsMap.ja ?? ""),
                       }}
+                      onValuesChange={setMetaKeywordsLive}
                       placeholders={{
                         en: "Comma-separated keywords, e.g. electronics, gadgets, tech",
                         vn: "Từ khóa cách nhau bằng dấu phẩy",
@@ -1520,6 +1674,7 @@ export function CategoriesPage({
                         zh: isAddMode ? "" : (metaDescMap.zh ?? ""),
                         ja: isAddMode ? "" : (metaDescMap.ja ?? ""),
                       }}
+                      onValuesChange={setMetaDescLive}
                       placeholders={{
                         en: isAddMode ? "Describe this category for search engines..." : "",
                         vn: isAddMode ? "Mô tả ngắn về danh mục này cho công cụ tìm kiếm..." : "",
@@ -1539,7 +1694,7 @@ export function CategoriesPage({
                       <p className="truncate text-sm font-medium text-blue-700">
                         {isAddMode
                           ? "Category Title | Your Store Name"
-                          : (metaTitleMap.en || `${editNodeName} | Your Store`)}
+                          : ((metaTitleLive.en ?? "").trim() || `${editNodeName} | Your Store`)}
                       </p>
                       <p className="truncate text-xs text-green-700">
                         {isAddMode
@@ -1549,7 +1704,7 @@ export function CategoriesPage({
                       <p className="text-xs leading-tight text-on-surface-variant">
                         {isAddMode
                           ? "Your meta description will appear here once filled in above."
-                          : (metaDescMap.en || "Your meta description will appear here once filled in above.")}
+                          : ((metaDescLive.en ?? "").trim() || "Your meta description will appear here once filled in above.")}
                       </p>
                     </div>
                   </div>
@@ -1790,21 +1945,56 @@ export function CategoriesPage({
           onClick={() => setPromoteListingOpen(false)}
         >
           <div
-            className="w-full max-w-lg rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-6 shadow-2xl"
+            className="max-h-[min(90vh,520px)] w-full max-w-lg overflow-y-auto rounded-2xl border border-outline-variant/20 bg-surface-container-lowest p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-bold text-on-surface">Select products</h3>
-            {/* TODO(DAI-413): Wire product selection modal when catalog / listing API is available. */}
-            <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
-              Product picker is not wired yet (no listing API in this build). This dialog is a placeholder only.
-            </p>
-            <div className="mt-5 flex justify-end">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-on-surface">Featured products</h3>
+                <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
+                  Same product picker pattern as Campaign editor — mock catalog until listing API is available.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                className="shrink-0 rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setPromoteListingOpen(false)}
+              >
+                <IconClose className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4">
+              <FeaturedProductSearchablePicker
+                label="Products"
+                options={MOCK_FEATURED_PRODUCTS}
+                selected={featuredProductsDraft}
+                onChange={setFeaturedProductsDraft}
+                placeholder="Search products…"
+              />
+            </div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-outline-variant/10 pt-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-4 py-2 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setPromoteListingOpen(false)}
+              >
+                Cancel
+              </button>
               <button
                 type="button"
                 className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-on-primary hover:bg-primary-container"
-                onClick={() => setPromoteListingOpen(false)}
+                onClick={() => {
+                  setFeaturedProducts(featuredProductsDraft);
+                  setPromoteListingOpen(false);
+                  showToast(
+                    featuredProductsDraft.length === 0
+                      ? "Featured products cleared."
+                      : `${featuredProductsDraft.length} featured product${featuredProductsDraft.length !== 1 ? "s" : ""} saved (local).`,
+                  );
+                }}
               >
-                Close
+                Apply
               </button>
             </div>
           </div>

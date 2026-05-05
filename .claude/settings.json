@@ -30,7 +30,8 @@
       "Bash(:)",
       "Bash(../../backoffice/dcms-backoffice-spa/node_modules/.bin/tsc --noEmit -p tsconfig.json --typeRoots ../../backoffice/dcms-backoffice-spa/node_modules/@types --moduleResolution bundler)",
       "Bash(../../backoffice/dcms-backoffice-spa/node_modules/.bin/tsc --noEmit -p tsconfig.json)",
-      "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)"
+      "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(docker port *)"
     ],
     "additionalDirectories": [
       "\\tmp"
