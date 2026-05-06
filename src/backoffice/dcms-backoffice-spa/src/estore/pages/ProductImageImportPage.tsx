@@ -17,10 +17,20 @@ const btnGhost =
 
 type Props = { tenantId?: string; onBack: () => void };
 
+type MatchBy = "upc" | "sku" | "ean" | "vendor";
+
+const MATCH_OPTIONS: { value: MatchBy; label: string }[] = [
+  { value: "upc",    label: "UPC" },
+  { value: "sku",    label: "SKU" },
+  { value: "ean",    label: "EAN" },
+  { value: "vendor", label: "Vendor Article No" },
+];
+
 export function ProductImageImportPage({ tenantId, onBack }: Props) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [matchBy, setMatchBy] = useState<MatchBy>("upc");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [toast, setToast] = useState<string | null>(null);
@@ -38,6 +48,7 @@ export function ProductImageImportPage({ tenantId, onBack }: Props) {
     if (!selectedFile || !tenantId) return;
     setUploading(true);
     try {
+      // matchBy is UI-only for now — backend uploadImport signature does not yet accept it
       const r = await uploadImport(tenantId, "product-images", selectedFile);
       setJobId(r.jobId);
       setToast(`Job ${r.jobId} queued. Processing in background.`);
@@ -73,52 +84,72 @@ export function ProductImageImportPage({ tenantId, onBack }: Props) {
             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${jobId ? "bg-secondary-container/30 text-secondary" : "bg-primary text-on-primary"}`}>
               {jobId ? <IconCheckCircle className="h-4 w-4" /> : "1"}
             </span>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Upload File</h3>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Image Folder Upload</h3>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="space-y-6">
+            {/* Match files name by */}
             <div className="space-y-2">
-              <label className={labelBase}>Import File <span className="text-error">*</span></label>
-              <div
-                className="flex cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed border-primary/20 bg-primary/5 px-5 py-4 transition-colors hover:border-primary/40 hover:bg-primary/10"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <IconCloudUpload className="h-8 w-8 shrink-0 text-primary/50" />
-                <div className="min-w-0">
-                  {selectedFile ? (
-                    <>
-                      <p className="truncate text-sm font-semibold text-on-surface">{selectedFile.name}</p>
-                      <p className="text-[10px] text-on-surface-variant">
-                        {(selectedFile.size / 1024).toFixed(1)} KB · Click to change
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-sm font-semibold text-primary/80">Choose File</p>
-                      <p className="text-[10px] text-on-surface-variant">Accepts .xlsx, .xls, .csv</p>
-                    </>
-                  )}
-                </div>
+              <label className={labelBase}>Match files name by:</label>
+              <div className="flex flex-wrap items-center gap-4">
+                {MATCH_OPTIONS.map((opt) => (
+                  <label key={opt.value} className="flex cursor-pointer items-center gap-2 select-none">
+                    <input
+                      type="radio"
+                      name="matchBy"
+                      value={opt.value}
+                      checked={matchBy === opt.value}
+                      onChange={(e) => setMatchBy(e.target.value as MatchBy)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    <span className="text-xs font-medium text-on-surface">{opt.label}</span>
+                  </label>
+                ))}
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={handleFileChange}
-              />
             </div>
 
-            <div className="flex flex-col justify-end gap-4">
-              <button
-                type="button"
-                className={`${btnPrimary} self-start ${(!selectedFile || !tenantId || uploading || !!jobId) ? "pointer-events-none opacity-40" : ""}`}
-                onClick={handleUpload}
-                disabled={!selectedFile || !tenantId || uploading || !!jobId}
-              >
-                <IconCloudUpload className="h-4 w-4 shrink-0" />
-                {uploading ? "Uploading…" : jobId ? "Uploaded" : "Upload File"}
-              </button>
+            {/* Image Zip file Upload */}
+            <div className="space-y-2">
+              <label className={labelBase}>Image Zip file Upload:</label>
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex flex-1 cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed border-primary/20 bg-primary/5 px-5 py-4 transition-colors hover:border-primary/40 hover:bg-primary/10"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <IconCloudUpload className="h-8 w-8 shrink-0 text-primary/50" />
+                  <div className="min-w-0">
+                    {selectedFile ? (
+                      <>
+                        <p className="truncate text-sm font-semibold text-on-surface">{selectedFile.name}</p>
+                        <p className="text-[10px] text-on-surface-variant">
+                          {(selectedFile.size / 1024).toFixed(1)} KB · Click to change
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm font-semibold text-primary/80">Choose File</p>
+                        <p className="text-[10px] text-on-surface-variant">Accepts .zip files</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".zip"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <button
+                  type="button"
+                  className={`${btnPrimary} ${(!selectedFile || !tenantId || uploading || !!jobId) ? "pointer-events-none opacity-40" : ""}`}
+                  onClick={handleUpload}
+                  disabled={!selectedFile || !tenantId || uploading || !!jobId}
+                >
+                  <IconCloudUpload className="h-4 w-4 shrink-0" />
+                  {uploading ? "Uploading…" : jobId ? "Uploaded" : "Upload File"}
+                </button>
+              </div>
               {!tenantId && (
                 <p className="text-[10px] text-error">Tenant context required to upload.</p>
               )}
@@ -128,8 +159,7 @@ export function ProductImageImportPage({ tenantId, onBack }: Props) {
           <div className="mt-5 flex items-start gap-3 rounded-md border border-outline-variant/10 bg-surface-container-low p-3">
             <IconInfo className="h-4 w-4 shrink-0 text-primary mt-0.5" />
             <p className="text-[11px] text-on-surface-variant leading-relaxed">
-              Required columns: <code className="rounded bg-outline-variant/20 px-1">sku</code>, <code className="rounded bg-outline-variant/20 px-1">image_url</code>. Optional: <code className="rounded bg-outline-variant/20 px-1">alt_text</code>, <code className="rounded bg-outline-variant/20 px-1">sort_order</code>.
-              Images larger than 10 MB or with timeouts &gt; 10 s are reported as row errors.
+              Upload a .zip file containing product images. File names should match the selected identifier (UPC, SKU, EAN, or Vendor Article No). Supported formats: .jpg, .jpeg, .png, .webp. Max file size: 10 MB per image.
             </p>
           </div>
         </section>

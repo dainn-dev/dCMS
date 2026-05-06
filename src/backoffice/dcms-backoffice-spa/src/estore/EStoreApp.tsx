@@ -31,6 +31,7 @@ import {
 } from "./api/fulfillmentApi";
 import { ProductImportPage } from "./pages/ProductImportPage";
 import { ProductInventoryImportPage } from "./pages/ProductInventoryImportPage";
+import { AdvancePriceImportPage } from "./pages/AdvancePriceImportPage";
 import { CategoryAssignmentPage } from "./pages/CategoryAssignmentPage";
 import { ProductConfigPage } from "./pages/ProductConfigPage";
 import { EditAttributePage } from "./pages/EditAttributePage";
@@ -43,6 +44,7 @@ import type { AttributeListRow } from "./attributes-columns";
 import type { ProductListRow } from "./pages/ProductsPage";
 import { ProductsPage } from "./pages/ProductsPage";
 import { BestSellerSettingsPage } from "./pages/BestSellerSettingsPage";
+import { ProductQuantityLimitSettingsPage } from "./pages/ProductQuantityLimitSettingsPage";
 import { DEMO_PRODUCT_ROWS } from "./demo/demoProductRows";
 import { AttributesPage } from "./pages/AttributesPage";
 import {
@@ -101,7 +103,8 @@ type ProductFormState =
   | { mode: "edit"; data: ProductListRow }
   | { mode: "import" }
   | { mode: "image-import" }
-  | { mode: "inventory-import" };
+  | { mode: "inventory-import" }
+  | { mode: "advance-price-import" };
 
 type FulfillmentFormState =
   | { mode: "idle" }
@@ -888,6 +891,9 @@ export function EStoreApp({
       {page === "product-category-assignment" && (
         <CategoryAssignmentPage onNavigateToProducts={() => handlePageChange("products")} />
       )}
+      {page === "product-quantity-limit-settings" && (
+        <ProductQuantityLimitSettingsPage onNavigateToProducts={() => handlePageChange("products")} />
+      )}
       {page === "product-configuration" && (
         <ProductConfigPage
           onNavigateToProducts={() => handlePageChange("products")}
@@ -902,6 +908,8 @@ export function EStoreApp({
           <ProductInventoryImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode === "image-import" ? (
           <ProductImageImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
+        ) : productForm.mode === "advance-price-import" ? (
+          <AdvancePriceImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode === "import" ? (
           <ProductImportPage tenantId={tenantId} onBack={() => setProductForm({ mode: "idle" })} />
         ) : productForm.mode !== "idle" ? (
@@ -920,6 +928,8 @@ export function EStoreApp({
             onImportProduct={() => setProductForm({ mode: "import" })}
             onImageImport={() => setProductForm({ mode: "image-import" })}
             onInventoryImport={() => setProductForm({ mode: "inventory-import" })}
+            onAdvancePriceImport={() => setProductForm({ mode: "advance-price-import" })}
+            onCategoryAssignment={() => handlePageChange("product-category-assignment")}
           />
         ))}
       {page === "campaigns" &&

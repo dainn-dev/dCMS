@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  IconAccountTree,
   IconApartment,
   IconBolt,
   IconBox,
@@ -28,6 +27,7 @@ export type EStorePageId =
   | "products"
   | "product-best-sellers"
   | "product-category-assignment"
+  | "product-quantity-limit-settings"
   | "product-configuration"
   | "attributes"
   | "campaigns"
@@ -58,7 +58,7 @@ const navItems: NavItem[] = [
   { id: "categories", label: "Categories", Icon: IconGrid },
   { id: "products", label: "Products", Icon: IconBox },
   { id: "product-best-sellers", label: "Best Seller Settings", Icon: IconTrendingUp, nestUnderProducts: true },
-  { id: "product-category-assignment", label: "Category Assignment", Icon: IconAccountTree, nestUnderProducts: true },
+  { id: "product-quantity-limit-settings", label: "Product Quantity Limit", Icon: IconTune, nestUnderProducts: true },
   { id: "product-configuration", label: "Product Configuration", Icon: IconTune, nestUnderProducts: true },
   { id: "attributes", label: "Attributes", Icon: IconTag },
   { id: "campaigns", label: "Campaigns", Icon: IconBolt },

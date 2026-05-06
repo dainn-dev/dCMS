@@ -97,6 +97,8 @@ type ProductsPageProps = {
   onImportProduct?: () => void;
   onImageImport?: () => void;
   onInventoryImport?: () => void;
+  onAdvancePriceImport?: () => void;
+  onCategoryAssignment?: () => void;
 };
 
 const FILTER_CATEGORIES = [
@@ -120,25 +122,31 @@ export function ProductsPage({
   onImportProduct,
   onImageImport,
   onInventoryImport,
+  onAdvancePriceImport,
+  onCategoryAssignment,
 }: ProductsPageProps) {
-  // ── Group Actions dropdown state ──────────────────────────────────────────
+  // ── Dropdown states ──────────────────────────────────────────
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [groupOpen, setGroupOpen] = useState(false);
+
+  const importRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     function handler(e: MouseEvent) {
-      const root = groupRef.current;
-      if (!root) return;
-      // composedPath: robust if target is inside shadow DOM; capture phase runs before item onClick is lost
       const path = e.composedPath();
-      if (path.includes(root)) return;
-      setGroupOpen(false);
+      if (importRef.current && !path.includes(importRef.current)) setImportOpen(false);
+      if (exportRef.current && !path.includes(exportRef.current)) setExportOpen(false);
+      if (groupRef.current && !path.includes(groupRef.current)) setGroupOpen(false);
     }
     document.addEventListener("click", handler, true);
     return () => document.removeEventListener("click", handler, true);
   }, []);
 
   // Export modal state
-  const [exportType, setExportType] = useState<"products" | "inventory" | "preview" | null>(null);
+  const [exportType, setExportType] = useState<"products" | "inventory" | "preview" | "advance-price" | null>(null);
   const [exportFormat, setExportFormat] = useState<"csv" | "excel">("csv");
   const [exportStripHtml, setExportStripHtml] = useState(false);
 
@@ -264,6 +272,13 @@ export function ProductsPage({
           );
           csv = bom + [headers.join(","), ...lines].join("\n");
           filename = "preview-links-export.csv";
+        } else if (exportType === "advance-price") {
+          const headers = ["UPC", "SKU", "Product Name", "Advance Price", "Start Date", "End Date"];
+          const lines = exportRows.map((r) =>
+            [clean(r.upc), clean(r.sku), clean(r.name), "0.00", "", ""].map(csvEscape).join(",")
+          );
+          csv = bom + [headers.join(","), ...lines].join("\n");
+          filename = "advance-price-export.csv";
         }
 
         if (!csv) return;
@@ -301,6 +316,13 @@ export function ProductsPage({
           filename = "preview-links-export.xlsx";
           sheetName = "Preview";
           aoa = [["UPC", "SKU", "Product Name", "Preview URL"], ...exportRows.map((r) => [clean(r.upc), clean(r.sku), clean(r.name), `https://preview.dcms.local/products/${r.id}`])];
+        } else if (exportType === "advance-price") {
+          filename = "advance-price-export.xlsx";
+          sheetName = "Advance Price";
+          aoa = [
+            ["UPC", "SKU", "Product Name", "Advance Price", "Start Date", "End Date"],
+            ...exportRows.map((r) => [clean(r.upc), clean(r.sku), clean(r.name), "0.00", "", ""]),
+          ];
         }
 
         const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -502,12 +524,151 @@ export function ProductsPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Import dropdown */}
+          <div className="relative" ref={importRef}>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded bg-surface-container-low px-4 py-2 text-xs font-semibold text-on-surface transition-all hover:bg-surface-container-high"
+              onClick={() => { setImportOpen((o) => !o); setExportOpen(false); setGroupOpen(false); }}
+            >
+              <IconCloudUpload className="h-4 w-4 shrink-0" />
+              Import
+              <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" />
+            </button>
+            {importOpen && (
+              <div
+                className="absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setImportOpen(false); onImportProduct?.(); }}
+                >
+                  <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
+                  Products
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setImportOpen(false); onImageImport?.(); }}
+                >
+                  <IconImage className="h-4 w-4 shrink-0 text-primary" />
+                  Product Images
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setImportOpen(false); onInventoryImport?.(); }}
+                >
+                  <IconBox className="h-4 w-4 shrink-0 text-primary" />
+                  Inventory Qty
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setImportOpen(false); onAdvancePriceImport?.(); }}
+                >
+                  <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
+                  Advance Price
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setImportOpen(false); onCategoryAssignment?.(); }}
+                >
+                  <IconLayers className="h-4 w-4 shrink-0 text-primary" />
+                  Product Categories
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Export dropdown */}
+          <div className="relative" ref={exportRef}>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded bg-surface-container-low px-4 py-2 text-xs font-semibold text-on-surface transition-all hover:bg-surface-container-high"
+              onClick={() => { setExportOpen((o) => !o); setImportOpen(false); setGroupOpen(false); }}
+            >
+              <IconDownload className="h-4 w-4 shrink-0" />
+              Export
+              <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-on-surface-variant" />
+            </button>
+            {exportOpen && (
+              <div
+                className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); setExportType("products"); }}
+                >
+                  <IconDownload className="h-4 w-4 shrink-0 text-primary" />
+                  Products
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); setExportType("inventory"); }}
+                >
+                  <IconBox className="h-4 w-4 shrink-0 text-primary" />
+                  Inventory Qty
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); setExportType("advance-price"); }}
+                >
+                  <IconDownload className="h-4 w-4 shrink-0 text-primary" />
+                  Advance Price
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); setExportType("preview"); }}
+                >
+                  <IconOpenInNew className="h-4 w-4 shrink-0 text-primary" />
+                  Preview Links
+                </button>
+
+                <div className="my-1 border-t border-outline-variant/20" />
+                <div className="px-4 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/60">Templates</div>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); void downloadProductImportTemplateXlsx(); }}
+                >
+                  <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
+                  Product Import Template
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); void downloadInventoryImportTemplateXlsx(); }}
+                >
+                  <IconBox className="h-4 w-4 shrink-0 text-primary" />
+                  Inventory Import Template
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setExportOpen(false); console.info("[Products] Download Advance Price Import Template"); }}
+                >
+                  <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
+                  Advance Price Import Template
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Group Actions dropdown */}
           <div className="relative" ref={groupRef}>
             <button
               type="button"
               className="flex items-center gap-2 rounded bg-surface-container-low px-4 py-2 text-xs font-semibold text-on-surface transition-all hover:bg-surface-container-high"
-              onClick={() => setGroupOpen((o) => !o)}
+              onClick={() => { setGroupOpen((o) => !o); setImportOpen(false); setExportOpen(false); }}
             >
               <IconLayers className="h-4 w-4 shrink-0" />
               Group Actions
@@ -518,84 +679,69 @@ export function ProductsPage({
                 className="absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                {/* Import section */}
-                <div className="px-4 pt-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/60">Import</div>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); onImportProduct?.(); }}
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Send for Approval", Array.from(selectedIds)); }}
                 >
                   <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
-                  Product Import
+                  Send for Approval
                 </button>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); onImageImport?.(); }}
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Approve", Array.from(selectedIds)); }}
                 >
-                  <IconImage className="h-4 w-4 shrink-0 text-primary" />
-                  Image Import
+                  <IconAddCircle className="h-4 w-4 shrink-0 text-primary" />
+                  Approve
                 </button>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); onInventoryImport?.(); }}
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Reject", Array.from(selectedIds)); }}
                 >
-                  <IconBox className="h-4 w-4 shrink-0 text-primary" />
-                  Inventory Import
-                </button>
-
-                <div className="my-1 border-t border-outline-variant/20" />
-
-                {/* Export section */}
-                <div className="px-4 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/60">Export</div>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); setExportType("products"); }}
-                >
-                  <IconDownload className="h-4 w-4 shrink-0 text-primary" />
-                  Export Products
+                  <IconClose className="h-4 w-4 shrink-0 text-primary" />
+                  Reject
                 </button>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); setExportType("inventory"); }}
+                  onClick={() => { setGroupOpen(false); setConfirmArchiveOpen(true); }}
                 >
                   <IconBox className="h-4 w-4 shrink-0 text-primary" />
-                  Export Inventory Qty
+                  Archive
                 </button>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); setExportType("preview"); }}
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Send for Archive", Array.from(selectedIds)); }}
+                >
+                  <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
+                  Send for Archive
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Restore", Array.from(selectedIds)); }}
                 >
                   <IconOpenInNew className="h-4 w-4 shrink-0 text-primary" />
-                  Export Preview Links
-                </button>
-
-                <div className="px-4 pt-1 pb-1 text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/60">Templates</div>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => {
-                    setGroupOpen(false);
-                    void downloadProductImportTemplateXlsx();
-                  }}
-                >
-                  <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
-                  Product Import Template
+                  Restore
                 </button>
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => {
-                    setGroupOpen(false);
-                    void downloadInventoryImportTemplateXlsx();
-                  }}
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Add Category", Array.from(selectedIds)); }}
                 >
-                  <IconBox className="h-4 w-4 shrink-0 text-primary" />
-                  Inventory Import Template
+                  <IconAddCircle className="h-4 w-4 shrink-0 text-primary" />
+                  Add Category
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                  onClick={() => { setGroupOpen(false); console.info("[Products] Change Category", Array.from(selectedIds)); }}
+                >
+                  <IconEdit className="h-4 w-4 shrink-0 text-primary" />
+                  Change Category
                 </button>
               </div>
             )}
@@ -1271,28 +1417,31 @@ export function ProductsPage({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="w-[420px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
             {/* Header */}
-            <div className="border-b border-outline-variant/10 px-6 py-5">
+            <div className="flex items-center justify-between border-b border-outline-variant/10 px-6 py-4">
               <h3 className="text-base font-bold text-on-surface">
-                Export{" "}
                 {exportType === "products"
-                  ? "Products"
+                  ? "Export Products"
                   : exportType === "inventory"
-                  ? "Inventory Qty"
-                  : "Preview Links"}
+                  ? "Export Inventory Qty"
+                  : exportType === "preview"
+                  ? "Export Preview Links"
+                  : "Advance Price Export"}
               </h3>
-              <p className="mt-1 text-xs text-on-surface-variant">
-                Choose the file format and options for this export.
-              </p>
+              <button
+                type="button"
+                aria-label="Close"
+                className="rounded-full p-1.5 text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                onClick={() => setExportType(null)}
+              >
+                <IconClose className="h-4 w-4" />
+              </button>
             </div>
 
             {/* Body */}
-            <div className="space-y-6 px-6 py-6">
-              {/* File format */}
-              <div>
-                <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                  File Format
-                </p>
-                <div className="flex gap-6">
+            {exportType === "advance-price" ? (
+              <div className="px-6 py-6">
+                <div className="flex items-center justify-center gap-6">
+                  <span className="text-xs font-semibold text-on-surface">File Format:</span>
                   {(["excel", "csv"] as const).map((fmt) => (
                     <label key={fmt} className="flex cursor-pointer items-center gap-2 select-none">
                       <input
@@ -1303,28 +1452,54 @@ export function ProductsPage({
                         onChange={() => setExportFormat(fmt)}
                         className="accent-primary"
                       />
-                      <span className="text-xs font-semibold text-on-surface">
-                        {fmt === "excel" ? "Excel (.xlsx)" : "CSV (.csv)"}
+                      <span className="text-xs font-semibold text-on-surface uppercase">
+                        {fmt === "excel" ? "Excel" : "CSV"}
                       </span>
                     </label>
                   ))}
                 </div>
               </div>
+            ) : (
+              <div className="space-y-6 px-6 py-6">
+                {/* File format */}
+                <div>
+                  <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+                    File Format
+                  </p>
+                  <div className="flex gap-6">
+                    {(["excel", "csv"] as const).map((fmt) => (
+                      <label key={fmt} className="flex cursor-pointer items-center gap-2 select-none">
+                        <input
+                          type="radio"
+                          name="exportFormat"
+                          value={fmt}
+                          checked={exportFormat === fmt}
+                          onChange={() => setExportFormat(fmt)}
+                          className="accent-primary"
+                        />
+                        <span className="text-xs font-semibold text-on-surface">
+                          {fmt === "excel" ? "Excel (.xlsx)" : "CSV (.csv)"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
 
-              {/* Strip HTML */}
-              <label className="flex cursor-pointer items-center gap-3 select-none">
-                <input
-                  type="checkbox"
-                  checked={exportStripHtml}
-                  onChange={(e) => setExportStripHtml(e.target.checked)}
-                  className="h-4 w-4 accent-primary"
-                />
-                <span className="text-xs font-semibold text-on-surface">Strip HTML</span>
-                <span className="text-[10px] text-on-surface-variant">
-                  Remove HTML tags from exported text fields
-                </span>
-              </label>
-            </div>
+                {/* Strip HTML */}
+                <label className="flex cursor-pointer items-center gap-3 select-none">
+                  <input
+                    type="checkbox"
+                    checked={exportStripHtml}
+                    onChange={(e) => setExportStripHtml(e.target.checked)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  <span className="text-xs font-semibold text-on-surface">Strip HTML</span>
+                  <span className="text-[10px] text-on-surface-variant">
+                    Remove HTML tags from exported text fields
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
@@ -1340,8 +1515,8 @@ export function ProductsPage({
                 className="flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 text-xs font-bold text-on-primary shadow-lg shadow-primary/20 transition-all hover:opacity-90"
                 onClick={doExport}
               >
-                <IconDownload className="h-4 w-4 shrink-0" />
-                Ok
+                {exportType === "advance-price" ? null : <IconDownload className="h-4 w-4 shrink-0" />}
+                OK
               </button>
             </div>
           </div>
