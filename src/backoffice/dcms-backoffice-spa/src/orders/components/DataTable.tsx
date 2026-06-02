@@ -41,6 +41,10 @@ interface DataTableProps<TData, TValue> {
   footerMode?: "pagination" | "loadMore" | "none";
   /** Cursor pagination: show a load more button in footer. */
   loadMore?: { onClick: () => void; disabled?: boolean; label?: string };
+  /** Message shown when there are no rows. */
+  emptyMessage?: string;
+  /** Plural noun for the footer count, e.g. "brands". */
+  itemNoun?: string;
 }
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -57,6 +61,8 @@ export function DataTable<TData, TValue>({
   loading = false,
   footerMode = "pagination",
   loadMore,
+  emptyMessage = "No results found.",
+  itemNoun = "results",
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -232,7 +238,7 @@ export function DataTable<TData, TValue>({
                   colSpan={columns.length}
                   className="h-32 text-center text-sm text-on-surface-variant"
                 >
-                  No orders found.
+                  {emptyMessage}
                 </td>
               </tr>
             )}
@@ -250,7 +256,7 @@ export function DataTable<TData, TValue>({
               <>
                 Showing <span className="font-bold text-on-surface">{firstRow}</span>–
                 <span className="font-bold text-on-surface">{lastRow}</span> of{" "}
-                <span className="font-bold text-on-surface">{totalFiltered}</span> orders
+                <span className="font-bold text-on-surface">{totalFiltered}</span> {itemNoun}
               </>
             )}
           </span>

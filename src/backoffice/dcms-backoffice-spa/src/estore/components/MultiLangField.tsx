@@ -175,6 +175,7 @@ export function MultiLangTextarea({
   label,
   rows,
   defaultValues,
+  onValuesChange,
   placeholders,
   hint,
   className,
@@ -182,12 +183,13 @@ export function MultiLangTextarea({
   label: string;
   rows?: number;
   defaultValues?: Record<string, string>;
+  onValuesChange?: (values: Record<string, string>) => void;
   placeholders?: Record<string, string>;
   hint?: string;
   className?: string;
 }) {
   const { languages, resolvedIso, setActiveIso, values, currentValue, setValue } =
-    useLangField(defaultValues);
+    useLangField(defaultValues, onValuesChange);
 
   const placeholder =
     placeholders?.[langKey(resolvedIso)] ??

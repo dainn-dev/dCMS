@@ -75,17 +75,18 @@ type EditTab = "general" | "images" | "navbar" | "product-page" | "seo";
 function CategoryNameField({
   isAddMode,
   defaultEnValue,
+  onValuesChange,
 }: {
   isAddMode: boolean;
   defaultEnValue: string;
+  onValuesChange?: (values: Record<string, string>) => void;
 }) {
   return (
     <MultiLangInput
       label="Category Name (Multi-language)"
-      defaultValues={{
-        en: isAddMode ? "" : defaultEnValue,
-        zh: isAddMode ? "" : "@12% 折扣",
-      }}
+      requiredMark
+      defaultValues={{ en: isAddMode ? "" : defaultEnValue }}
+      onValuesChange={onValuesChange}
       placeholders={{ en: "e.g. Men, Women, Kids", vn: "Tên danh mục", zh: "中文名称", ja: "カテゴリ名" }}
     />
   );
@@ -196,6 +197,20 @@ function insertNode(
   });
 }
 
+function renameNode(
+  nodes: CatNode[],
+  id: string,
+  name: string,
+  active: boolean
+): CatNode[] {
+  return nodes.map((n) => {
+    if (n.id === id) return { ...n, name, active };
+    if (n.children?.length)
+      return { ...n, children: renameNode(n.children, id, name, active) };
+    return n;
+  });
+}
+
 function collectExpandableIds(nodes: CatNode[], acc: string[] = []): string[] {
   for (const n of nodes) {
     if (n.children?.length) {
@@ -292,6 +307,15 @@ function countExpiredInTree(nodes: CatNode[]): number {
     const children = countExpiredInTree(n.children ?? []);
     return acc + self + children;
   }, 0);
+}
+
+/** URL-safe slug from a display name, e.g. "Sports & Outdoors" → "sports-outdoors". */
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 const MAX_CATEGORY_IMG_BYTES = 2 * 1024 * 1024;
@@ -504,6 +528,9 @@ export function CategoriesPage({
   const [tab, setTab] = useState<EditTab>("general");
   const [formParentId, setFormParentId] = useState<string | null>(null);
   const [originalParentId, setOriginalParentId] = useState<string | null>(null);
+  // Controlled mirrors of the editable General-tab fields so Save can actually read them.
+  const [formNameValues, setFormNameValues] = useState<Record<string, string>>({});
+  const [formActive, setFormActive] = useState(true);
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({
     message: "",
     visible: false,
@@ -515,7 +542,14 @@ export function CategoriesPage({
     let cancelled = false;
     setApiLoading(true);
     fetchCategories(tenantId, authToken)
-      .then((tree) => { if (!cancelled) { setTreeData(tree); setApiLoading(false); } })
+      .then((tree) => {
+        if (cancelled) return;
+        setTreeData(tree);
+        setApiLoading(false);
+        // Select a real node (or empty/add state) instead of the demo "c1" that no longer exists.
+        const first = firstNodeIdInTree(tree);
+        setMode(first ? { kind: "edit", nodeId: first } : { kind: "add", parentId: null });
+      })
       .catch((err) => {
         if (!cancelled) {
           console.error("[CategoriesPage] fetch failed", err);
@@ -552,11 +586,16 @@ export function CategoriesPage({
       setFormParentId(mode.parentId);
       setOriginalParentId(mode.parentId);
       setTab("general");
+      setFormNameValues({});
+      setFormActive(true);
     } else {
       const p = findParentId(treeData, mode.nodeId);
       const pid = p !== undefined ? p : null;
       setFormParentId(pid);
       setOriginalParentId(pid);
+      const node = findNodeRef(treeData, mode.nodeId);
+      setFormNameValues(node ? { en: node.name } : {});
+      setFormActive(node?.active !== false);
     }
   // treeData intentionally excluded — only sync when mode changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -605,11 +644,13 @@ export function CategoriesPage({
     if (isAddMode) {
       if (tenantId) {
         // ── Create via API ────────────────────────────────────────────────
-        const slug = `cat-${Date.now()}`;
+        const nameEn = (formNameValues.en ?? "").trim() || "New Category";
+        const slug = slugify(nameEn) || `cat-${Date.now()}`;
         const payload: CategoryPayload = {
-          name: "New Category",
+          name: nameEn,
           slug,
           parentId: formParentId ? parseInt(formParentId, 10) : null,
+          active: formActive,
         };
         try {
           const newNode = await createCategory(tenantId, payload, authToken);
@@ -629,13 +670,19 @@ export function CategoriesPage({
     if (tenantId && !isNaN(nodeNumericId)) {
       // ── Update via API ────────────────────────────────────────────────
       const existing = findNodeRef(treeData, mode.nodeId);
+      const existingSlug = (existing?._dto as { slug?: string } | undefined)?.slug;
+      const nameEn = (formNameValues.en ?? "").trim() || existing?.name || "Category";
       const payload: CategoryPayload = {
-        name: existing?.name ?? "Category",
-        slug: `cat-${nodeNumericId}`,
+        name: nameEn,
+        // Preserve the real slug — never clobber it with a synthetic "cat-{id}".
+        slug: existingSlug || slugify(nameEn) || `cat-${nodeNumericId}`,
         parentId: parentNumericId,
+        active: formActive,
       };
       try {
         await updateCategory(tenantId, nodeNumericId, payload, authToken);
+        // Reflect the rename in the local tree so the hierarchy updates immediately.
+        setTreeData((prev) => renameNode(prev, mode.nodeId, nameEn, formActive));
         showToast("Category saved.");
       } catch (err) {
         showToast(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -646,7 +693,14 @@ export function CategoriesPage({
   }, [
     isAddMode, isReclassifying, mode, treeData, formParentId,
     reclassifyToLabel, showToast, tenantId, authToken,
+    formNameValues, formActive,
   ]);
+
+  // After cancel/close, return to a real node (or the add form if the tree is empty).
+  const selectFirstOrAdd = useCallback(() => {
+    const first = firstNodeIdInTree(treeData);
+    setMode(first ? { kind: "edit", nodeId: first } : { kind: "add", parentId: null });
+  }, [treeData]);
 
   const expandAll = useCallback(() => setExpanded(new Set(expandableIds)), [expandableIds]);
   const collapseAll = useCallback(() => setExpanded(new Set()), []);
@@ -812,6 +866,12 @@ export function CategoriesPage({
 
   const editNodeName =
     mode.kind === "edit" ? (findNodeName(treeData, mode.nodeId) ?? "Category") : "";
+  // Real internal identifier (slug/id) for the selected node — replaces the old hardcoded mock.
+  const editInternalId =
+    mode.kind === "edit"
+      ? (((findNodeRef(treeData, mode.nodeId)?._dto as { slug?: string } | undefined)?.slug) ??
+         `CAT-${mode.nodeId}`)
+      : "";
   const addParentName =
     isAddMode && mode.parentId ? findNodeName(treeData, mode.parentId) : null;
 
@@ -1082,7 +1142,7 @@ export function CategoriesPage({
               <button
                 type="button"
                 className="rounded px-3 py-1 text-xs font-medium text-on-surface-variant transition-colors hover:bg-surface-container-high"
-                onClick={() => setMode({ kind: "edit", nodeId: "c1" })}
+                onClick={selectFirstOrAdd}
               >
                 Cancel
               </button>
@@ -1131,10 +1191,13 @@ export function CategoriesPage({
                       <span className="text-xs font-medium text-on-surface-variant">Active:</span>
                       <input
                         type="checkbox"
-                        defaultChecked
+                        checked={formActive}
+                        onChange={(e) => setFormActive(e.target.checked)}
                         className="h-4 w-4 rounded border-outline-variant text-primary focus:ring-primary/20"
                       />
-                      <span className="text-xs font-semibold text-primary">Yes</span>
+                      <span className={`text-xs font-semibold ${formActive ? "text-primary" : "text-on-surface-variant"}`}>
+                        {formActive ? "Yes" : "No"}
+                      </span>
                     </label>
                   </div>
 
@@ -1169,10 +1232,10 @@ export function CategoriesPage({
                     <div className="space-y-2">
                       <label className={labelBase}>Internal Identifier</label>
                       <input
-                        className={`${inputBase} ${isAddMode ? "bg-surface-container text-on-surface-variant" : ""}`}
-                        defaultValue={isAddMode ? "" : "CAT-2023-REBATE-12"}
+                        className={`${inputBase} bg-surface-container text-on-surface-variant`}
+                        value={isAddMode ? "" : editInternalId}
                         placeholder={isAddMode ? "Auto-generated on save" : ""}
-                        readOnly={isAddMode}
+                        readOnly
                       />
                     </div>
                   </div>
@@ -1180,6 +1243,7 @@ export function CategoriesPage({
                   <CategoryNameField
                     isAddMode={isAddMode}
                     defaultEnValue={isAddMode ? "" : editNodeName}
+                    onValuesChange={setFormNameValues}
                   />
                 </div>
               )}
@@ -1426,9 +1490,7 @@ export function CategoriesPage({
                     <h3 className={sectionHeading}>SEO &amp; Metadata</h3>
                     <MultiLangInput
                       label="Meta Title"
-                      defaultValues={{
-                        en: isAddMode ? "" : "Shop @12%rebate Category Online | Exclusive Deals",
-                      }}
+                      defaultValues={{ en: "" }}
                       placeholders={{
                         en: isAddMode ? "e.g. Shop Electronics Online | Best Deals" : "",
                         vn: isAddMode ? "VD: Mua sắm điện tử | Ưu đãi tốt nhất" : "",
@@ -1439,9 +1501,7 @@ export function CategoriesPage({
                     />
                     <MultiLangInput
                       label="Meta Keywords"
-                      defaultValues={{
-                        en: isAddMode ? "" : "rebate, deals, cashback, enterprise savings",
-                      }}
+                      defaultValues={{ en: "" }}
                       placeholders={{
                         en: "Comma-separated keywords, e.g. electronics, gadgets, tech",
                         vn: "Từ khóa cách nhau bằng dấu phẩy",
@@ -1453,11 +1513,7 @@ export function CategoriesPage({
                     <MultiLangTextarea
                       label="Meta Description"
                       rows={3}
-                      defaultValues={{
-                        en: isAddMode
-                          ? ""
-                          : "Discover huge savings in our rebate category. Browse high-quality items with guaranteed 12% cash back for enterprise members.",
-                      }}
+                      defaultValues={{ en: "" }}
                       placeholders={{
                         en: isAddMode ? "Describe this category for search engines..." : "",
                         vn: isAddMode ? "Mô tả ngắn về danh mục này cho công cụ tìm kiếm..." : "",
@@ -1477,17 +1533,13 @@ export function CategoriesPage({
                       <p className="truncate text-sm font-medium text-blue-700">
                         {isAddMode
                           ? "Category Title | Your Store Name"
-                          : "Shop @12%rebate Category Online | Exclusive Deals"}
+                          : `${editNodeName} | Your Store Name`}
                       </p>
                       <p className="truncate text-xs text-green-700">
-                        {isAddMode
-                          ? "https://example.com/category/new-category"
-                          : "https://example.com/category/@12-percent-rebate"}
+                        {`https://example.com/category/${isAddMode ? "new-category" : (editInternalId || slugify(editNodeName))}`}
                       </p>
                       <p className="text-xs leading-tight text-on-surface-variant">
-                        {isAddMode
-                          ? "Your meta description will appear here once filled in above."
-                          : "Discover huge savings in our rebate category. Browse high-quality items with guaranteed 12% cash back for enterprise members."}
+                        Your meta description will appear here once filled in above.
                       </p>
                     </div>
                   </div>
@@ -1563,7 +1615,7 @@ export function CategoriesPage({
               <IconInfo className="h-4 w-4 shrink-0" />
               {isAddMode
                 ? "Fill in the details above to create a new category."
-                : "Last updated by Admin 2 hours ago"}
+                : "Edit the category details, then Save."}
             </div>
             <div className="flex gap-3">
               <button
@@ -1571,10 +1623,13 @@ export function CategoriesPage({
                 className={btnFooterGhost}
                 onClick={() => {
                   if (isAddMode) {
-                    setMode({ kind: "edit", nodeId: "c1" });
+                    selectFirstOrAdd();
                   } else {
-                    // Reset parent picker to original (discard reclassification)
+                    // Reset edits (discard rename / reclassification)
                     setFormParentId(originalParentId);
+                    const node = findNodeRef(treeData, mode.kind === "edit" ? mode.nodeId : "");
+                    setFormNameValues(node ? { en: node.name } : {});
+                    setFormActive(node?.active !== false);
                   }
                 }}
               >
@@ -1606,8 +1661,8 @@ export function CategoriesPage({
               <div>
                 <h3 className="text-sm font-bold text-on-surface">Delete category</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
-                  Delete &ldquo;{deleteTarget.name}&rdquo; and its sub-tree from the hierarchy? This demo only updates
-                  local state (no server).
+                  Delete &ldquo;{deleteTarget.name}&rdquo; and its sub-tree from the hierarchy? This action
+                  cannot be undone.
                 </p>
               </div>
             </div>
@@ -1803,7 +1858,7 @@ export function CategoriesPage({
                   className={btnFooterPrimary + " w-full justify-center"}
                   onClick={() => {
                     setShowSuccessModal(false);
-                    setMode({ kind: "edit", nodeId: "c1" });
+                    selectFirstOrAdd();
                   }}
                 >
                   Continue Editing

@@ -270,6 +270,8 @@ export function PromotionsPage({
           data={rows}
           globalFilterPlaceholder="Search by promo type, code, or status…"
           columnLabels={{ schedule: "Schedule", activeDot: "Active", usedPct: "% Used" }}
+          emptyMessage="No promotions found."
+          itemNoun="promotions"
         />
       </div>
 

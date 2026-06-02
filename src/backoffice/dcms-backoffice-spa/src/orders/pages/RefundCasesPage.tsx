@@ -265,6 +265,8 @@ export function RefundCasesPage({
               columnLabels={REFUND_CASE_COLUMN_LABELS}
               getRowId={(row) => row.refundNo}
               loading={(loading || loadingMore) && cases.length === 0}
+              emptyMessage="No refund cases found."
+              itemNoun="refund cases"
               footerMode="loadMore"
               loadMore={{
                 disabled: loading || loadingMore || nextCursor === null,

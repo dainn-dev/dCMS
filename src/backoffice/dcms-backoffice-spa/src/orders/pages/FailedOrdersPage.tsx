@@ -336,6 +336,8 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
               getRowId={(row) => row.orderId}
               rowSelection={rowSelection}
               onRowSelectionChange={setRowSelection}
+              emptyMessage="No failed orders found."
+              itemNoun="orders"
               loading={(loading || loadingMore) && rows.length === 0}
               footerMode="loadMore"
               loadMore={{

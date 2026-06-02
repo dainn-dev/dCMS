@@ -7,6 +7,7 @@ import type {
 } from "./BrandConfigPage";
 import { MultiLangInput, MultiLangTextarea } from "../components/MultiLangField";
 import { MultiLangLexicalRichText } from "../components/MultiLangLexicalRichText";
+import { uploadImage } from "../api/mediaApi";
 import {
   IconArrowBack,
   IconCalendarToday,
@@ -16,17 +17,16 @@ import {
   IconDelete,
   IconFactCheck,
   IconGroup,
-  IconHistory,
   IconImage,
   IconInfo,
   IconLightbulb,
   IconLocationOn,
-  IconMap,
   IconMoreHoriz,
   IconSave,
   IconSearch,
   IconTune,
   IconVisibility,
+  IconWarning,
 } from "../../orders/icons";
 
 // ── Shared style tokens ────────────────────────────────────────────────────
@@ -54,30 +54,31 @@ type Props = {
   active?: boolean;
   logoSrc?: string;
   logoAlt?: string;
+  additionalInfo?: string;
   /** Additional fields configured in BrandConfigPage — drives the "Other" tab. */
   additionalFields?: BrandAdditionalField[];
+  brandOptions?: Pick<BrandListRow, "code" | "name">[];
+  /** Real catalog categories for the Categories picker (stored by id). */
+  categoryOptions?: CategoryOption[];
+  /** Current tenant identifier — shown read-only on the form. */
+  tenantId?: string;
   onBack: () => void;
-  /** row = core brand data; additionalInfo = JSON-serialised additional values from "Other" tab. */
-  onSave?: (row: BrandListRow, additionalInfo: string) => void;
+  /** row = core brand data; additionalInfo = JSON-serialised additional values from "Other" tab.
+   *  May be async and reject — the form shows the error instead of a false success. */
+  onSave?: (row: BrandListRow, additionalInfo: string) => void | Promise<void>;
 };
 
-// ── Mock category list (mirrors CategoriesPage INITIAL_TREE) ─────────────
-const MOCK_CATEGORIES = [
-  "@12%rebate",
-  "Sub-category A",
-  "Sub-category B",
-  "1-12-REBATE",
-  "Anniversary",
-  "CGCategory",
-  "Electronics",
-  "Furniture",
-];
-
 // ── Category Picker ────────────────────────────────────────────────────────
+// `options` are real categories from the catalog API; selection is stored by
+// category **id** (stable) while the UI shows category names.
+export type CategoryOption = { id: string; name: string };
+
 function CategoryPicker({
+  options,
   selected,
   onChange,
 }: {
+  options: CategoryOption[];
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
@@ -95,15 +96,16 @@ function CategoryPicker({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const filtered = MOCK_CATEGORIES.filter((c) =>
-    c.toLowerCase().includes(search.toLowerCase())
+  const nameById = new Map(options.map((o) => [o.id, o.name]));
+  const filtered = options.filter((o) =>
+    o.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const toggle = (cat: string) => {
+  const toggle = (id: string) => {
     onChange(
-      selected.includes(cat)
-        ? selected.filter((c) => c !== cat)
-        : [...selected, cat]
+      selected.includes(id)
+        ? selected.filter((c) => c !== id)
+        : [...selected, id]
     );
   };
 
@@ -112,17 +114,17 @@ function CategoryPicker({
       {/* Selected chips */}
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {selected.map((cat) => (
+          {selected.map((id) => (
             <span
-              key={cat}
+              key={id}
               className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary"
             >
-              {cat}
+              {nameById.get(id) ?? id}
               <button
                 type="button"
-                aria-label={`Remove ${cat}`}
+                aria-label={`Remove ${nameById.get(id) ?? id}`}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-                onClick={() => toggle(cat)}
+                onClick={() => toggle(id)}
               >
                 <IconClose className="h-2.5 w-2.5" />
               </button>
@@ -147,16 +149,20 @@ function CategoryPicker({
       {/* Dropdown */}
       {open && (
         <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-52 overflow-y-auto rounded-lg border border-outline-variant/20 bg-surface shadow-xl">
-          {filtered.length === 0 ? (
+          {options.length === 0 ? (
+            <p className="px-4 py-3 text-xs italic text-on-surface-variant">
+              No categories defined yet. Create them under eStore → Categories.
+            </p>
+          ) : filtered.length === 0 ? (
             <p className="px-4 py-3 text-xs italic text-on-surface-variant">
               No categories match "{search}"
             </p>
           ) : (
-            filtered.map((cat) => {
-              const checked = selected.includes(cat);
+            filtered.map((opt) => {
+              const checked = selected.includes(opt.id);
               return (
                 <label
-                  key={cat}
+                  key={opt.id}
                   className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors hover:bg-surface-container-high ${
                     checked ? "bg-primary/5 font-semibold text-primary" : "text-on-surface"
                   }`}
@@ -164,10 +170,10 @@ function CategoryPicker({
                   <input
                     type="checkbox"
                     checked={checked}
-                    onChange={() => toggle(cat)}
+                    onChange={() => toggle(opt.id)}
                     className="h-3.5 w-3.5 accent-primary shrink-0"
                   />
-                  {cat}
+                  {opt.name}
                 </label>
               );
             })
@@ -192,24 +198,71 @@ const ALL_BRANDS = [
   { code: "AUR-5501", name: "Aura Essentials" },
 ];
 
-type BrandHistoryRow = { at: string; actor: string; field: string; old: string; new: string };
+type LangValues = Record<string, string>;
 
-function mockBrandHistory(code: string, name: string): BrandHistoryRow[] {
-  const safeName = name || "—";
-  const safeCode = code || "—";
-  return [
-    { at: "2026-04-12 14:32", actor: "eStore Admin", field: "Status", old: "Inactive", new: "Active" },
-    { at: "2026-04-11 10:08", actor: "minh.hoang@example.com", field: "Brand Name", old: "Working Title", new: safeName },
-    { at: "2026-04-11 10:07", actor: "minh.hoang@example.com", field: "Brand Code", old: "TMP-0000", new: safeCode },
-    { at: "2026-04-09 15:21", actor: "Content Bot", field: "Description (EN)", old: "(empty)", new: "Updated marketing copy." },
-  ];
+type BrandAdditionalInfo = {
+  general?: {
+    displayName?: LangValues;
+    promoCodePrefix?: string;
+    categories?: string[];
+    publishFrom?: string;
+    publishTo?: string;
+    description?: LangValues;
+    mobileImageSrc?: string;
+  };
+  contacts?: {
+    officeNo1?: string;
+    officeNo2?: string;
+    contactPerson?: string;
+    contactPersonPhone?: string;
+    contactEmails?: string;
+    outOfStockEmails?: string;
+    headquartersAddress?: string;
+  };
+  recommendations?: {
+    excludedBrandCodes?: string[];
+  };
+  seo?: {
+    metaTitle?: LangValues;
+    metaKeywords?: LangValues;
+    metaDescription?: LangValues;
+  };
+  customFields?: Record<string, string | string[]>;
+};
+
+const EMPTY_ADDITIONAL_INFO: BrandAdditionalInfo = {};
+
+function parseBrandAdditionalInfo(raw?: string): BrandAdditionalInfo {
+  if (!raw?.trim()) return EMPTY_ADDITIONAL_INFO;
+  try {
+    const parsed = JSON.parse(raw) as BrandAdditionalInfo;
+    return parsed && typeof parsed === "object" ? parsed : EMPTY_ADDITIONAL_INFO;
+  } catch {
+    return EMPTY_ADDITIONAL_INFO;
+  }
 }
 
-// ── Image upload slot (real file input; mock preview only) ─────────────────
+function cleanRecord<T extends Record<string, unknown>>(record: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => {
+      if (value === "" || value === undefined || value === null) return false;
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "object") return Object.keys(value as object).length > 0;
+      return true;
+    })
+  ) as Partial<T>;
+}
+
+function firstLang(values?: LangValues, fallback = "") {
+  return values?.en?.trim() || Object.values(values ?? {}).find((v) => v.trim()) || fallback;
+}
+
+// ── Image upload slot — uploads to the media endpoint and stores the URL ──────
 function ImageSlot({
   label,
   src,
   alt,
+  folder = "brands",
   maxBytes = 2 * 1024 * 1024,
   onFileSelected,
   onRemove,
@@ -217,19 +270,23 @@ function ImageSlot({
   label: string;
   src?: string;
   alt?: string;
+  /** media subfolder, e.g. "brands". */
+  folder?: string;
   maxBytes?: number;
-  onFileSelected: (dataUrl: string) => void;
+  /** Receives the served URL of the uploaded image. */
+  onFileSelected: (url: string) => void;
   onRemove: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   function openPicker() {
     setError("");
     inputRef.current?.click();
   }
 
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -241,12 +298,16 @@ function ImageSlot({
       setError(`Max size is ${Math.round(maxBytes / (1024 * 1024))} MB.`);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === "string") onFileSelected(result);
-    };
-    reader.readAsDataURL(file);
+    setError("");
+    setUploading(true);
+    try {
+      const url = await uploadImage(file, folder);
+      onFileSelected(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -278,10 +339,11 @@ function ImageSlot({
             </div>
             <button
               type="button"
-              className="w-full py-1.5 bg-surface-container-high text-primary font-bold text-[10px] uppercase tracking-widest rounded hover:bg-surface-container transition-colors"
+              disabled={uploading}
+              className="w-full py-1.5 bg-surface-container-high text-primary font-bold text-[10px] uppercase tracking-widest rounded hover:bg-surface-container transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={openPicker}
             >
-              Replace Image
+              {uploading ? "Uploading…" : "Replace Image"}
             </button>
           </>
         ) : (
@@ -292,10 +354,11 @@ function ImageSlot({
             </p>
             <button
               type="button"
-              className="w-full py-1.5 bg-primary text-on-primary font-bold text-[10px] uppercase tracking-widest rounded hover:bg-primary-container transition-colors"
+              disabled={uploading}
+              className="w-full py-1.5 bg-primary text-on-primary font-bold text-[10px] uppercase tracking-widest rounded hover:bg-primary-container transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={openPicker}
             >
-              Choose File
+              {uploading ? "Uploading…" : "Choose File"}
             </button>
           </>
         )}
@@ -313,19 +376,32 @@ export function EditBrandPage({
   active = true,
   logoSrc = "",
   logoAlt = "",
+  additionalInfo = "{}",
   additionalFields = [],
+  brandOptions = ALL_BRANDS,
+  categoryOptions = [],
+  tenantId,
   onBack,
   onSave,
 }: Props) {
   const isAdd = mode === "add";
+  const parsedAdditionalInfo = parseBrandAdditionalInfo(additionalInfo);
 
   // UI state
   const [tab, setTab] = useState<EditTab>("general");
   const [actionsOpen, setActionsOpen] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  // Error surfaced when onSave rejects (e.g. backend validation) — no more false "success".
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
+  // null = follow the auto-generated code; string = user typed an explicit override (add mode).
+  const [codeOverride, setCodeOverride] = useState<string | null>(null);
+  // null = follow the auto-derived promo prefix; string = explicit user value.
+  const [promoOverride, setPromoOverride] = useState<string | null>(
+    parsedAdditionalInfo.general?.promoCodePrefix ?? null
+  );
   const [brandImageSrc, setBrandImageSrc] = useState(logoSrc?.trim() ? logoSrc : "");
-  const [mobileImageSrc, setMobileImageSrc] = useState("");
+  const [mobileImageSrc, setMobileImageSrc] = useState(parsedAdditionalInfo.general?.mobileImageSrc ?? "");
   const actionsRef = useRef<HTMLDivElement>(null);
 
   // Additional-info field values (keyed by field.id)
@@ -333,10 +409,36 @@ export function EditBrandPage({
     Object.fromEntries(
       additionalFields.map((f) => [
         f.id,
-        f.controlType === "Multiple Select" ? [] : "",
+        parsedAdditionalInfo.customFields?.[f.id] ??
+          (f.controlType === "Multiple Select" ? [] : ""),
       ])
     )
   );
+
+  const [displayNameValues, setDisplayNameValues] = useState<LangValues>(
+    parsedAdditionalInfo.general?.displayName ?? (brandName ? { en: brandName.split(/\s+/).slice(0, 2).join(" ") } : {})
+  );
+  const [descriptionValues, setDescriptionValues] = useState<LangValues>(
+    parsedAdditionalInfo.general?.description ?? {}
+  );
+  const [publishFrom, setPublishFrom] = useState(parsedAdditionalInfo.general?.publishFrom ?? "");
+  const [publishTo, setPublishTo] = useState(parsedAdditionalInfo.general?.publishTo ?? "");
+
+  const [contactValues, setContactValues] = useState<Required<NonNullable<BrandAdditionalInfo["contacts"]>>>(() => ({
+    officeNo1: parsedAdditionalInfo.contacts?.officeNo1 ?? "",
+    officeNo2: parsedAdditionalInfo.contacts?.officeNo2 ?? "",
+    contactPerson: parsedAdditionalInfo.contacts?.contactPerson ?? "",
+    contactPersonPhone: parsedAdditionalInfo.contacts?.contactPersonPhone ?? "",
+    contactEmails: parsedAdditionalInfo.contacts?.contactEmails ?? "",
+    outOfStockEmails: parsedAdditionalInfo.contacts?.outOfStockEmails ?? "",
+    headquartersAddress: parsedAdditionalInfo.contacts?.headquartersAddress ?? "",
+  }));
+
+  const [seoValues, setSeoValues] = useState<Required<NonNullable<BrandAdditionalInfo["seo"]>>>(() => ({
+    metaTitle: parsedAdditionalInfo.seo?.metaTitle ?? {},
+    metaKeywords: parsedAdditionalInfo.seo?.metaKeywords ?? {},
+    metaDescription: parsedAdditionalInfo.seo?.metaDescription ?? {},
+  }));
 
   function setAdditionalValue(id: string, val: string | string[]) {
     setAdditionalValues((prev) => ({ ...prev, [id]: val }));
@@ -346,19 +448,62 @@ export function EditBrandPage({
   const [isActive, setIsActive] = useState(active);
 
   useEffect(() => {
+    const nextInfo = parseBrandAdditionalInfo(additionalInfo);
     setBrandImageSrc(logoSrc?.trim() ? logoSrc : "");
-    setMobileImageSrc("");
+    setMobileImageSrc(nextInfo.general?.mobileImageSrc ?? "");
     setIsActive(active);
-  }, [logoSrc, mode, brandCode, active]);
+    setPublishFrom(nextInfo.general?.publishFrom ?? "");
+    setPublishTo(nextInfo.general?.publishTo ?? "");
+    setSelectedCategories(nextInfo.general?.categories ?? []);
+    setExcludedBrands(nextInfo.recommendations?.excludedBrandCodes ?? []);
+    setPromoOverride(nextInfo.general?.promoCodePrefix ?? null);
+    setDisplayNameValues(
+      nextInfo.general?.displayName ??
+        (brandName ? { en: brandName.split(/\s+/).slice(0, 2).join(" ") } : {})
+    );
+    setDescriptionValues(nextInfo.general?.description ?? {});
+    setContactValues({
+      officeNo1: nextInfo.contacts?.officeNo1 ?? "",
+      officeNo2: nextInfo.contacts?.officeNo2 ?? "",
+      contactPerson: nextInfo.contacts?.contactPerson ?? "",
+      contactPersonPhone: nextInfo.contacts?.contactPersonPhone ?? "",
+      contactEmails: nextInfo.contacts?.contactEmails ?? "",
+      outOfStockEmails: nextInfo.contacts?.outOfStockEmails ?? "",
+      headquartersAddress: nextInfo.contacts?.headquartersAddress ?? "",
+    });
+    setSeoValues({
+      metaTitle: nextInfo.seo?.metaTitle ?? {},
+      metaKeywords: nextInfo.seo?.metaKeywords ?? {},
+      metaDescription: nextInfo.seo?.metaDescription ?? {},
+    });
+    setAdditionalValues(
+      Object.fromEntries(
+        additionalFields.map((f) => [
+          f.id,
+          nextInfo.customFields?.[f.id] ?? (f.controlType === "Multiple Select" ? [] : ""),
+        ])
+      )
+    );
+  }, [additionalInfo, additionalFields, logoSrc, mode, brandCode, active, brandName]);
 
   // Brand Name reactive state (drives auto-populate in add mode)
   const [brandNameInput, setBrandNameInput] = useState(brandName || "");
+
+  useEffect(() => {
+    setBrandNameInput(brandName || "");
+    setCodeOverride(null);
+  }, [brandName, brandCode, mode]);
 
   // Derive auto-populated values from brand name input
   const words = brandNameInput.replace(/[^a-zA-Z0-9\s]/g, " ").trim().split(/\s+/).filter(Boolean);
   const autoDisplayName = words.slice(0, 2).join(" ");
   const autoCodePrefix = (words[0] ?? "").slice(0, 3).toUpperCase().padEnd(3, "X");
-  const autoCode = brandNameInput ? `${autoCodePrefix}-${words.length > 1 ? (words[1] ?? "").slice(0, 4).toUpperCase().padEnd(4, "0") : "0001"}` : "";
+  // Backend requires: 2–5 uppercase letters, dash, 1–6 digits (e.g. CAS-7721).
+  // The digit segment must stay numeric — deriving it from the 2nd word produced
+  // invalid codes like "AUR-LIVI". Default to 0001; user can override the field.
+  const autoCode = brandNameInput ? `${autoCodePrefix}-0001` : "";
+  const effectiveCode = codeOverride ?? autoCode;
+  const codeIsValid = /^[A-Z]{2,5}-\d{1,6}$/.test(effectiveCode);
   const autoPromo = brandNameInput.replace(/[^a-zA-Z]/g, "").slice(0, 4).toUpperCase() || "";
 
   // Display Name: seed remounts MultiLangInput only when brand name field loses focus
@@ -369,6 +514,7 @@ export function EditBrandPage({
   function handleBrandNameBlur() {
     if (isAdd && autoDisplayName !== confirmedDisplayName) {
       setConfirmedDisplayName(autoDisplayName);
+      setDisplayNameValues((prev) => ({ ...prev, en: autoDisplayName }));
       setDisplayNameSeed((s) => s + 1);
     }
   }
@@ -378,18 +524,22 @@ export function EditBrandPage({
   const promoGuess = isAdd
     ? autoPromo
     : brandCode.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase() || "BRND";
-  const codeValue = isAdd ? autoCode : brandCode;
+  // User-editable promo prefix; falls back to the auto-derived value until overridden.
+  const effectivePromo = promoOverride ?? promoGuess;
+  const codeValue = isAdd ? effectiveCode : brandCode;
 
   // Categories state
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    isAdd ? [] : ["Luxury", "Fragrance"]
+    parsedAdditionalInfo.general?.categories ?? []
   );
 
   // Recommendations state
-  const [excludedBrands, setExcludedBrands] = useState<string[]>([]);
+  const [excludedBrands, setExcludedBrands] = useState<string[]>(
+    parsedAdditionalInfo.recommendations?.excludedBrandCodes ?? []
+  );
 
   // Available brands for recommendations (exclude self)
-  const availableBrands = ALL_BRANDS.filter((b) => b.code !== brandCode);
+  const availableBrands = brandOptions.filter((b) => b.code !== brandCode);
 
   // Close actions dropdown on outside click
   useEffect(() => {
@@ -402,30 +552,86 @@ export function EditBrandPage({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  function handleSave() {
-    const code = isAdd ? autoCode || `BRD-${Date.now()}` : brandCode;
+  async function handleSave() {
+    const code = isAdd ? effectiveCode : brandCode;
+    setActionsOpen(false);
+
+    // Client-side guard so the user gets immediate, specific feedback before the round-trip.
+    if (isAdd && !codeIsValid) {
+      setSaveError(
+        `Brand code "${code}" is invalid. Expected 2–5 uppercase letters, a dash, then 1–6 digits (e.g. CAS-7721).`
+      );
+      return;
+    }
+
+    const trimmedName = (brandNameInput || brandName).trim();
+    if (!trimmedName) {
+      setSaveError("Brand name is required.");
+      return;
+    }
+
+    const missingRequiredField = additionalFields.find((field) => {
+      if (!field.enabled || !field.required) return false;
+      const value = additionalValues[field.id];
+      return value === "" || value === undefined || (Array.isArray(value) && value.length === 0);
+    });
+    if (missingRequiredField) {
+      setSaveError(`${missingRequiredField.columnLabel || missingRequiredField.fieldName} is required.`);
+      return;
+    }
+
     const savedRow: BrandListRow = {
       code,
-      name: brandNameInput || brandName,
+      name: trimmedName,
       imageSrc: brandImageSrc,
-      imageAlt: logoAlt || brandNameInput || brandName,
+      imageAlt: logoAlt || trimmedName,
       active: isActive,
     };
     // Serialise additional values — filter out empty/default so JSON is clean
-    let additionalInfoStr = "{}";
-    try {
-      const cleaned: Record<string, unknown> = {};
-      for (const [id, val] of Object.entries(additionalValues)) {
-        const isEmpty = val === "" || (Array.isArray(val) && val.length === 0);
-        if (!isEmpty) cleaned[id] = val;
-      }
-      additionalInfoStr = JSON.stringify(cleaned);
-    } catch {
-      additionalInfoStr = "{}";
+    const customFields: Record<string, string | string[]> = {};
+    for (const [id, val] of Object.entries(additionalValues)) {
+      const isEmpty = val === "" || (Array.isArray(val) && val.length === 0);
+      if (!isEmpty) customFields[id] = val;
     }
-    onSave?.(savedRow, additionalInfoStr);
-    setActionsOpen(false);
-    setShowSuccessModal(true);
+
+    const additionalInfoPayload = cleanRecord({
+      general: cleanRecord({
+        displayName: cleanRecord(displayNameValues),
+        promoCodePrefix: effectivePromo,
+        categories: selectedCategories,
+        publishFrom,
+        publishTo,
+        description: cleanRecord(descriptionValues),
+        mobileImageSrc,
+      }),
+      contacts: cleanRecord(contactValues),
+      recommendations: cleanRecord({ excludedBrandCodes: excludedBrands }),
+      seo: cleanRecord({
+        metaTitle: cleanRecord(seoValues.metaTitle),
+        metaKeywords: cleanRecord(seoValues.metaKeywords),
+        metaDescription: cleanRecord(seoValues.metaDescription),
+      }),
+      customFields,
+    }) as BrandAdditionalInfo;
+    const additionalInfoStr = JSON.stringify(additionalInfoPayload);
+    savedRow.additionalInfo = additionalInfoStr;
+
+    setSaveError("");
+    setSaving(true);
+    try {
+      // Await so a rejected save (e.g. backend validation) surfaces as an error
+      // instead of a false "Brand Created!" toast over a phantom row.
+      await onSave?.(savedRow, additionalInfoStr);
+      setShowSuccessModal(true);
+    } catch (e) {
+      setSaveError(
+        e instanceof Error && e.message
+          ? e.message
+          : "Could not save the brand. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function toggleExclusion(code: string, checked: boolean) {
@@ -471,17 +677,6 @@ export function EditBrandPage({
         </div>
 
         <div className="flex items-center gap-3">
-          {!isAdd && (
-            <button
-              type="button"
-              className="px-4 py-2 rounded-md border border-outline-variant/30 text-on-surface-variant font-semibold text-xs hover:bg-surface-container-high transition-colors flex items-center gap-2"
-              onClick={() => setShowHistoryModal(true)}
-            >
-              <IconHistory className="h-4 w-4 shrink-0" />
-              Show Change History
-            </button>
-          )}
-
           {/* Actions dropdown */}
           <div className="relative" ref={actionsRef}>
             <button
@@ -496,11 +691,12 @@ export function EditBrandPage({
               <div className="absolute right-0 top-full mt-1 w-44 bg-surface-container-lowest border border-outline-variant/20 rounded-lg shadow-xl z-20 overflow-hidden">
                 <button
                   type="button"
-                  className="w-full px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container flex items-center gap-2.5 transition-colors"
+                  disabled={saving}
+                  className="w-full px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container flex items-center gap-2.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleSave}
                 >
                   <IconSave className="h-4 w-4 shrink-0 text-primary" />
-                  Save
+                  {saving ? "Saving…" : "Save"}
                 </button>
               </div>
             )}
@@ -558,14 +754,15 @@ export function EditBrandPage({
 
                 <div className="col-span-12 md:col-span-4 space-y-1.5">
                   <label className={labelBase}>Tenant</label>
-                  <div className="relative">
-                    <select className={`${inputBase} appearance-none pr-10`}>
-                      <option>Global Enterprise Solutions</option>
-                      <option>EMEA Retail Group</option>
-                      <option>North America Brand Div</option>
-                    </select>
-                    <IconChevronDown className="absolute right-3 top-2.5 h-4 w-4 text-on-surface-variant pointer-events-none" />
-                  </div>
+                  <input
+                    className={`${inputBase} bg-surface-container text-on-surface-variant`}
+                    type="text"
+                    value={tenantId || "—"}
+                    readOnly
+                  />
+                  <p className="text-[10px] text-on-surface-variant">
+                    Brands belong to the current tenant and cannot be reassigned.
+                  </p>
                 </div>
 
                 <div className="col-span-12 md:col-span-4 space-y-1.5">
@@ -589,9 +786,8 @@ export function EditBrandPage({
                   <MultiLangInput
                     key={isAdd ? displayNameSeed : undefined}
                     label="Display Name"
-                    defaultValues={{
-                      en: isAdd ? confirmedDisplayName : displayNameGuess,
-                    }}
+                    defaultValues={displayNameValues}
+                    onValuesChange={setDisplayNameValues}
                     placeholders={{
                       en: "Auto-filled from Brand Name",
                       vn: "Tên hiển thị",
@@ -604,38 +800,50 @@ export function EditBrandPage({
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>
                     Brand Code
-                    {isAdd && autoCode && (
+                    {isAdd && autoCode && codeOverride === null && (
                       <span className="ml-1.5 text-[9px] font-normal normal-case text-primary/70 tracking-normal">
                         auto-filled
                       </span>
                     )}
                   </label>
                   <input
-                    className={`${inputBase} font-mono ${isAdd && autoCode ? "text-on-surface-variant" : ""}`}
+                    className={`${inputBase} font-mono ${
+                      isAdd && !codeIsValid
+                        ? "border-error focus:ring-error"
+                        : isAdd && codeOverride === null
+                          ? "text-on-surface-variant"
+                          : ""
+                    }`}
                     type="text"
                     value={codeValue}
-                    readOnly={isAdd && Boolean(autoCode)}
+                    readOnly={!isAdd}
                     placeholder="e.g. LHG-7721"
-                    onChange={() => {}}
+                    onChange={(e) =>
+                      isAdd && setCodeOverride(e.target.value.toUpperCase())
+                    }
                   />
+                  {isAdd && !codeIsValid && (
+                    <p className="text-[10px] text-error">
+                      Use 2–5 letters, a dash, then 1–6 digits (e.g. CAS-7721).
+                    </p>
+                  )}
                 </div>
 
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>
                     Promo Code Prefix
-                    {isAdd && autoPromo && (
+                    {promoOverride === null && effectivePromo && (
                       <span className="ml-1.5 text-[9px] font-normal normal-case text-primary/70 tracking-normal">
                         auto-filled
                       </span>
                     )}
                   </label>
                   <input
-                    className={`${inputBase} ${isAdd && autoPromo ? "text-on-surface-variant" : ""}`}
+                    className={`${inputBase} font-mono ${promoOverride === null ? "text-on-surface-variant" : ""}`}
                     type="text"
-                    value={isAdd ? autoPromo : promoGuess}
-                    readOnly={isAdd && Boolean(autoPromo)}
+                    value={effectivePromo}
                     placeholder="e.g. LHG"
-                    onChange={() => {}}
+                    onChange={(e) => setPromoOverride(e.target.value.toUpperCase())}
                   />
                 </div>
 
@@ -664,6 +872,7 @@ export function EditBrandPage({
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
                   <label className={labelBase}>Categories</label>
                   <CategoryPicker
+                    options={categoryOptions}
                     selected={selectedCategories}
                     onChange={setSelectedCategories}
                   />
@@ -680,7 +889,8 @@ export function EditBrandPage({
                   <input
                     className={inputBase}
                     type="date"
-                    defaultValue={isAdd ? "" : "2024-05-15"}
+                    value={publishFrom}
+                    onChange={(e) => setPublishFrom(e.target.value)}
                   />
                 </div>
                 <div className="col-span-12 md:col-span-3 space-y-1.5">
@@ -688,7 +898,8 @@ export function EditBrandPage({
                   <input
                     className={inputBase}
                     type="date"
-                    defaultValue={isAdd ? "" : "2025-05-15"}
+                    value={publishTo}
+                    onChange={(e) => setPublishTo(e.target.value)}
                   />
                 </div>
               </div>
@@ -703,11 +914,8 @@ export function EditBrandPage({
                 <div className="col-span-12 md:col-span-8 space-y-1.5">
                   <MultiLangLexicalRichText
                     label="Description"
-                    defaultValues={{
-                      en: isAdd
-                        ? ""
-                        : "<p>Velvet Aura Luxury represents the pinnacle of olfactory craftsmanship. Established in 2024, our mission is to curate sensory experiences that transcend the ordinary.</p>",
-                    }}
+                    defaultValues={descriptionValues}
+                    onValuesChange={setDescriptionValues}
                     placeholders={{
                       en: "Enter brand description...",
                       vn: "Nhập mô tả thương hiệu...",
@@ -741,9 +949,9 @@ export function EditBrandPage({
                   <button type="button" className={btnFooterGhost} onClick={onBack}>
                     Cancel
                   </button>
-                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                  <button type="button" disabled={saving} className={`${btnFooterPrimary} disabled:opacity-50 disabled:cursor-not-allowed`} onClick={handleSave}>
                     <IconSave className="h-4 w-4 shrink-0" />
-                    Save Changes
+                    {saving ? "Saving…" : "Save Changes"}
                   </button>
                 </div>
               )}
@@ -762,26 +970,48 @@ export function EditBrandPage({
                 <div className="col-span-12 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                   <div className="space-y-1.5">
                     <label className={labelBase}>Office No 1</label>
-                    <input className={inputBase} type="text" defaultValue={isAdd ? "" : "+1 (555) 0123-456"} />
+                    <input
+                      className={inputBase}
+                      type="text"
+                      value={contactValues.officeNo1}
+                      onChange={(e) => setContactValues((prev) => ({ ...prev, officeNo1: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>Office No 2</label>
-                    <input className={inputBase} placeholder="Alternative contact line" type="text" />
+                    <input
+                      className={inputBase}
+                      placeholder="Alternative contact line"
+                      type="text"
+                      value={contactValues.officeNo2}
+                      onChange={(e) => setContactValues((prev) => ({ ...prev, officeNo2: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>Contact Person</label>
-                    <input className={`${inputBase} font-medium`} type="text" defaultValue={isAdd ? "" : "Julian Montgomery"} />
+                    <input
+                      className={`${inputBase} font-medium`}
+                      type="text"
+                      value={contactValues.contactPerson}
+                      onChange={(e) => setContactValues((prev) => ({ ...prev, contactPerson: e.target.value }))}
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>Contact Person Phone No</label>
-                    <input className={inputBase} type="text" defaultValue={isAdd ? "" : "+1 (555) 987-6543"} />
+                    <input
+                      className={inputBase}
+                      type="text"
+                      value={contactValues.contactPersonPhone}
+                      onChange={(e) => setContactValues((prev) => ({ ...prev, contactPersonPhone: e.target.value }))}
+                    />
                   </div>
                   <div className="md:col-span-2 space-y-1.5">
                     <label className={labelBase}>Contact Person&apos;s Email</label>
                     <textarea
                       className={`${inputBase} resize-none`}
                       rows={3}
-                      defaultValue={isAdd ? "" : "julian.montgomery@editorial-executive.co\noperations.desk@brandportal.io"}
+                      value={contactValues.contactEmails}
+                      onChange={(e) => setContactValues((prev) => ({ ...prev, contactEmails: e.target.value }))}
                     />
                     <p className="text-xs text-on-surface-variant italic">
                       Enter multiple email addresses separated by a new line.
@@ -804,7 +1034,8 @@ export function EditBrandPage({
                     className={`${inputBase} resize-none`}
                     placeholder="Enter recipient emails, one per line (e.g. warehouse@brand.com)"
                     rows={4}
-                    defaultValue={isAdd ? "" : "stock-alerts@luxeheritage.com\nwarehouse@brandportal.io"}
+                    value={contactValues.outOfStockEmails}
+                    onChange={(e) => setContactValues((prev) => ({ ...prev, outOfStockEmails: e.target.value }))}
                   />
                   <p className="text-xs text-on-surface-variant italic">
                     Enter multiple email addresses separated by a new line.
@@ -825,37 +1056,11 @@ export function EditBrandPage({
                     <input
                       className={`${inputBase} pl-10 font-medium`}
                       type="text"
-                      defaultValue={isAdd ? "" : "350 Fifth Avenue, Empire State Building, New York, NY"}
+                      value={contactValues.headquartersAddress}
+                      onChange={(e) => setContactValues((prev) => ({ ...prev, headquartersAddress: e.target.value }))}
                       placeholder="Enter HQ address"
                     />
                   </div>
-                  {!isAdd && (
-                    <div className="mt-4 grid grid-cols-12 gap-4 h-48">
-                      <div className="col-span-12 md:col-span-8 relative rounded-md overflow-hidden border border-outline-variant/20">
-                        <img
-                          alt="Location map preview"
-                          className="w-full h-full object-cover grayscale contrast-125"
-                          src="https://lh3.googleusercontent.com/aida-public/AB6AXuAka-AEjzWcje_ee7Igh5WHmjM0XiGOjU2H-34r-UdC2Fpbrz5DHvaEA6vGo39s-3PswnBjdStVsxaHPvV_QMvy-4d5pbVW8ujPZb4_iYz4YHGgxYGugNmVywsLVOKvjSWifRFxDWwDU_IRrNObVhwnNRrqVUM8NAxwtYna7elsh58kjsT4G_0498_IT8vf9SYGqP1rTiqm2Jmf4QlUGL_5ZndRf3z4QFDkLO0nFM2BZkEZujXSmXe65CW6OpXVTcFgbr_t1KumRjo"
-                        />
-                        <div className="absolute inset-0 bg-primary/5 pointer-events-none" />
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-                          <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center animate-pulse">
-                            <div className="w-3 h-3 bg-primary rounded-full border-2 border-white" />
-                          </div>
-                        </div>
-                      </div>
-                      <div className="col-span-12 md:col-span-4">
-                        <div className="h-full min-h-[12rem] bg-surface-container-high rounded-md p-4 flex flex-col justify-center items-center text-center space-y-2 border border-outline-variant/20">
-                          <IconMap className="h-6 w-6 text-primary shrink-0" />
-                          <p className="text-[10px] font-bold text-on-surface uppercase">Zone Coverage</p>
-                          <p className="text-lg font-black text-on-background">Tier 1</p>
-                          <div className="px-3 py-1 bg-primary/10 rounded-full">
-                            <p className="text-[9px] font-bold text-primary">North America</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -864,9 +1069,9 @@ export function EditBrandPage({
                   <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditBrand] Contacts discard")}>
                     Discard Changes
                   </button>
-                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                  <button type="button" disabled={saving} className={`${btnFooterPrimary} disabled:opacity-50 disabled:cursor-not-allowed`} onClick={handleSave}>
                     <IconSave className="h-4 w-4 shrink-0" />
-                    Update Contacts
+                    {saving ? "Saving…" : "Update Contacts"}
                   </button>
                 </div>
               )}
@@ -934,9 +1139,9 @@ export function EditBrandPage({
                   <button type="button" className={btnFooterGhost} onClick={() => setExcludedBrands([])}>
                     Reset
                   </button>
-                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                  <button type="button" disabled={saving} className={`${btnFooterPrimary} disabled:opacity-50 disabled:cursor-not-allowed`} onClick={handleSave}>
                     <IconSave className="h-4 w-4 shrink-0" />
-                    Update Recommendations
+                    {saving ? "Saving…" : "Update Recommendations"}
                   </button>
                 </div>
               )}
@@ -959,9 +1164,8 @@ export function EditBrandPage({
                   <div className="space-y-6">
                     <MultiLangInput
                       label="Meta Title"
-                      defaultValues={{
-                        en: isAdd ? "" : "T - 10.Deep | TANGS Singapore",
-                      }}
+                      defaultValues={seoValues.metaTitle}
+                      onValuesChange={(values) => setSeoValues((prev) => ({ ...prev, metaTitle: values }))}
                       placeholders={{
                         en: "Enter the text that will appear on the browser's title bar and tab",
                         vn: "Tiêu đề xuất hiện trên tab trình duyệt",
@@ -973,6 +1177,8 @@ export function EditBrandPage({
 
                     <MultiLangInput
                       label="Meta Keywords"
+                      defaultValues={seoValues.metaKeywords}
+                      onValuesChange={(values) => setSeoValues((prev) => ({ ...prev, metaKeywords: values }))}
                       placeholders={{
                         en: "Enter keywords separated by commas…",
                         vn: "Nhập từ khóa cách nhau bằng dấu phẩy...",
@@ -985,11 +1191,8 @@ export function EditBrandPage({
                     <MultiLangTextarea
                       label="Meta Description"
                       rows={4}
-                      defaultValues={{
-                        en: isAdd
-                          ? ""
-                          : "T - 10.Deep demo ecommerce sirius brand meta description. Experience premium lifestyle curation with global delivery options.",
-                      }}
+                      defaultValues={seoValues.metaDescription}
+                      onValuesChange={(values) => setSeoValues((prev) => ({ ...prev, metaDescription: values }))}
                       placeholders={{
                         en: "Provide a brief overview of the brand that will be displayed on search results listings",
                         vn: "Mô tả ngắn về thương hiệu hiển thị trên kết quả tìm kiếm",
@@ -1010,17 +1213,21 @@ export function EditBrandPage({
                     </h3>
                     <div className="bg-white p-4 rounded-md border border-outline-variant/20 font-sans">
                       <div className="text-sm text-on-surface-variant/80 mb-0.5 truncate">
-                        https://your-estore.com › brands › {brandName.toLowerCase().replace(/\s+/g, "-") || "brand-name"}
+                        https://your-estore.com › brands › {(brandNameInput || brandName).toLowerCase().replace(/\s+/g, "-") || "brand-name"}
                       </div>
                       <h4 className="text-lg text-[#1a0dab] hover:underline cursor-pointer font-normal mb-1 truncate">
-                        {isAdd ? (
+                        {firstLang(seoValues.metaTitle) ? (
+                          firstLang(seoValues.metaTitle)
+                        ) : isAdd ? (
                           <span className="text-outline-variant italic">Meta title will appear here</span>
                         ) : (
                           "T - 10.Deep | TANGS Singapore"
                         )}
                       </h4>
                       <p className="text-[13px] text-[#4d5156] leading-snug line-clamp-3">
-                        {isAdd ? (
+                        {firstLang(seoValues.metaDescription) ? (
+                          firstLang(seoValues.metaDescription)
+                        ) : isAdd ? (
                           <span className="italic text-outline-variant">Meta description will appear here</span>
                         ) : (
                           "T - 10.Deep demo ecommerce sirius brand meta description. Experience premium lifestyle curation with global delivery options."
@@ -1046,9 +1253,9 @@ export function EditBrandPage({
                   <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditBrand] SEO discard")}>
                     Discard Changes
                   </button>
-                  <button type="button" className={btnFooterPrimary} onClick={handleSave}>
+                  <button type="button" disabled={saving} className={`${btnFooterPrimary} disabled:opacity-50 disabled:cursor-not-allowed`} onClick={handleSave}>
                     <IconSave className="h-4 w-4 shrink-0" />
-                    Update SEO Settings
+                    {saving ? "Saving…" : "Update SEO Settings"}
                   </button>
                 </div>
               )}
@@ -1063,73 +1270,11 @@ export function EditBrandPage({
               onChange={setAdditionalValue}
               isAdd={isAdd}
               onSave={handleSave}
+              saving={saving}
             />
           )}
         </section>
       </div>
-
-      {/* ── Change history (mock audit trail) ───────────────────────────── */}
-      {showHistoryModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 backdrop-blur-sm p-4"
-          onClick={() => setShowHistoryModal(false)}
-        >
-          <div
-            className="flex max-h-[min(85vh,720px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-outline-variant/15 px-6 py-4">
-              <div>
-                <h3 className="text-lg font-bold text-on-surface">Change history</h3>
-                <p className="text-xs text-on-surface-variant mt-0.5">
-                  Mock data for UI review (date, actor, field, old, new).
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close"
-                className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                onClick={() => setShowHistoryModal(false)}
-              >
-                <IconClose className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              <table className="w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="border-b border-outline-variant/20 text-on-surface-variant uppercase tracking-wider">
-                    <th className="py-2 pr-3 font-bold">Date / time</th>
-                    <th className="py-2 pr-3 font-bold">Actor</th>
-                    <th className="py-2 pr-3 font-bold">Field</th>
-                    <th className="py-2 pr-3 font-bold">Old value</th>
-                    <th className="py-2 font-bold">New value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mockBrandHistory(codeValue, brandNameInput || brandName).map((row) => (
-                    <tr key={`${row.at}-${row.field}`} className="border-b border-outline-variant/10 align-top">
-                      <td className="py-2.5 pr-3 whitespace-nowrap text-on-surface-variant">{row.at}</td>
-                      <td className="py-2.5 pr-3 text-on-surface">{row.actor}</td>
-                      <td className="py-2.5 pr-3 font-medium text-on-surface">{row.field}</td>
-                      <td className="py-2.5 pr-3 text-on-surface-variant break-words max-w-[140px]">{row.old}</td>
-                      <td className="py-2.5 text-on-surface break-words max-w-[140px]">{row.new}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="border-t border-outline-variant/10 px-6 py-3 flex justify-end">
-              <button
-                type="button"
-                className="rounded-md bg-primary px-5 py-2 text-xs font-bold uppercase tracking-widest text-on-primary hover:bg-primary-container transition-colors"
-                onClick={() => setShowHistoryModal(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Success modal ────────────────────────────────────────────────── */}
       {showSuccessModal && (
@@ -1171,6 +1316,36 @@ export function EditBrandPage({
           </div>
         </div>
       )}
+
+      {/* ── Error modal ──────────────────────────────────────────────────── */}
+      {saveError && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 backdrop-blur-sm"
+          onClick={() => setSaveError("")}
+        >
+          <div
+            className="bg-surface-container-lowest rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-full bg-error-container/30 flex items-center justify-center mx-auto mb-4">
+              <IconWarning className="h-8 w-8 text-error" />
+            </div>
+            <h3 className="text-lg font-bold text-on-surface mb-2">
+              {isAdd ? "Couldn’t create brand" : "Couldn’t save changes"}
+            </h3>
+            <p className="text-sm text-on-surface-variant mb-6">{saveError}</p>
+            <div className="flex justify-center">
+              <button
+                type="button"
+                className="px-5 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest hover:bg-primary-container transition-colors"
+                onClick={() => setSaveError("")}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1190,12 +1365,14 @@ function OtherTab({
   onChange,
   isAdd,
   onSave,
+  saving,
 }: {
   fields: BrandAdditionalField[];
   values: Record<string, string | string[]>;
   onChange: (id: string, val: string | string[]) => void;
   isAdd: boolean;
   onSave: () => void;
+  saving: boolean;
 }) {
   const enabledFields = fields.filter((f) => f.enabled);
 
@@ -1271,11 +1448,12 @@ function OtherTab({
           </button>
           <button
             type="button"
-            className="px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2"
+            disabled={saving}
+            className="px-6 py-2 bg-primary text-on-primary rounded-md font-bold text-xs uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             onClick={onSave}
           >
             <IconSave className="h-4 w-4 shrink-0" />
-            Save Additional Info
+            {saving ? "Saving…" : "Save Additional Info"}
           </button>
         </div>
       )}

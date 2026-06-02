@@ -224,7 +224,7 @@ export function TenantsPage({ onAddTenant, onEditTenant, authToken }: TenantsPag
       </header>
 
       <div className="flex-1 p-6">
-        <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search tenants…" />
+        <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search tenants…" emptyMessage="No tenants found." itemNoun="tenants" />
       </div>
 
       {/* Deactivate confirmation modal (API: soft-delete, active = 0) */}

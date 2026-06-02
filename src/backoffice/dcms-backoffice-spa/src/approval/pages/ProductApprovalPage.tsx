@@ -198,6 +198,8 @@ export function ProductApprovalPage({ tenantId, storeId, authToken, onPendingCou
             getRowId={(row) => row.id}
             rowSelection={rowSelection}
             onRowSelectionChange={setRowSelection}
+            emptyMessage="No products pending approval."
+            itemNoun="products"
           />
         )}
 

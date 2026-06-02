@@ -5,6 +5,8 @@ import { LanguageProvider } from "./LanguageContext";
 import type { BrandListRow } from "./pages/BrandsPage";
 import { BrandsPage } from "./pages/BrandsPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
+import type { CatNode } from "./pages/CategoriesPage";
+import { fetchCategories } from "./api/categoriesApi";
 import { EditBrandPage } from "./pages/EditBrandPage";
 import { EditProductPage } from "./pages/EditProductPage";
 import { ProductImageImportPage } from "./pages/ProductImageImportPage";
@@ -71,7 +73,7 @@ import { TenantFormPage } from "./pages/access/TenantFormPage";
 import { TemplatesPage } from "./pages/TemplatesPage";
 import type { TenantRow } from "./api/tenantsApi";
 
-type BrandEditData = Pick<BrandListRow, "code" | "name" | "active" | "imageSrc" | "imageAlt">;
+type BrandEditData = Pick<BrandListRow, "code" | "name" | "active" | "imageSrc" | "imageAlt" | "additionalInfo">;
 
 type BrandFormState =
   | { mode: "idle" }
@@ -494,6 +496,31 @@ export function EStoreApp({
       .finally(() => setBrandsLoading(false));
   }, [tenantId, authToken]);
 
+  // ── Categories (flat {id,name} list for the brand Categories picker) ──
+  const [brandCategoryOptions, setBrandCategoryOptions] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    fetchCategories(tenantId, authToken)
+      .then((tree) => {
+        if (cancelled) return;
+        const flat: { id: string; name: string }[] = [];
+        const walk = (nodes: CatNode[]) =>
+          nodes.forEach((n) => {
+            flat.push({ id: n.id, name: n.name });
+            if (n.children?.length) walk(n.children);
+          });
+        walk(tree);
+        setBrandCategoryOptions(flat);
+      })
+      .catch(() => {
+        /* non-fatal: the picker simply shows "no categories defined yet" */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, authToken]);
+
   const [brandAdditionalFields, setBrandAdditionalFields] = useState<BrandAdditionalField[]>(
     () =>
       safeJsonParse<BrandAdditionalField[]>(localStorage.getItem(LS_KEYS.brandAdditionalFields)) ??
@@ -807,25 +834,23 @@ export function EStoreApp({
             active={brandForm.mode === "edit" ? brandForm.data.active : undefined}
             logoSrc={brandForm.mode === "edit" ? brandForm.data.imageSrc : undefined}
             logoAlt={brandForm.mode === "edit" ? brandForm.data.imageAlt : undefined}
+            additionalInfo={brandForm.mode === "edit" ? brandForm.data.additionalInfo : undefined}
             additionalFields={brandAdditionalFields}
+            brandOptions={brands}
+            categoryOptions={brandCategoryOptions}
+            tenantId={tenantId}
             onBack={() => setBrandForm({ mode: "idle" })}
             onSave={async (row, additionalInfo) => {
               if (tenantId) {
-                try {
-                  const saved = brandForm.mode === "add"
-                    ? await createBrand(tenantId, row.code, { name: row.name, active: row.active, imageUrl: row.imageSrc, imageAlt: row.imageAlt, additionalInfo }, authToken)
-                    : await updateBrand(tenantId, row.code, { name: row.name, active: row.active, imageUrl: row.imageSrc, imageAlt: row.imageAlt, additionalInfo }, authToken);
-                  setBrands((prev) => {
-                    const exists = prev.some((b) => b.code === saved.code);
-                    return exists ? prev.map((b) => (b.code === saved.code ? saved : b)) : [saved, ...prev];
-                  });
-                } catch {
-                  // API error — still update local state optimistically so UI isn't broken
-                  setBrands((prev) => {
-                    const exists = prev.some((b) => b.code === row.code);
-                    return exists ? prev.map((b) => (b.code === row.code ? row : b)) : [row, ...prev];
-                  });
-                }
+                // Let failures propagate — the form surfaces the error instead of
+                // showing a false "success" over a phantom row that vanishes on reload.
+                const saved = brandForm.mode === "add"
+                  ? await createBrand(tenantId, row.code, { name: row.name, active: row.active, imageUrl: row.imageSrc, imageAlt: row.imageAlt, additionalInfo }, authToken)
+                  : await updateBrand(tenantId, row.code, { name: row.name, active: row.active, imageUrl: row.imageSrc, imageAlt: row.imageAlt, additionalInfo }, authToken);
+                setBrands((prev) => {
+                  const exists = prev.some((b) => b.code === saved.code);
+                  return exists ? prev.map((b) => (b.code === saved.code ? saved : b)) : [saved, ...prev];
+                });
               } else {
                 // No tenantId — in-memory only (dev / demo mode), additionalInfo not persisted
                 setBrands((prev) => {
@@ -847,6 +872,7 @@ export function EStoreApp({
                   active: row.active,
                   imageSrc: row.imageSrc,
                   imageAlt: row.imageAlt,
+                  additionalInfo: row.additionalInfo,
                 },
               })
             }
@@ -858,11 +884,9 @@ export function EStoreApp({
               if (tenantId) {
                 const removed = brands.find((b) => !next.some((n) => n.code === b.code));
                 if (removed) {
-                  try {
-                    await deleteBrand(tenantId, removed.code, authToken);
-                  } catch {
-                    // ignore — row removed locally regardless
-                  }
+                  // Let failures propagate so the caller keeps the row and shows the error
+                  // instead of silently dropping a brand that still exists on the server.
+                  await deleteBrand(tenantId, removed.code, authToken);
                 }
               }
               setBrands(next);

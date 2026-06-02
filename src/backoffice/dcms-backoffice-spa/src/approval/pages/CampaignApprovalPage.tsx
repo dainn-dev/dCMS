@@ -197,6 +197,8 @@ export function CampaignApprovalPage({ tenantId, authToken, onPendingCountChange
             getRowId={(row) => row.id}
             rowSelection={rowSelection}
             onRowSelectionChange={setRowSelection}
+            emptyMessage="No campaigns pending approval."
+            itemNoun="campaigns"
           />
         )}
 

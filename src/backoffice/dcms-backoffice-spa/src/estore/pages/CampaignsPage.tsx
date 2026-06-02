@@ -249,6 +249,8 @@ export function CampaignsPage({ onCreateCampaign, onEditCampaign, onViewCampaign
           data={filteredRows}
           getRowId={(r) => r.id}
           globalFilterPlaceholder="Search by name, code, audience, budget…"
+          emptyMessage="No campaigns found."
+          itemNoun="campaigns"
         />
       </div>
 

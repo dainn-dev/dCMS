@@ -239,7 +239,7 @@ export function UsersPage({ onAddUser, onEditUser, onChangePassword }: UsersPage
             Loading users…
           </div>
         ) : (
-          <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search users…" />
+          <DataTable columns={columns} data={filtered} globalFilterPlaceholder="Search users…" emptyMessage="No users found." itemNoun="users" />
         )}
       </div>
 

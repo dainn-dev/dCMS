@@ -215,7 +215,7 @@ export function RolesPage({ onAddRole, onEditRole, onManageModules, authToken }:
       </header>
 
       <div className="flex-1 p-6">
-        <DataTable columns={columns} data={rows} globalFilterPlaceholder="Search by role name…" />
+        <DataTable columns={columns} data={rows} globalFilterPlaceholder="Search by role name…" emptyMessage="No roles found." itemNoun="roles" />
       </div>
 
       {deleteTarget && (

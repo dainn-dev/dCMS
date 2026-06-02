@@ -42,6 +42,7 @@ function toRow(dto: BrandDto): BrandListRow {
     active:   dto.active,
     imageSrc: dto.imageUrl ?? "",
     imageAlt: dto.imageAlt ?? "",
+    additionalInfo: dto.additionalInfo ?? "{}",
   };
 }
 

@@ -197,6 +197,8 @@ export function PromoCodeApprovalPage({ tenantId, authToken, onPendingCountChang
             getRowId={(row) => row.id}
             rowSelection={rowSelection}
             onRowSelectionChange={setRowSelection}
+            emptyMessage="No promo codes pending approval."
+            itemNoun="promo codes"
           />
         )}
 

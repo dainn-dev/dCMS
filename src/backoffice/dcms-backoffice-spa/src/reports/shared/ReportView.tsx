@@ -210,7 +210,7 @@ export function ReportView<T extends { id: string }>({
         )}
 
         {!loading && rows.length > 0 && (
-          <DataTable columns={columns} data={rows} getRowId={(row) => row.id} globalFilterPlaceholder="Search in results…" />
+          <DataTable columns={columns} data={rows} getRowId={(row) => row.id} globalFilterPlaceholder="Search in results…" emptyMessage="No matching records." itemNoun="records" />
         )}
 
         {!loading && !hasSearched && (

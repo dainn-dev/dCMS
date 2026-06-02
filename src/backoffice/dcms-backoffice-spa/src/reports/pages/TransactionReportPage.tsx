@@ -452,6 +452,8 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Props) {
             data={summaryRows}
             getRowId={(row) => row.id}
             globalFilterPlaceholder="Search in results…"
+            emptyMessage="No matching records."
+            itemNoun="records"
           />
         )}
         {!loading && detailsRows.length > 0 && tab === "details" && (
@@ -460,6 +462,8 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Props) {
             data={detailsRows}
             getRowId={(row) => row.id}
             globalFilterPlaceholder="Search by order, member, store…"
+            emptyMessage="No matching transactions."
+            itemNoun="transactions"
           />
         )}
         {!loading && ecommerceRows.length > 0 && tab === "ecommerce" && (
@@ -468,6 +472,8 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Props) {
             data={ecommerceRows}
             getRowId={(row) => row.id}
             globalFilterPlaceholder="Search by order, ref…"
+            emptyMessage="No matching orders."
+            itemNoun="orders"
           />
         )}
 

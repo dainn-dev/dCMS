@@ -227,7 +227,7 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
       </header>
 
       <div className="flex-1 space-y-6 p-6">
-        <DataTable columns={columns} data={rows} globalFilterPlaceholder="Search by name, code, or type…" />
+        <DataTable columns={columns} data={rows} globalFilterPlaceholder="Search by name, code, or type…" emptyMessage="No attributes found." itemNoun="attributes" />
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary to-primary-container p-6 text-on-primary shadow-lg shadow-primary/20 md:col-span-2">

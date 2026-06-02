@@ -479,6 +479,8 @@ export function ReturnsPage({ tenantId, storeId, authToken }: Props) {
               globalFilterPlaceholder="Search by return id, order, reason…"
               getRowId={(row) => row.returnId}
               loading={loading && rows.length === 0}
+              emptyMessage="No returns found."
+              itemNoun="returns"
             />
           </div>
         </>

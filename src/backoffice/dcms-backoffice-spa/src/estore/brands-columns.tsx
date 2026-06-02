@@ -1,6 +1,5 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import {
-  IconAccountTree,
   IconChevronDown,
   IconChevronUp,
   IconDelete,
@@ -14,6 +13,7 @@ export type BrandListRow = {
   imageSrc: string;
   imageAlt: string;
   active: boolean;
+  additionalInfo?: string;
 };
 
 function SortHeader({
@@ -50,31 +50,8 @@ export function createBrandColumns(
   onDelete?: (code: string) => void
 ): ColumnDef<BrandListRow>[] {
   return [
-    {
-      id: "select",
-      header: ({ table }) => (
-        <input
-          type="checkbox"
-          className="h-3.5 w-3.5 rounded border-outline-variant accent-primary cursor-pointer"
-          checked={table.getIsAllPageRowsSelected()}
-          ref={(el) => { if (el) el.indeterminate = table.getIsSomePageRowsSelected(); }}
-          onChange={(e) => table.toggleAllPageRowsSelected(e.target.checked)}
-          aria-label="Select all"
-        />
-      ),
-      cell: ({ row }) => (
-        <input
-          type="checkbox"
-          className="h-3.5 w-3.5 rounded border-outline-variant accent-primary cursor-pointer"
-          checked={row.getIsSelected()}
-          onChange={(e) => row.toggleSelected(e.target.checked)}
-          aria-label="Select row"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-    },
-
+    // NOTE: row-selection checkboxes were removed — the Brands page has no bulk action,
+    // so selection was a dead-end. Re-add a select column here if bulk operations land.
     {
       accessorKey: "code",
       header: ({ column }) => (
@@ -135,14 +112,6 @@ export function createBrandColumns(
             onClick={() => onEditBrand?.(row.original)}
           >
             <IconEdit className="text-lg" />
-          </button>
-          <button
-            type="button"
-            className="p-1.5 hover:bg-surface-variant rounded transition-colors text-on-surface-variant hover:text-primary"
-            aria-label="Brand hierarchy"
-            onClick={() => console.info("[Brands] Tree", row.original.code)}
-          >
-            <IconAccountTree className="h-4 w-4" />
           </button>
           <button
             type="button"

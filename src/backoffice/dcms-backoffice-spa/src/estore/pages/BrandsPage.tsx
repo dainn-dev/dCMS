@@ -66,15 +66,25 @@ export function BrandsPage({ onEditBrand, onCreateBrand, rows, onRowsChange, loa
     [onEditBrand, requestDelete]
   );
 
-  function handleDeleteConfirm() {
+  async function handleDeleteConfirm() {
     if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
     if (onRowsChange) {
-      onRowsChange(tableRows.filter((r) => r.code !== deleteTarget.code));
-      setToast({ message: "Brand removed.", visible: true });
+      try {
+        // Await so a failed server delete surfaces an error and keeps the row,
+        // instead of falsely reporting success.
+        await onRowsChange(tableRows.filter((r) => r.code !== target.code));
+        setToast({ message: "Brand removed.", visible: true });
+      } catch (e) {
+        setToast({
+          message: e instanceof Error ? e.message : "Failed to delete brand. Please try again.",
+          visible: true,
+        });
+      }
     } else {
       setToast({ message: "Delete is not available in this view.", visible: true });
     }
-    setDeleteTarget(null);
   }
 
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({
@@ -149,6 +159,8 @@ export function BrandsPage({ onEditBrand, onCreateBrand, rows, onRowsChange, loa
           columns={columns}
           data={tableRows}
           globalFilterPlaceholder="Search by code or brand name…"
+          emptyMessage="No brands found."
+          itemNoun="brands"
         />
         )}
       </div>
@@ -165,8 +177,7 @@ export function BrandsPage({ onEditBrand, onCreateBrand, rows, onRowsChange, loa
                 <h3 className="text-sm font-bold text-on-surface">Delete brand</h3>
                 <p className="mt-1.5 text-xs text-on-surface-variant leading-relaxed">
                   Remove <span className="font-semibold text-on-surface">{deleteTarget.name}</span> (
-                  {deleteTarget.code}) from the list? This demo does not call a server; the row disappears from the
-                  table.
+                  {deleteTarget.code})? This permanently deletes the brand. This action cannot be undone.
                 </p>
               </div>
             </div>

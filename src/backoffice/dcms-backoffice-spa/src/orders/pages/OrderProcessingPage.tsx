@@ -724,6 +724,8 @@ export function OrderProcessingPage({ tenantId, storeId, authToken, onViewOrder 
               defaultHiddenColumns={["distributionCentre", "paymentMethod", "paymentDate"]}
               globalFilterPlaceholder="Search by order, customer, store…"
               loading={loading && rows.length === 0}
+              emptyMessage="No orders found."
+              itemNoun="orders"
               footerMode="loadMore"
               loadMore={{
                 onClick: () => void loadMore(),
