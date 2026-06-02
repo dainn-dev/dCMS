@@ -544,6 +544,8 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
             data={rows}
             getRowId={(row) => row.id}
             globalFilterPlaceholder="Search by order, member, store, promo…"
+            emptyMessage="No matching records."
+            itemNoun="records"
           />
         )}
 
