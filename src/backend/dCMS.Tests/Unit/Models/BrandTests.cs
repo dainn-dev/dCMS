@@ -14,10 +14,16 @@ public sealed class BrandTests
     [InlineData("VEL-4490")]
     [InlineData("AB-1")]
     [InlineData("ABCDE-999999")]
+    // DAI-743 relaxed cases — bulk-import legacy codes:
+    [InlineData("acqua-di-parma")]
+    [InlineData("10-DEEP")]
+    [InlineData("a")]
+    [InlineData("CASMI7721")]                  // no dash
+    [InlineData("ABCDEFGHIJ-1234567890")]      // long but ≤ 64
     public void Create_succeeds_for_valid_codes(string code)
     {
         var brand = Brand.Create("t1", code, "Test Brand", "", "", true, Now);
-        brand.Code.Should().Be(code.ToUpperInvariant());
+        brand.Code.Should().Be(code);          // DAI-743: casing preserved
         brand.TenantId.Should().Be("t1");
         brand.Active.Should().BeTrue();
         brand.CreatedAt.Should().Be(Now);
@@ -25,13 +31,12 @@ public sealed class BrandTests
     }
 
     [Theory]
-    [InlineData("cas-7721")]       // lowercase
-    [InlineData("CAS7721")]        // no dash
-    [InlineData("C-1234")]         // prefix too short (1 char)
-    [InlineData("TOOLONG-1")]      // prefix > 5 chars
-    [InlineData("CAS-1234567")]    // suffix > 6 digits
-    [InlineData("CAS-")]           // missing digits
-    [InlineData("")]               // empty
+    [InlineData("")]                                              // empty
+    [InlineData("-leading-dash")]                                 // first char must be alnum
+    [InlineData("name with spaces")]                              // disallowed char
+    [InlineData("name_with_underscore")]                          // underscore disallowed
+    [InlineData("contains/slash")]                                // disallowed char
+    [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXYZ12345678901234567890ABCDEFGHIJKLMNOPQRSTU")] // > 64 chars
     public void Create_throws_for_invalid_codes(string code)
     {
         var act = () => Brand.Create("t1", code, "Test Brand", "", "", true, Now);
@@ -60,12 +65,17 @@ public sealed class BrandTests
     }
 
     [Fact]
-    public void Create_normalises_code_to_uppercase()
+    public void Create_preserves_code_casing_after_DAI743()
     {
-        // lowercase input but valid after upper — IsValidCode checks uppercase only
-        // Create always calls ToUpperInvariant before matching, but IsValidCode is raw
-        var brand = Brand.Create("t1", "CAS-1234", "Brand", "", "", true, Now);
-        brand.Code.Should().Be("CAS-1234");
+        var brand = Brand.Create("t1", "Acqua-di-Parma", "Brand", "", "", true, Now);
+        brand.Code.Should().Be("Acqua-di-Parma");
+    }
+
+    [Fact]
+    public void Create_trims_code_whitespace()
+    {
+        var brand = Brand.Create("t1", "  CAS-7721  ", "Brand", "", "", true, Now);
+        brand.Code.Should().Be("CAS-7721");
     }
 
     // ── UpdateDetails ─────────────────────────────────────────────────────────
@@ -99,12 +109,17 @@ public sealed class BrandTests
 
     [Theory]
     [InlineData("CAS-7721", true)]
-    [InlineData("AB-1",     true)]
+    [InlineData("AB-1", true)]
     [InlineData("ABCDE-999999", true)]
-    [InlineData("cas-7721", false)]
-    [InlineData("CAS7721",  false)]
-    [InlineData("",         false)]
-    [InlineData("TOOLONG-1", false)]
+    // DAI-743 relaxed:
+    [InlineData("cas-7721", true)]
+    [InlineData("CAS7721", true)]
+    [InlineData("acqua-di-parma", true)]
+    [InlineData("10-DEEP", true)]
+    [InlineData("a", true)]
+    [InlineData("", false)]
+    [InlineData("-x", false)]
+    [InlineData("has space", false)]
     public void IsValidCode_returns_expected(string code, bool expected)
     {
         Brand.IsValidCode(code).Should().Be(expected);

@@ -9,8 +9,10 @@ namespace dCMS.Core.Models;
 /// </summary>
 public sealed class Brand
 {
+    // Relaxed for legacy bulk-import (DAI-743). Accepts alphanumeric + dash, length 1–64,
+    // case-insensitive. Existing strict format (e.g. "CAS-7721") still passes.
     private static readonly Regex CodePattern =
-        new(@"^[A-Z]{2,5}-[0-9]{1,6}$", RegexOptions.Compiled);
+        new(@"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$", RegexOptions.Compiled);
 
     private Brand() { }
 
@@ -44,9 +46,10 @@ public sealed class Brand
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (!CodePattern.IsMatch(code))
+        var trimmedCode = code.Trim();
+        if (!CodePattern.IsMatch(trimmedCode))
             throw new ArgumentException(
-                $"Brand code '{code}' is invalid. Expected format: 2–5 uppercase letters, dash, 1–6 digits (e.g. CAS-7721).",
+                $"Brand code '{code}' is invalid. Allowed: 1–64 chars of letters, digits, and dashes; must start with a letter or digit.",
                 nameof(code));
 
         if (name.Length > 200)
@@ -55,7 +58,7 @@ public sealed class Brand
         return new Brand
         {
             TenantId       = tenantId,
-            Code           = code.Trim().ToUpperInvariant(),
+            Code           = trimmedCode,
             Name           = name.Trim(),
             Active         = active,
             ImageUrl       = (imageUrl ?? string.Empty).Trim(),

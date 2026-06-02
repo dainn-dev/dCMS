@@ -21,6 +21,12 @@ public static class DcmsJwtAuthExtensions
         if (!opt.Enabled)
             return services;
 
+        // DAI-748 — every dCMS service is bound to a single client; missing config = misconfiguration.
+        var clientId = configuration.GetSection("Dcms:Client")["Id"]?.Trim();
+        if (string.IsNullOrWhiteSpace(clientId))
+            throw new InvalidOperationException(
+                "Auth:Enabled is true but Dcms:Client.Id is missing. Set \"Dcms\": { \"Client\": { \"Id\": \"<chain>\" } } in appsettings.");
+
         if (string.IsNullOrWhiteSpace(opt.JwtSigningKey) || opt.JwtSigningKey.Length < 32)
             throw new InvalidOperationException(
                 $"Auth:Enabled is true but Auth:{nameof(DcmsAuthOptions.JwtSigningKey)} is missing or shorter than 32 characters.");
@@ -100,6 +106,17 @@ public static class DcmsJwtAuthExtensions
                 DcmsRoles.StoreManager,
                 DcmsRoles.CustomerSupport,
                 DcmsRoles.SuperAdmin));
+
+            // DAI-752 (US-5) — HQ ClientAdmin (or SuperAdmin) only.
+            o.AddPolicy(DcmsPolicies.ClientAdminOnly, p => p.RequireAuthenticatedUser().RequireRole(
+                DcmsRoles.ClientAdmin,
+                DcmsRoles.SuperAdmin));
+
+            // DAI-752 (US-5) — TenantAdmin or anyone broader. ChainAdmin retained for back-compat.
+            o.AddPolicy(DcmsPolicies.TenantAdminOrAbove, p => p.RequireAuthenticatedUser().RequireRole(
+                DcmsRoles.TenantAdmin,
+                DcmsRoles.ChainAdmin,
+                DcmsRoles.SuperAdmin));
         });
 
         return services;
@@ -160,6 +177,22 @@ public static class DcmsJwtAuthExtensions
     {
         if (configuration.IsDcmsAuthEnabled())
             builder.AddEndpointFilter<StoresFromBodyAccessEndpointFilter>();
+        return builder;
+    }
+
+    /// <summary>DAI-748 (US-1) — applies client_id check (token must belong to this deployment's client).</summary>
+    public static RouteGroupBuilder WithClientAccess(this RouteGroupBuilder group, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            group.AddEndpointFilter<ClientScopeAccessEndpointFilter>();
+        return group;
+    }
+
+    /// <summary>DAI-748 (US-1) — per-endpoint variant of the client_id check.</summary>
+    public static RouteHandlerBuilder WithClientAccess(this RouteHandlerBuilder builder, IConfiguration configuration)
+    {
+        if (configuration.IsDcmsAuthEnabled())
+            builder.AddEndpointFilter<ClientScopeAccessEndpointFilter>();
         return builder;
     }
 }

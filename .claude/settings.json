@@ -6,7 +6,35 @@
       "Bash(npm:*)",
       "Bash(npx:*)",
       "Bash(pytest:*)",
-      "Bash(go:*)"
+      "Bash(go:*)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'US-2 - Schema migration: ClientId on tenant-scoped tables' -BodyFile 'c:\\\\tmp\\\\us2-body.md' -ParentId $parent -Priority 2 -Estimate 5)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'US-3 - Branches domain + nearest-branch resolver' -BodyFile 'c:\\\\tmp\\\\us3-body.md' -ParentId $parent -Priority 2 -Estimate 3)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'US-4 - Storefront tenant-scoped APIs + X-Active-Tenant header' -BodyFile 'c:\\\\tmp\\\\us4-body.md' -ParentId $parent -Priority 2 -Estimate 5)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'US-5 - Users module: ClientAdmin/TenantAdmin + impersonation' -BodyFile 'c:\\\\tmp\\\\us5-body.md' -ParentId $parent -Priority 2 -Estimate 8)",
+      "PowerShell($parent = '42667cd3-51a2-41f4-b3d0-a292fe234174')",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T1.1 - Add DcmsClaims.ClientId constant; obsolete StoreIds/BrandIds' -BodyFile 'c:\\\\tmp\\\\t1-1.md' -ParentId $us1 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T1.2 - Mint client_id claim from Dcms:Client.Id config' -BodyFile 'c:\\\\tmp\\\\t1-2.md' -ParentId $us1 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T1.3 - Authorization handlers: graceful client_id fallback' -BodyFile 'c:\\\\tmp\\\\t1-3.md' -ParentId $us1 -Priority 2 -Estimate 2)",
+      "PowerShell($us1 = 'f0ccf2ef-a14d-4659-9322-4b397587c795')",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T3.1 - Branches table migration + seed 3 branches' -BodyFile 'c:\\\\tmp\\\\t3-1.md' -ParentId $us3 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T3.2 - BranchQueryStore: list + Haversine nearest' -BodyFile 'c:\\\\tmp\\\\t3-2.md' -ParentId $us3 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T3.3 - Storefront branch endpoints \\(list + :nearest\\)' -BodyFile 'c:\\\\tmp\\\\t3-3.md' -ParentId $us3 -Priority 2 -Estimate 2)",
+      "PowerShell($us3 = '483975f5-49e5-4b7d-a27d-f1612fdcc33a')",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T4.1 - StorefrontTenantBinder middleware' -BodyFile 'c:\\\\tmp\\\\t4-1.md' -ParentId $us4 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T4.2 - Wire binder into Catalog/Inventory + CORS' -BodyFile 'c:\\\\tmp\\\\t4-2.md' -ParentId $us4 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T4.3 - Storefront BranchProvider + fetch interceptor' -BodyFile 'c:\\\\tmp\\\\t4-3.md' -ParentId $us4 -Priority 2 -Estimate 2)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T4.4 - BranchPicker UI component' -BodyFile 'c:\\\\tmp\\\\t4-4.md' -ParentId $us4 -Priority 2 -Estimate 1)",
+      "PowerShell(& 'c:\\\\tmp\\\\linear-create.ps1' -Title 'T4.5 - Cache key vary-by X-Active-Tenant' -BodyFile 'c:\\\\tmp\\\\t4-5.md' -ParentId $us4 -Priority 3 -Estimate 1)",
+      "PowerShell($us4 = 'f4a47eea-5479-409c-8e25-ed37a1bf6a7e')",
+      "PowerShell($env:LINEAR_API_KEY; $env:LINEAR_TOKEN; Get-Content \"$env:USERPROFILE\\\\.linear-token\" -ErrorAction SilentlyContinue; Get-Content \"$env:USERPROFILE\\\\.config\\\\linear\\\\token\" -ErrorAction SilentlyContinue)",
+      "Bash(:)",
+      "Bash(../../backoffice/dcms-backoffice-spa/node_modules/.bin/tsc --noEmit -p tsconfig.json --typeRoots ../../backoffice/dcms-backoffice-spa/node_modules/@types --moduleResolution bundler)",
+      "Bash(../../backoffice/dcms-backoffice-spa/node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(docker port *)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
     ]
   },
   "hooks": {

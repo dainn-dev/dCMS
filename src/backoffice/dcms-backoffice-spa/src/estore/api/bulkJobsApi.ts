@@ -1,6 +1,10 @@
 /**
- * Async bulk jobs (catalog CSV import, order export) — DAI-684. Same-origin; uses Umbraco backoffice cookie.
+ * Async bulk jobs (catalog CSV/XLSX import, order export) — DAI-684. Same-origin; uses Umbraco backoffice cookie.
  * Base: /umbraco/dcms/api/bulk-jobs
+ *
+ * Catalog import auto-detects schema from the header row:
+ *   - Products  : slug, categoryId, nameVi[, descriptionVi]
+ *   - Categories: Code, Name, MetaTitle, MetaKeywords, MetaDescription, Active, PublishedFrom, PublishedTo
  */
 
 const BASE = "/umbraco/dcms/api/bulk-jobs";
@@ -47,20 +51,11 @@ export async function startCatalogImport(file: File, storeId?: string): Promise<
   return parse<{ jobId: string; hangfireJobId: string }>(r);
 }
 
-export async function startOrdersExport(body: { dateFrom: string; dateTo: string; storeId?: string }): Promise<{
-  jobId: string;
-  hangfireJobId: string;
-}> {
-  const r = await fetch(`${BASE}/orders-export`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      dateFrom: body.dateFrom,
-      dateTo: body.dateTo,
-      storeId: body.storeId ?? "",
-    }),
-    credentials: "include",
-  });
+export async function startBrandImport(file: File, storeId?: string): Promise<{ jobId: string; hangfireJobId: string }> {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  if (storeId) fd.append("storeId", storeId);
+  const r = await fetch(`${BASE}/brand-import`, { method: "POST", body: fd, credentials: "include" });
   return parse<{ jobId: string; hangfireJobId: string }>(r);
 }
 

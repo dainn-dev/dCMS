@@ -340,7 +340,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
     }
 
     private const string CategoryColumns = """
-        "Id","TenantId","ParentId","Path","Depth","Name","Slug","SortOrder",
+        "Id","TenantId","ParentId","Path","Depth","Name","Slug","SortOrder","Code",
         "Active","PublishFrom","PublishUntil",
         "ImageMenuUrl","ImagePageUrl","ImageThumbUrl",
         "ShowInNav","ShowInBrands","CustomNavUrl","NavSortPriority","BreakNavColumn",
@@ -380,6 +380,21 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         return row?.ToModel();
     }
 
+    public async Task<CatalogCategoryRow?> GetCategoryBySlugAsync(string tenantId, string slug,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        var sql = $"""
+            SELECT {CategoryColumns}
+            FROM "Categories"
+            WHERE "TenantId" = @TenantId AND "Slug" = @Slug
+            """;
+        var row = await connection.QuerySingleOrDefaultAsync<CategoryRow>(
+            new CommandDefinition(sql, new { TenantId = tenantId, Slug = slug }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return row?.ToModel();
+    }
+
     public async Task<bool> CategorySlugExistsAsync(string tenantId, string slug, int? excludeId,
         CancellationToken cancellationToken = default)
     {
@@ -415,7 +430,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
 
         const string sql = """
             INSERT INTO "Categories"
-            ("TenantId","ParentId","Path","Depth","Name","Slug","SortOrder",
+            ("TenantId","ParentId","Path","Depth","Name","Slug","SortOrder","Code",
              "Active","PublishFrom","PublishUntil",
              "ImageMenuUrl","ImagePageUrl","ImageThumbUrl",
              "ShowInNav","ShowInBrands","CustomNavUrl","NavSortPriority","BreakNavColumn",
@@ -423,7 +438,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
              "MetaTitleJson","MetaKeywordsJson","MetaDescJson",
              "RestrictAccess","AccessApp","AccessMemberType","AccessMemberTier")
             VALUES
-            (@TenantId,@ParentId,@Path,@Depth,@Name,@Slug,@SortOrder,
+            (@TenantId,@ParentId,@Path,@Depth,@Name,@Slug,@SortOrder,@Code,
              @Active,@PublishFrom,@PublishUntil,
              @ImageMenuUrl,@ImagePageUrl,@ImageThumbUrl,
              @ShowInNav,@ShowInBrands,@CustomNavUrl,@NavSortPriority,@BreakNavColumn,
@@ -436,7 +451,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         return await connection.ExecuteScalarAsync<int>(new CommandDefinition(sql, new
         {
             row.TenantId, row.ParentId, Path = path, Depth = depth,
-            row.Name, row.Slug, row.SortOrder,
+            row.Name, row.Slug, row.SortOrder, row.Code,
             row.Active, PublishFrom = row.PublishFrom?.UtcDateTime, PublishUntil = row.PublishUntil?.UtcDateTime,
             row.ImageMenuUrl, row.ImagePageUrl, row.ImageThumbUrl,
             row.ShowInNav, row.ShowInBrands, row.CustomNavUrl, row.NavSortPriority, row.BreakNavColumn,
@@ -454,6 +469,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
                 "Name"             = @Name,
                 "Slug"             = @Slug,
                 "SortOrder"        = @SortOrder,
+                "Code"             = @Code,
                 "Active"           = @Active,
                 "PublishFrom"      = @PublishFrom,
                 "PublishUntil"     = @PublishUntil,
@@ -478,7 +494,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             """;
         var affected = await connection.ExecuteAsync(new CommandDefinition(sql, new
         {
-            row.Id, row.TenantId, row.Name, row.Slug, row.SortOrder,
+            row.Id, row.TenantId, row.Name, row.Slug, row.SortOrder, row.Code,
             row.Active, PublishFrom = row.PublishFrom?.UtcDateTime, PublishUntil = row.PublishUntil?.UtcDateTime,
             row.ImageMenuUrl, row.ImagePageUrl, row.ImageThumbUrl,
             row.ShowInNav, row.ShowInBrands, row.CustomNavUrl, row.NavSortPriority, row.BreakNavColumn,
@@ -857,6 +873,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         public string   Name             { get; init; } = null!;
         public string   Slug             { get; init; } = null!;
         public int      SortOrder        { get; init; }
+        public string   Code             { get; init; } = "";
         public bool     Active           { get; init; }
         public DateTime? PublishFrom     { get; init; }
         public DateTime? PublishUntil    { get; init; }
@@ -880,6 +897,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
 
         public CatalogCategoryRow ToModel() => new(
             Id, TenantId, ParentId, Path, Depth, Name, Slug, SortOrder,
+            Code,
             Active,
             PublishFrom.HasValue  ? new DateTimeOffset(PublishFrom.Value,  TimeSpan.Zero) : null,
             PublishUntil.HasValue ? new DateTimeOffset(PublishUntil.Value, TimeSpan.Zero) : null,

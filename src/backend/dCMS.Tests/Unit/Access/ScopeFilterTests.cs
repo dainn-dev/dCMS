@@ -51,8 +51,10 @@ public sealed class ScopeFilterTests
         var claims = new List<Claim>();
         if (tenantId is not null) claims.Add(new Claim(DcmsClaims.TenantId, tenantId));
         if (storeId is not null) claims.Add(new Claim(DcmsClaims.StoreId, storeId));
+#pragma warning disable CS0618 // Obsolete StoreIds/BrandIds — tests validate legacy claim path until US-5.
         if (storeIdsCsv is not null) claims.Add(new Claim(DcmsClaims.StoreIds, storeIdsCsv));
         if (brandIdsCsv is not null) claims.Add(new Claim(DcmsClaims.BrandIds, brandIdsCsv));
+#pragma warning restore CS0618
         foreach (var r in roles) claims.Add(new Claim(ClaimTypes.Role, r));
         return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
     }

@@ -1,4 +1,5 @@
 using dCMS.AspNetCore.Auth;
+using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Core.Approvals;
 using dCMS.Core.Persistence;
 using dCMS.Infrastructure.Approvals;
@@ -43,6 +44,8 @@ else
         o.AddPolicy(DcmsPolicies.ApprovalManage, p => p.RequireAssertion(_ => true));
     });
 }
+
+builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -91,6 +94,8 @@ if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
+
+app.UseDcmsImpersonationAudit();
 
 app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();

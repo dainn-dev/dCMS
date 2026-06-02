@@ -56,6 +56,7 @@ public static class CategoryRoutes
         name           = c.Name,
         slug           = c.Slug,
         sortOrder      = c.SortOrder,
+        code           = c.Code,
         active         = c.Active,
         publishFrom    = c.PublishFrom,
         publishUntil   = c.PublishUntil,
@@ -83,6 +84,7 @@ public static class CategoryRoutes
         string   Slug,
         int?     ParentId        = null,
         int      SortOrder       = 0,
+        string?  Code            = null,
         bool     Active          = true,
         DateTimeOffset? PublishFrom  = null,
         DateTimeOffset? PublishUntil = null,
@@ -147,7 +149,7 @@ public static class CategoryRoutes
         {
             id = c.Id, tenantId = c.TenantId, parentId = c.ParentId,
             path = c.Path, depth = c.Depth, name = c.Name, slug = c.Slug,
-            sortOrder = c.SortOrder, active = c.Active,
+            sortOrder = c.SortOrder, code = c.Code, active = c.Active,
             publishFrom = c.PublishFrom, publishUntil = c.PublishUntil,
             imageMenuUrl = c.ImageMenuUrl, imagePageUrl = c.ImagePageUrl, imageThumbUrl = c.ImageThumbUrl,
             showInNav = c.ShowInNav, showInBrands = c.ShowInBrands, customNavUrl = c.CustomNavUrl,
@@ -196,6 +198,7 @@ public static class CategoryRoutes
         var row = new CatalogCategoryRow(
             0, tenantId, body.ParentId, "/", 0,
             body.Name.Trim(), normalizedSlug, body.SortOrder,
+            (body.Code ?? "").Trim(),
             body.Active, body.PublishFrom, body.PublishUntil,
             body.ImageMenuUrl ?? "", body.ImagePageUrl ?? "", body.ImageThumbUrl ?? "",
             body.ShowInNav, body.ShowInBrands, body.CustomNavUrl ?? "",
@@ -239,6 +242,7 @@ public static class CategoryRoutes
         var updated = existing with
         {
             Name = body.Name.Trim(), Slug = normalizedSlug, SortOrder = body.SortOrder,
+            Code = body.Code is null ? existing.Code : body.Code.Trim(),
             Active = body.Active, PublishFrom = body.PublishFrom, PublishUntil = body.PublishUntil,
             ImageMenuUrl = body.ImageMenuUrl ?? existing.ImageMenuUrl,
             ImagePageUrl = body.ImagePageUrl ?? existing.ImagePageUrl,

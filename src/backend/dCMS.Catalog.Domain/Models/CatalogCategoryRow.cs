@@ -14,6 +14,9 @@ public sealed record CatalogCategoryRow(
     string Slug,
     int    SortOrder,
 
+    // ── Internal Identifier (preserves casing from import; "" if not set) ────
+    string Code,
+
     // ── Status / schedule ────────────────────────────────────────────────────
     bool             Active,
     DateTimeOffset?  PublishFrom,
@@ -52,6 +55,7 @@ public sealed record CatalogCategoryRow(
         : this(
             Id: id, TenantId: "", ParentId: parentId, Path: path, Depth: depth,
             Name: name, Slug: slug, SortOrder: sortOrder,
+            Code: "",
             Active: true, PublishFrom: null, PublishUntil: null,
             ImageMenuUrl: "", ImagePageUrl: "", ImageThumbUrl: "",
             ShowInNav: true, ShowInBrands: false, CustomNavUrl: "",

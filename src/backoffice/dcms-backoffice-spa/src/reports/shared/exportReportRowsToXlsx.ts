@@ -28,3 +28,27 @@ export async function exportReportRowsToXlsx(sheetName: string, filename: string
   const buf = await workbook.xlsx.writeBuffer();
   await triggerDownload(buf, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
 }
+
+export type ExportColumn<T> = {
+  header: string;
+  /** Cell value formatter; called per row. Return value coerced to string. */
+  value: (row: T) => string | number | null | undefined;
+};
+
+/**
+ * Driving headers from the same column descriptors used by the table view prevents header/cell
+ * drift when columns are added or reordered.
+ */
+export async function exportRowsByColumns<T>(
+  sheetName: string,
+  filename: string,
+  columns: ExportColumn<T>[],
+  rows: T[],
+): Promise<void> {
+  const headers = columns.map((c) => c.header);
+  const data = rows.map((r) => columns.map((c) => {
+    const v = c.value(r);
+    return v === null || v === undefined ? "" : String(v);
+  }));
+  await exportReportRowsToXlsx(sheetName, filename, headers, data);
+}

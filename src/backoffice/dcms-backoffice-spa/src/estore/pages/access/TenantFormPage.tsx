@@ -1,12 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconArrowBack,
   IconCheckCircle,
+  IconChevronDown,
+  IconChevronRight,
   IconClose,
   IconDelete,
+  IconFolder,
+  IconFolderOpen,
   IconImage,
   IconSave,
   IconSearch,
+  IconTag,
+  IconUnfoldLess,
+  IconUnfoldMore,
 } from "../../../orders/icons";
 import {
   createTenant,
@@ -104,7 +111,233 @@ function ImageSlot({
 }
 
 const MOCK_BRANDS = ["Luxe Heritage Group", "Velocity Tech Systems", "Nomad Consulting Ltd.", "Aura Essentials", "Urban Edge Collective"];
-const MOCK_CATEGORIES = ["Electronics", "Fashion", "Beauty", "Home & Living", "Sports", "Food & Beverage"];
+
+type CategoryTreeNode = {
+  id: string;
+  name: string;
+  children?: CategoryTreeNode[];
+};
+
+const MOCK_CATEGORY_TREE: CategoryTreeNode[] = [
+  {
+    id: "electronics",
+    name: "Electronics",
+    children: [
+      { id: "electronics-phones", name: "Phones & Tablets" },
+      { id: "electronics-laptops", name: "Laptops & Computers" },
+      { id: "electronics-audio", name: "Audio & Headphones" },
+      { id: "electronics-tv", name: "TV & Home Cinema" },
+    ],
+  },
+  {
+    id: "fashion",
+    name: "Fashion",
+    children: [
+      { id: "fashion-mens", name: "Men's Apparel" },
+      { id: "fashion-womens", name: "Women's Apparel" },
+      { id: "fashion-kids", name: "Kids" },
+      { id: "fashion-shoes", name: "Shoes" },
+      { id: "fashion-accessories", name: "Accessories" },
+    ],
+  },
+  {
+    id: "beauty",
+    name: "Beauty",
+    children: [
+      { id: "beauty-skincare", name: "Skincare" },
+      { id: "beauty-makeup", name: "Makeup" },
+      { id: "beauty-fragrance", name: "Fragrance" },
+    ],
+  },
+  {
+    id: "home-living",
+    name: "Home & Living",
+    children: [
+      { id: "home-furniture", name: "Furniture" },
+      { id: "home-decor", name: "Decor" },
+      { id: "home-kitchen", name: "Kitchenware" },
+      { id: "home-bedding", name: "Bedding" },
+    ],
+  },
+  {
+    id: "sports",
+    name: "Sports",
+    children: [
+      { id: "sports-fitness", name: "Fitness Equipment" },
+      { id: "sports-outdoor", name: "Outdoor & Camping" },
+      { id: "sports-cycling", name: "Cycling" },
+    ],
+  },
+  {
+    id: "food-beverage",
+    name: "Food & Beverage",
+    children: [
+      { id: "food-grocery", name: "Grocery" },
+      { id: "food-beverages", name: "Beverages" },
+      { id: "food-snacks", name: "Snacks & Confectionery" },
+    ],
+  },
+];
+
+function findCategoryName(tree: CategoryTreeNode[], id: string): string | undefined {
+  for (const n of tree) {
+    if (n.id === id) return n.name;
+    if (n.children?.length) {
+      const found = findCategoryName(n.children, id);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function collectExpandableCategoryIds(tree: CategoryTreeNode[], acc: string[] = []): string[] {
+  for (const n of tree) {
+    if (n.children?.length) {
+      acc.push(n.id);
+      collectExpandableCategoryIds(n.children, acc);
+    }
+  }
+  return acc;
+}
+
+function CategoryTreePicker({
+  tree,
+  selectedIds,
+  onToggle,
+  filter,
+}: {
+  tree: CategoryTreeNode[];
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+  filter: string;
+}) {
+  const allExpandableIds = useMemo(() => collectExpandableCategoryIds(tree), [tree]);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(allExpandableIds));
+
+  const filterLower = filter.trim().toLowerCase();
+
+  const nodeMatches = (n: CategoryTreeNode): boolean => {
+    if (!filterLower) return true;
+    if (n.name.toLowerCase().includes(filterLower)) return true;
+    return n.children?.some(nodeMatches) ?? false;
+  };
+
+  // When filtering, force-expand all so matches deep in the tree are visible.
+  const expandedEffective = filterLower ? new Set(allExpandableIds) : expanded;
+
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const renderNode = (node: CategoryTreeNode, depth = 0): React.ReactNode => {
+    if (!nodeMatches(node)) return null;
+    const hasChildren = Boolean(node.children?.length);
+    const isOpen = hasChildren && expandedEffective.has(node.id);
+    const isChecked = selectedIds.includes(node.id);
+
+    const rowCls = `group flex w-full items-center gap-1 rounded p-1.5 text-[13px] transition-colors cursor-pointer select-none ${
+      isChecked ? "bg-primary/10 text-primary font-semibold" : "text-on-surface-variant hover:bg-surface-container-high"
+    }`;
+
+    if (!hasChildren) {
+      return (
+        <div key={node.id} style={{ marginLeft: depth ? 24 : 0 }}>
+          <label className={rowCls}>
+            <span className="inline-flex w-5 shrink-0" aria-hidden />
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={() => onToggle(node.id)}
+              className="h-3.5 w-3.5 shrink-0 accent-primary"
+            />
+            <IconTag className="h-4 w-4 shrink-0 opacity-80" />
+            <span className="truncate">{node.name}</span>
+          </label>
+        </div>
+      );
+    }
+
+    return (
+      <div key={node.id} className={depth ? "mt-1" : ""}>
+        <label className={rowCls}>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 hover:bg-surface-container-high"
+            aria-expanded={isOpen}
+            onClick={(e) => {
+              e.preventDefault();
+              toggleExpand(node.id);
+            }}
+          >
+            {isOpen ? <IconChevronDown className="h-4 w-4" /> : <IconChevronRight className="h-4 w-4" />}
+          </button>
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={() => onToggle(node.id)}
+            className="h-3.5 w-3.5 shrink-0 accent-primary"
+          />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            {isOpen ? (
+              <IconFolderOpen className="h-4 w-4 shrink-0 text-primary/80" />
+            ) : (
+              <IconFolder className="h-4 w-4 shrink-0 text-primary/60" />
+            )}
+            <span className="truncate">{node.name}</span>
+          </span>
+        </label>
+        {isOpen && node.children && (
+          <div className="ml-6 mt-1 space-y-1 border-l border-outline-variant/30 pl-2">
+            {node.children.map((child) => renderNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const visibleRoots = tree.filter(nodeMatches);
+
+  return (
+    <div className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
+      <div className="flex items-center justify-between border-b border-outline-variant/10 px-3 py-1.5">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+          Hierarchy
+        </span>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high"
+            title="Expand all"
+            onClick={() => setExpanded(new Set(allExpandableIds))}
+          >
+            <IconUnfoldMore className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high"
+            title="Collapse all"
+            onClick={() => setExpanded(new Set())}
+          >
+            <IconUnfoldLess className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="max-h-64 space-y-1 overflow-y-auto p-2">
+        {visibleRoots.length === 0 ? (
+          <p className="px-2 py-4 text-center text-[11px] italic text-on-surface-variant">
+            No categories match &ldquo;{filter}&rdquo;.
+          </p>
+        ) : (
+          visibleRoots.map((n) => renderNode(n))
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: TenantFormPageProps) {
   const isAdd = mode === "add";
@@ -117,9 +350,10 @@ export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: Te
   const [additionalInfo, setAdditionalInfo] = useState("");
 
   // Configuration
-  const [categoryInput, setCategoryInput] = useState("");
+  const categoryPickerRef = useRef<HTMLDivElement>(null);
   const [categoryOpen, setCategoryOpen] = useState(false);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [navStyle, setNavStyle] = useState<NavStyle>("Standard");
   const [distributionCenter, setDistributionCenter] = useState("");
 
@@ -149,6 +383,16 @@ export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: Te
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(e.target as Node)) {
+        setCategoryOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => {
     setSaveError(null);
     if (isAdd) {
       setCode("");
@@ -156,7 +400,8 @@ export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: Te
       setDescription("");
       setOverview("");
       setAdditionalInfo("");
-      setSelectedCategories([]);
+      setSelectedCategoryIds([]);
+      setCategoryFilter("");
       setNavStyle("Standard");
       setDistributionCenter("");
       setLogoSrc("");
@@ -181,16 +426,13 @@ export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: Te
     setActive(tenant.active);
   }, [isAdd, tenant?.id]);
 
-  const filteredCategories = MOCK_CATEGORIES.filter((c) =>
-    c.toLowerCase().includes(categoryInput.toLowerCase()),
-  );
   const filteredBrands = MOCK_BRANDS.filter(
     (b) => b.toLowerCase().includes(brandInput.toLowerCase()) && !selectedBrands.includes(b),
   );
 
-  function toggleCategory(cat: string) {
-    setSelectedCategories((prev) =>
-      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat],
+  function toggleCategory(id: string) {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id],
     );
   }
 
@@ -254,19 +496,6 @@ export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: Te
       {/* Top bar */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 md:flex-row md:items-center md:justify-between">
         <div>
-          {!isAdd && (
-            <nav className="mb-1 flex text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-              <span>eStore</span>
-              <span className="mx-2">/</span>
-              <span>Access</span>
-              <span className="mx-2">/</span>
-              <button type="button" className="text-on-surface-variant hover:text-primary transition-colors" onClick={onCancel}>
-                Tenants
-              </button>
-              <span className="mx-2">/</span>
-              <span className="text-primary">Edit Tenant</span>
-            </nav>
-          )}
           <button type="button" onClick={onCancel} className="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-tighter mb-1 hover:opacity-80">
             <IconArrowBack className="h-3 w-3 shrink-0" />
             Back to Tenants
@@ -355,45 +584,63 @@ export function TenantFormPage({ mode, tenant, authToken, onSave, onCancel }: Te
         <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm p-6">
           <h3 className={sectionTitleRow}>Configuration</h3>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            {/* Category picker */}
-            <div className="md:col-span-2 relative">
+            {/* Category picker — tree view (mirrors CategoriesPage hierarchy) */}
+            <div className="md:col-span-2">
               <label className={labelBase}>Category</label>
-              {selectedCategories.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {selectedCategories.map((cat) => (
-                    <span key={cat} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary">
-                      {cat}
-                      <button type="button" aria-label={`Remove ${cat}`} className="rounded p-0.5 hover:bg-primary/20 transition-colors" onClick={() => toggleCategory(cat)}>
-                        <IconClose className="h-2.5 w-2.5" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="relative">
-                <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
-                <input
-                  className={`${inputBase} pl-8`}
-                  value={categoryInput}
-                  onChange={(e) => { setCategoryInput(e.target.value); setCategoryOpen(true); }}
-                  onFocus={() => setCategoryOpen(true)}
-                  onBlur={() => setTimeout(() => setCategoryOpen(false), 150)}
-                  placeholder="Type to search categories…"
-                />
+              <div ref={categoryPickerRef} className="relative space-y-2">
+                {selectedCategoryIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedCategoryIds.map((id) => {
+                      const name = findCategoryName(MOCK_CATEGORY_TREE, id) ?? id;
+                      return (
+                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary">
+                          {name}
+                          <button type="button" aria-label={`Remove ${name}`} className="rounded p-0.5 hover:bg-primary/20 transition-colors" onClick={() => toggleCategory(id)}>
+                            <IconClose className="h-2.5 w-2.5" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  className={`${inputBase} flex items-center justify-between gap-2 text-left`}
+                  onClick={() => setCategoryOpen((v) => !v)}
+                >
+                  <span className={selectedCategoryIds.length ? "text-on-surface" : "italic text-on-surface-variant"}>
+                    {selectedCategoryIds.length
+                      ? `${selectedCategoryIds.length} selected`
+                      : "Click to choose categories"}
+                  </span>
+                  <IconChevronDown
+                    className={`h-4 w-4 shrink-0 text-outline transition-transform ${categoryOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+
+                {categoryOpen && (
+                  <div className="absolute left-0 right-0 top-full z-40 mt-1 rounded-lg border border-outline-variant/20 bg-surface shadow-xl p-2">
+                    <div className="relative mb-2">
+                      <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-on-surface-variant" />
+                      <input
+                        className={`${inputBase} pl-8`}
+                        value={categoryFilter}
+                        onChange={(e) => setCategoryFilter(e.target.value)}
+                        placeholder="Filter categories…"
+                        autoFocus
+                      />
+                    </div>
+                    <CategoryTreePicker
+                      tree={MOCK_CATEGORY_TREE}
+                      selectedIds={selectedCategoryIds}
+                      onToggle={toggleCategory}
+                      filter={categoryFilter}
+                    />
+                  </div>
+                )}
               </div>
-              {categoryOpen && filteredCategories.length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-48 overflow-y-auto rounded-lg border border-outline-variant/20 bg-surface shadow-xl">
-                  {filteredCategories.map((cat) => {
-                    const checked = selectedCategories.includes(cat);
-                    return (
-                      <label key={cat} className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 text-xs transition-colors hover:bg-surface-container-high ${checked ? "bg-primary/5 text-primary font-semibold" : "text-on-surface"}`}>
-                        <input type="checkbox" checked={checked} onChange={() => toggleCategory(cat)} className="h-3.5 w-3.5 accent-primary shrink-0" />
-                        {cat}
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
+              <p className={hintText}>Pick one or more categories from the hierarchy. Sub-categories can be selected independently of their parent.</p>
             </div>
             <div>
               <label className={labelBase}>Navigation Style</label>

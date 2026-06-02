@@ -183,6 +183,7 @@ export function MultiLangTextarea({
   label: string;
   rows?: number;
   defaultValues?: Record<string, string>;
+  /** Called whenever any locale value changes (e.g. mirror state for save/export). */
   onValuesChange?: (values: Record<string, string>) => void;
   placeholders?: Record<string, string>;
   hint?: string;
