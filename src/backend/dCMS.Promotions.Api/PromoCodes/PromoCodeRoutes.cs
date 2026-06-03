@@ -107,7 +107,7 @@ public static class PromoCodeRoutes
             return ApiEnvelope.Error("conflict", $"Promo code '{code}' already exists.", StatusCodes.Status409Conflict);
 
         var now = DateTimeOffset.UtcNow;
-        var id = $"promo_{Guid.NewGuid():N}";
+        var id = "promo_" + Guid.NewGuid().ToString("N")[..26];
         var row = new PromoCodeRow(id, tenantId, code, body.NameJson, body.DiscountType,
             body.DiscountValue ?? "", "draft", now, now,
             body.PromoTypeLabel ?? "", body.MinSpend ?? "", body.StartDate, body.EndDate);

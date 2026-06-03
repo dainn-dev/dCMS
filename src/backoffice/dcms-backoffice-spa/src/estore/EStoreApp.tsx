@@ -1060,8 +1060,19 @@ export function EStoreApp({
           onNavigateToFulfillmentOptions={() => handlePageChange("fulfillment-options")}
         />
       )}
-      {page === "fulfillment-options" &&
-        (fulfillmentForm.mode === "logistic-partners" ? (
+      {page === "fulfillment-options" && (
+        <>
+          {tenantId && fulfillmentLoading && fulfillmentForm.mode === "idle" && (
+            <div className="shrink-0 border-b border-outline-variant/10 bg-surface-container-high/50 px-6 py-2 text-xs text-on-surface-variant">
+              Đang tải cấu hình fulfillment…
+            </div>
+          )}
+          {fulfillmentError && (
+            <div className="shrink-0 border-b border-error/30 bg-error/10 px-6 py-2 text-xs text-error">
+              {fulfillmentError}
+            </div>
+          )}
+          {fulfillmentForm.mode === "logistic-partners" ? (
           <LogisticPartnerManagementPage
             partners={logisticPartners}
             onChange={handleLogisticPartnersChange}
@@ -1143,40 +1154,30 @@ export function EStoreApp({
             dynamicFields={dynamicFields}
             predefinedFieldSettings={predefinedFieldSettings}
             logisticPartners={logisticPartners}
-            onSave={(slot) => {
-              void (async () => {
-                const gid = fulfillmentForm.groupingId;
+            onSave={async (slot) => {
+              const gid = slot.groupingId || fulfillmentForm.groupingId;
+              try {
                 if (tenantId) {
-                  try {
-                    setFulfillmentError(null);
-                    const { id, groupingId: _g, updatedAt: _u, ...rest } = slot;
-                    const u = await updateFulfillmentSlot(tenantId, gid, id, rest, authToken);
-                    setFulfillmentSlots((prev) => prev.map((s) => (s.id === u.id ? u : s)));
-                  } catch (err) {
-                    setFulfillmentError(err instanceof Error ? err.message : "Update slot failed");
-                  }
-                } else {
-                  setFulfillmentSlots((prev) => {
-                    const exists = prev.some((s) => s.id === slot.id);
-                    return exists ? prev.map((s) => (s.id === slot.id ? slot : s)) : [slot, ...prev];
-                  });
+                  setFulfillmentError(null);
+                  const { id, groupingId: _g, updatedAt: _u, ...rest } = slot;
+                  const u = await updateFulfillmentSlot(tenantId, gid, id, rest, authToken);
+                  setFulfillmentSlots((prev) => prev.map((s) => (s.id === u.id ? u : s)));
+                  return;
                 }
-              })();
+                setFulfillmentSlots((prev) => {
+                  const exists = prev.some((s) => s.id === slot.id);
+                  return exists ? prev.map((s) => (s.id === slot.id ? slot : s)) : [slot, ...prev];
+                });
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : "Update slot failed";
+                setFulfillmentError(msg);
+                throw err;
+              }
             }}
             onBack={() => setFulfillmentForm({ mode: "idle" })}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            {tenantId && fulfillmentLoading && (
-              <div className="shrink-0 border-b border-outline-variant/10 bg-surface-container-high/50 px-6 py-2 text-xs text-on-surface-variant">
-                Đang tải cấu hình fulfillment…
-              </div>
-            )}
-            {fulfillmentError && (
-              <div className="shrink-0 border-b border-error/30 bg-error/10 px-6 py-2 text-xs text-error">
-                {fulfillmentError}
-              </div>
-            )}
             {fulfillmentToast && (
               <div
                 className="fixed bottom-6 right-6 z-[100] max-w-sm rounded-lg border border-outline-variant/30 bg-inverse-surface px-4 py-3 text-xs text-inverse-on-surface shadow-xl"
@@ -1289,7 +1290,9 @@ export function EStoreApp({
               />
             </div>
           </div>
-        ))}
+        )}
+        </>
+      )}
       {/* ── Access: Users ── */}
       {page === "access-users" &&
         (accessUserForm.mode === "change-password" ? (

@@ -274,10 +274,6 @@ export function FulfillmentOptionsPage({
     setStockLocation(g.stockLocation);
   }
 
-  function handleGroupNameBlur() {
-    if (!code.trim() && groupName.trim()) setCode(seedCodeFromName(groupName));
-  }
-
   async function handleCreateTimeSlot() {
     const next: Omit<FulfillmentGrouping, "id"> = {
       groupName: groupName.trim() || "New Group",
@@ -757,13 +753,18 @@ export function FulfillmentOptionsPage({
                   <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
                     Group Name <span className="text-error">*</span>
                   </label>
-                  <input className={inputBase} value={groupName} onChange={(e) => setGroupName(e.target.value)} onBlur={handleGroupNameBlur} />
+                  <input className={inputBase} value={groupName} onChange={(e) => setGroupName(e.target.value)} />
                 </div>
                 <div>
                   <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
                     Code <span className="text-error">*</span>
                   </label>
-                  <input className={inputBase} value={code} onChange={(e) => setCode(e.target.value)} placeholder="AUTO-GENERATED" />
+                  <input
+                    className={inputBase}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Auto-generated from name if left blank"
+                  />
                 </div>
               </div>
 

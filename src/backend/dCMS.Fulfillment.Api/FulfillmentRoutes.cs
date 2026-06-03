@@ -180,7 +180,8 @@ public static class FulfillmentRoutes
         string Price = "");
 
     private sealed record CollectionLocationWriteRequest(
-        string Name,
+        string? Id = null,
+        string Name = "",
         string[]? BrandCodes = null,
         string? Address1 = null,
         string? Address2 = null,
@@ -469,8 +470,14 @@ public static class FulfillmentRoutes
     {
         if (string.IsNullOrWhiteSpace(body.Name))
             return ApiEnvelope.Error("validation_error", "Name is required.", StatusCodes.Status400BadRequest);
+        if (!TryNormalizeCollectionLocationId(body.Id, out var id, out var idError))
+            return ApiEnvelope.Error("validation_error", idError!, StatusCodes.Status400BadRequest);
+
+        var existing = await db.GetCollectionLocationAsync(id, tenantId, cancellationToken).ConfigureAwait(false);
+        if (existing is not null)
+            return ApiEnvelope.Error("validation_error", $"Collection location ID \"{id}\" already exists.", StatusCodes.Status409Conflict);
+
         var now = DateTimeOffset.UtcNow;
-        var id = $"ffc_{Guid.NewGuid():N}";
         var brandsJson = JsonSerializer.Serialize(body.BrandCodes ?? []);
         var row = new CollectionLocationRow(
             id, tenantId, body.Name.Trim(), brandsJson,
@@ -480,6 +487,44 @@ public static class FulfillmentRoutes
         await db.CreateCollectionLocationAsync(row, cancellationToken).ConfigureAwait(false);
         return Results.Json(new { data = ToDto(row), meta = (object?)null, error = (object?)null },
             statusCode: StatusCodes.Status201Created);
+    }
+
+    /// <summary>
+    /// Uses client-supplied ID (e.g. LOC_MAIN) when provided; otherwise generates <c>ffc_{guid}</c> for backward compatibility.
+    /// </summary>
+    private static bool TryNormalizeCollectionLocationId(string? raw, out string id, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            id = $"ffc_{Guid.NewGuid():N}";
+            return true;
+        }
+
+        id = raw.Trim().ToUpperInvariant();
+        if (id.Length > 40)
+        {
+            error = "Collection location ID must be at most 40 characters.";
+            return false;
+        }
+
+        if (!char.IsAsciiLetter(id[0]))
+        {
+            error = "Collection location ID must start with a letter.";
+            return false;
+        }
+
+        for (var i = 0; i < id.Length; i++)
+        {
+            var ch = id[i];
+            if (!char.IsAsciiLetterOrDigit(ch) && ch != '_')
+            {
+                error = $"Collection location ID \"{id}\" is invalid. Use uppercase letters, digits, or underscores (e.g. LOC_MAIN).";
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static async Task<IResult> UpdateCollectionLocation(

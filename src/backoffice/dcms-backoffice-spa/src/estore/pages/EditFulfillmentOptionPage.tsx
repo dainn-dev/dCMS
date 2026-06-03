@@ -17,9 +17,11 @@ import type {
   FulfillmentGrouping,
   FulfillmentPredefinedFieldKey,
   FulfillmentPredefinedFieldSetting,
+  FulfillmentSlot,
   LogisticPartner,
   StockLocation,
 } from "../EStoreApp";
+import { toDatetimeLocalValue } from "../api/fulfillmentApi";
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
 const sectionCard = "rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm";
@@ -135,13 +137,13 @@ function SearchablePicker({
 
 type Props = {
   grouping?: FulfillmentGrouping;
-  slot?: import("../EStoreApp").FulfillmentSlot;
+  slot?: FulfillmentSlot;
   collectionLocations: CollectionLocation[];
   stockLocations: StockLocation[];
   dynamicFields?: FulfillmentDynamicField[];
   predefinedFieldSettings?: FulfillmentPredefinedFieldSetting[];
   logisticPartners?: LogisticPartner[];
-  onSave?: (slot: import("../EStoreApp").FulfillmentSlot) => void;
+  onSave?: (slot: FulfillmentSlot) => void | Promise<void>;
   onBack: () => void;
 };
 
@@ -175,8 +177,8 @@ export function EditFulfillmentOptionPage({
   const [code, setCode] = useState(slot?.code ?? "");
   const [tenant, setTenant] = useState(MOCK_TENANTS[0]);
   const [mode, setMode] = useState<FulfillmentDeliveryMode>(slot?.mode ?? grouping?.deliveryMode ?? "Local Delivery");
-  const [startingDate, setStartingDate] = useState(slot?.startingDate ?? "");
-  const [endingDate, setEndingDate] = useState(slot?.endingDate ?? "");
+  const [startingDate, setStartingDate] = useState(() => toDatetimeLocalValue(slot?.startingDate ?? ""));
+  const [endingDate, setEndingDate] = useState(() => toDatetimeLocalValue(slot?.endingDate ?? ""));
   const [selectionLimitValue, setSelectionLimitValue] = useState<number>(7);
   const [selectionLimitUnit, setSelectionLimitUnit] = useState<(typeof SELECTION_UNITS)[number]>("days");
   const [price, setPrice] = useState(slot?.price ?? "");
@@ -255,8 +257,8 @@ export function EditFulfillmentOptionPage({
     function handler(e: MouseEvent) {
       if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) setActionsOpen(false);
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
   }, []);
 
   const [toast, setToast] = useState<string | null>(null);
@@ -266,42 +268,69 @@ export function EditFulfillmentOptionPage({
     return () => clearTimeout(t);
   }, [toast]);
 
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!slot) return;
+    setName(slot.name);
+    setCode(slot.code);
+    setMode(slot.mode);
+    setStartingDate(toDatetimeLocalValue(slot.startingDate));
+    setEndingDate(toDatetimeLocalValue(slot.endingDate));
+    setPrice(slot.price ?? "");
+  }, [slot?.id]);
+
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  function handleSaveApprove() {
-    setActionsOpen(false);
-    setToast("Fulfillment option saved and approved.");
-    if (grouping && onSave) {
-      onSave({
-        id: slot?.id ?? `slot-${Math.random().toString(36).slice(2, 8)}`,
-        groupingId: grouping.id,
-        name: name.trim() || "Delivery Slot",
-        code: (code.trim() || "DELIVERY_SLOT").toUpperCase(),
-        mode,
-        startingDate,
-        endingDate,
-        price: price || "0.00",
-        updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-      });
-    }
-    setTimeout(() => onBack(), 1800);
+  function buildSlotPayload(): FulfillmentSlot | null {
+    const groupingId = grouping?.id ?? slot?.groupingId;
+    if (!groupingId) return null;
+    const slotId = slot?.id;
+    if (!slotId) return null;
+    return {
+      id: slotId,
+      groupingId,
+      name: name.trim() || "Delivery Slot",
+      code: (code.trim() || "DELIVERY_SLOT").toUpperCase(),
+      mode,
+      startingDate,
+      endingDate,
+      price: price.trim() || "0.00",
+      updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
+    };
   }
-  function handleSaveChanges() {
-    setActionsOpen(false);
-    setToast("Fulfillment option saved.");
-    if (grouping && onSave) {
-      onSave({
-        id: slot?.id ?? `slot-${Math.random().toString(36).slice(2, 8)}`,
-        groupingId: grouping.id,
-        name: name.trim() || "Delivery Slot",
-        code: (code.trim() || "DELIVERY_SLOT").toUpperCase(),
-        mode,
-        startingDate,
-        endingDate,
-        price: price || "0.00",
-        updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-      });
+
+  async function persistSlot(options?: { navigateBack?: boolean; toastMessage?: string }) {
+    if (!onSave) {
+      setToast("Save is not available.");
+      return;
     }
+    const payload = buildSlotPayload();
+    if (!payload) {
+      setToast("Cannot save: slot or grouping is missing.");
+      return;
+    }
+    setActionsOpen(false);
+    setSaving(true);
+    try {
+      await Promise.resolve(onSave(payload));
+      setToast(options?.toastMessage ?? "Fulfillment option saved.");
+      if (options?.navigateBack) {
+        setTimeout(() => onBack(), 1800);
+      }
+    } catch {
+      setToast("Failed to save fulfillment option.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSaveApprove() {
+    void persistSlot({ navigateBack: true, toastMessage: "Fulfillment option saved and approved." });
+  }
+
+  function handleSaveChanges() {
+    void persistSlot();
   }
   function handleChangeHistory() {
     setActionsOpen(false);
@@ -363,8 +392,18 @@ export function EditFulfillmentOptionPage({
           </p>
         </div>
 
-        {/* Actions dropdown */}
-        <div className="relative" ref={actionsRef}>
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={saving || !slot?.id}
+            className="flex items-center gap-2 rounded-lg border border-outline-variant/30 bg-surface-container-lowest px-5 py-2.5 text-xs font-bold text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:pointer-events-none disabled:opacity-40"
+            onClick={handleSaveChanges}
+          >
+            <IconCheckCircle className="h-4 w-4 shrink-0" />
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+          <div className="relative" ref={actionsRef}>
           <button
             type="button"
             className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-xs font-bold text-on-primary shadow-lg shadow-primary/20 transition-all hover:opacity-90"
@@ -378,6 +417,7 @@ export function EditFulfillmentOptionPage({
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSaveApprove}
               >
                 <IconCheckCircle className="h-4 w-4 shrink-0 text-primary" />
@@ -386,6 +426,7 @@ export function EditFulfillmentOptionPage({
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleSaveChanges}
               >
                 <IconEdit className="h-4 w-4 shrink-0 text-on-surface-variant" />
@@ -395,6 +436,7 @@ export function EditFulfillmentOptionPage({
               <button
                 type="button"
                 className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={handleChangeHistory}
               >
                 <IconInfo className="h-4 w-4 shrink-0 text-on-surface-variant" />
@@ -402,6 +444,7 @@ export function EditFulfillmentOptionPage({
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
 

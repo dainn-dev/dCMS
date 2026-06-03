@@ -44,6 +44,18 @@ export function normalizeFulfillmentDate(s: string): string {
   return i >= 0 ? t.slice(0, i) : t.slice(0, 10);
 }
 
+/** API / storage date → value for `<input type="datetime-local">` (yyyy-MM-ddThh:mm). */
+export function toDatetimeLocalValue(s: string): string {
+  const t = s.trim();
+  if (!t) return "";
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)) return t.slice(0, 16);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return `${t}T00:00`;
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function formatSlotUpdatedAt(iso: string): string {
   try {
     const d = new Date(iso);
@@ -132,8 +144,8 @@ export function groupingFromDto(d: GroupingDto): FulfillmentGrouping {
     id: d.id,
     groupName: d.groupName,
     code: d.code,
-    startDate: d.startDate,
-    endDate: d.endDate,
+    startDate: toDatetimeLocalValue(d.startDate),
+    endDate: toDatetimeLocalValue(d.endDate),
     priority: d.priority,
     active: d.active,
     tenantEnabled: d.tenantEnabled,
@@ -171,8 +183,8 @@ export function slotFromDto(d: SlotDto): FulfillmentSlot {
     name: d.name,
     code: d.code,
     mode: asDeliveryMode(d.mode),
-    startingDate: d.startingDate,
-    endingDate: d.endingDate,
+    startingDate: toDatetimeLocalValue(d.startingDate),
+    endingDate: toDatetimeLocalValue(d.endingDate),
     price: d.price,
     updatedAt: formatSlotUpdatedAt(d.updatedAt),
   };
@@ -224,9 +236,10 @@ export function collectionFromDto(d: CollectionDto): CollectionLocation {
 }
 
 export function collectionToPayload(
-  c: Omit<CollectionLocation, "id"> & { id?: string }
+  c: Omit<CollectionLocation, "id"> & { id?: string },
+  options?: { includeId?: boolean }
 ): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     name: c.name,
     brandCodes: c.brandCodes ?? [],
     address1: c.address1 ?? null,
@@ -244,6 +257,10 @@ export function collectionToPayload(
     openingHours: c.openingHours ?? null,
     closingHours: c.closingHours ?? null,
   };
+  if (options?.includeId && c.id?.trim()) {
+    payload.id = c.id.trim().toUpperCase();
+  }
+  return payload;
 }
 
 export function partnerFromDto(d: PartnerDto): LogisticPartner {
@@ -399,7 +416,7 @@ export async function createCollectionLocationApi(
     method: "POST",
     credentials: "same-origin",
     headers: headers(token),
-    body: JSON.stringify(collectionToPayload(loc)),
+    body: JSON.stringify(collectionToPayload(loc, { includeId: true })),
   });
   await checkOk(res);
   const d = (await res.json()).data as CollectionDto;
