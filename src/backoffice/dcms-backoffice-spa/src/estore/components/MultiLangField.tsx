@@ -106,6 +106,7 @@ export function useLangField(
 export function MultiLangInput({
   label,
   requiredMark,
+  inputId,
   defaultValues,
   onValuesChange,
   onBlur,
@@ -116,6 +117,8 @@ export function MultiLangInput({
   label: string;
   /** Renders a red asterisk after the label (e.g. required fields). */
   requiredMark?: boolean;
+  /** Stable id/name for the active locale input (a11y). */
+  inputId?: string;
   defaultValues?: Record<string, string>;
   /** Called whenever any locale value changes (e.g. mirror state for save/export). */
   onValuesChange?: (values: Record<string, string>) => void;
@@ -136,7 +139,7 @@ export function MultiLangInput({
   return (
     <div className="space-y-1.5">
       {label ? (
-        <label className={labelBase}>
+        <label className={labelBase} htmlFor={inputId}>
           {label}
           {requiredMark ? (
             <>
@@ -155,6 +158,8 @@ export function MultiLangInput({
         />
         <input
           key={resolvedIso}
+          id={inputId}
+          name={inputId}
           className={`${inputBase} ${languages.length > 0 ? "rounded-tr-none" : ""} ${inputClassName ?? ""}`}
           value={currentValue}
           onChange={(e) => setValue(resolvedIso, e.target.value)}

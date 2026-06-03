@@ -9,7 +9,10 @@ using dCMS.Order.Infrastructure.Persistence;
 using dCMS.Order.Infrastructure.Sagas;
 using dCMS.Order.Infrastructure.Services;
 using dCMS.Order.Infrastructure.Shipping;
+using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Messaging;
+using dCMS.Core.Persistence;
+using dCMS.Core.Services;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -50,6 +53,22 @@ public static class OrderServiceCollectionExtensions
             return mux is null ? new NullOrderDetailCache() : new RedisOrderDetailCache(mux);
         });
         services.AddSingleton<IOrderService, OrderService>();
+
+        var catalogCs = configuration.GetConnectionString("Catalog");
+        if (!string.IsNullOrWhiteSpace(catalogCs))
+        {
+            services.AddSingleton<IStoreQuantityLimitPersistence>(_ => new SqlStoreQuantityLimitPersistence(catalogCs));
+            services.AddSingleton<ICatalogPersistence>(_ => new SqlCatalogPersistence(catalogCs));
+        }
+
+        var orderCs = configuration.GetConnectionString("Order")
+            ?? throw new InvalidOperationException("ConnectionStrings:Order is required.");
+        services.AddSingleton<ICustomerOrderQuantityQuery>(_ => new SqlCustomerOrderQuantityQuery(orderCs));
+        services.AddSingleton(sp => new QuantityLimitValidationService(
+            sp.GetRequiredService<IStoreQuantityLimitPersistence>(),
+            sp.GetRequiredService<ICatalogPersistence>(),
+            sp.GetRequiredService<ICustomerOrderQuantityQuery>()));
+
         services.AddSingleton<IOrderDlqAdminRepository, OrderDlqAdminRepository>();
         services.AddSingleton<IOrderFailureRepository, PgOrderFailureRepository>();
         services.AddSingleton<IReturnsRepository, PgReturnsRepository>();

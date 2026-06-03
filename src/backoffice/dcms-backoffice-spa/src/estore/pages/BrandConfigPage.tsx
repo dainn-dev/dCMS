@@ -105,18 +105,71 @@ function cloneRows(rows: BrandAdditionalField[]): BrandAdditionalField[] {
   }));
 }
 
+const FIELD_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/**
+ * Client-side validation mirroring the server (BrandFieldConfigRoutes).
+ * Returns the first error message, or null when valid — immediate feedback before
+ * the round-trip; the server remains authoritative.
+ */
+function validateFields(rows: BrandAdditionalField[]): string | null {
+  const names = new Set<string>();
+  const properties = new Set<string>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const f = rows[i];
+    const pos = `Field #${i + 1}`;
+    const property = f.property.trim();
+    const label = f.columnLabel.trim();
+    const fieldName = f.fieldName.trim();
+
+    if (!property) return `${pos}: Property is required.`;
+    if (!label) return `${pos}: Column label is required.`;
+    if (!fieldName) return `${pos}: Field name is required.`;
+    if (!FIELD_NAME_RE.test(fieldName))
+      return `${pos}: Field name “${fieldName}” is invalid. Use a letter followed by letters, digits or underscores (e.g. loyaltyTier).`;
+
+    const nameKey = fieldName.toLowerCase();
+    if (names.has(nameKey)) return `Duplicate field name “${fieldName}”. Field names must be unique.`;
+    names.add(nameKey);
+
+    const propKey = property.toLowerCase();
+    if (properties.has(propKey)) return `Duplicate property “${property}”. Properties must be unique.`;
+    properties.add(propKey);
+
+    if (f.controlType === "Dropdown List" || f.controlType === "Multiple Select") {
+      const cleaned = f.options
+        .map((o) => ({ name: o.name.trim(), value: o.value.trim() }))
+        .filter((o) => o.name || o.value);
+      if (cleaned.length === 0) return `${pos} (“${label}”): ${f.controlType} needs at least one option.`;
+      const values = new Set<string>();
+      for (const o of cleaned) {
+        if (!o.name || !o.value)
+          return `${pos} (“${label}”): every option needs both a display name and a value.`;
+        const vKey = o.value.toLowerCase();
+        if (values.has(vKey)) return `${pos} (“${label}”): duplicate option value “${o.value}”.`;
+        values.add(vKey);
+      }
+    }
+  }
+  return null;
+}
+
 type Props = {
   savedFields: BrandAdditionalField[];
-  onSave: (next: BrandAdditionalField[]) => void;
+  /** Persists the config. May be async (server PUT); rejects with an Error on failure. */
+  onSave: (next: BrandAdditionalField[]) => void | Promise<void>;
   onNavigateToBrands: () => void;
 };
 
 export function BrandConfigPage({ savedFields, onSave, onNavigateToBrands }: Props) {
   const [draft, setDraft] = useState<BrandAdditionalField[]>(() => cloneRows(savedFields));
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; visible: boolean }>({
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ message: string; visible: boolean; tone: "success" | "error" }>({
     message: "",
     visible: false,
+    tone: "success",
   });
 
   useEffect(() => {
@@ -134,13 +187,28 @@ export function BrandConfigPage({ savedFields, onSave, onNavigateToBrands }: Pro
     return () => clearTimeout(t);
   }, [toast.visible]);
 
-  function showToast(message: string) {
-    setToast({ message, visible: true });
+  function showToast(message: string, tone: "success" | "error" = "success") {
+    setToast({ message, visible: true, tone });
   }
 
-  function handleSave() {
-    onSave(cloneRows(draft));
-    showToast("Brand field configuration saved.");
+  async function handleSave() {
+    const validationError = validateFields(draft);
+    if (validationError) {
+      showToast(validationError, "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(cloneRows(draft));
+      showToast("Brand field configuration saved.", "success");
+    } catch (e) {
+      showToast(
+        e instanceof Error && e.message ? e.message : "Could not save the configuration. Please try again.",
+        "error"
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   function addBlankRow() {
@@ -228,19 +296,20 @@ export function BrandConfigPage({ savedFields, onSave, onNavigateToBrands }: Pro
           </nav>
           <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Brand Configuration</h1>
           <p className="text-sm text-on-surface-variant max-w-2xl">
-            Define additional fields shown on the Add / Edit Brand form. Changes apply after Save (demo: stored in
-            browser only).
+            Define additional fields shown on the Add / Edit Brand form. Fields appear on the form&rsquo;s
+            <span className="font-semibold"> Other</span> tab, grouped under their chosen heading. Changes apply
+            after Save and are stored per tenant.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           <button
             type="button"
-            disabled={!dirty}
+            disabled={!dirty || saving}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-on-primary shadow-sm transition-all hover:bg-primary-container disabled:opacity-40 disabled:pointer-events-none"
             onClick={handleSave}
           >
             <IconSave className="h-4 w-4 shrink-0" />
-            Save
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </header>
@@ -273,7 +342,7 @@ export function BrandConfigPage({ savedFields, onSave, onNavigateToBrands }: Pro
                   <th className="px-3 py-2.5 font-bold min-w-[120px]">Column label</th>
                   <th className="px-3 py-2.5 font-bold min-w-[120px]">Field name</th>
                   <th className="px-3 py-2.5 font-bold min-w-[140px]">Control type</th>
-                  <th className="px-3 py-2.5 font-bold min-w-[160px]">Page / section</th>
+                  <th className="px-3 py-2.5 font-bold min-w-[160px]" title="Heading the field is grouped under on the brand form's Other tab">Group heading</th>
                   <th className="px-3 py-2.5 font-bold w-12 text-center" aria-label="Delete" />
                 </tr>
               </thead>
@@ -453,7 +522,11 @@ export function BrandConfigPage({ savedFields, onSave, onNavigateToBrands }: Pro
         }`}
       >
         <div className="flex items-center gap-3 rounded-xl bg-on-surface px-5 py-3 shadow-2xl">
-          <IconCheckCircle className="h-4 w-4 shrink-0 text-primary" />
+          {toast.tone === "error" ? (
+            <IconWarning className="h-4 w-4 shrink-0 text-error" />
+          ) : (
+            <IconCheckCircle className="h-4 w-4 shrink-0 text-primary" />
+          )}
           <span className="text-sm font-medium text-surface">{toast.message}</span>
         </div>
       </div>

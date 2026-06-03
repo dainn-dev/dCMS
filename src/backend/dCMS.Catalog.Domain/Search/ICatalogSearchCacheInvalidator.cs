@@ -8,4 +8,7 @@ public interface ICatalogSearchCacheInvalidator
     /// <c>SCAN/DEL dcms:search:&#123;storeId&#125;:*</c>.
     /// </summary>
     Task InvalidateAfterIndexChangeAsync(string storeId, string? slug, CancellationToken cancellationToken = default);
+
+    /// <summary>Clears all public product detail + search cache keys for a store (after field-config change).</summary>
+    Task InvalidateStoreAsync(string storeId, CancellationToken cancellationToken = default);
 }

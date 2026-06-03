@@ -403,6 +403,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
       Elasticsearch__Url: "http://elasticsearch:9200"
       InternalCatalog__ApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
@@ -457,6 +458,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
+      ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Pass: "guest"

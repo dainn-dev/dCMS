@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.Json;
 using Dapper;
 using dCMS.Core.Events;
+using dCMS.Core.Exceptions;
 using dCMS.Core.Models;
 using dCMS.Core.Persistence;
 using Npgsql;
@@ -14,8 +16,8 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
     public async Task<Product?> GetByIdAsync(string productId, string tenantId, CancellationToken cancellationToken = default)
     {
         await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            SELECT "Id", "TenantId", "StoreId", "CategoryId", "Name", "Description", "Slug", "Status", "SalesCount30d", "CreatedAt", "UpdatedAt"
+        const string sql = $"""
+            SELECT {ProductColumns}
             FROM "Products"
             WHERE "Id" = @Id AND "TenantId" = @TenantId
             """;
@@ -23,28 +25,15 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             new CommandDefinition(sql, new { Id = productId, TenantId = tenantId }, cancellationToken: cancellationToken))
             .ConfigureAwait(false);
 
-        return row is null
-            ? null
-            : Product.Restore(
-                row.Id,
-                row.TenantId,
-                row.StoreId,
-                row.CategoryId,
-                row.Name,
-                row.Description,
-                row.Slug,
-                ProductStatusExtensions.ParsePersisted(row.Status),
-                row.SalesCount30d,
-                row.CreatedAt,
-                row.UpdatedAt);
+        return row is null ? null : RestoreProduct(row);
     }
 
     public async Task<Product?> GetBySlugAsync(string storeId, string tenantId, string slug,
         CancellationToken cancellationToken = default)
     {
         await using var connection = new NpgsqlConnection(_connectionString);
-        const string sql = """
-            SELECT "Id", "TenantId", "StoreId", "CategoryId", "Name", "Description", "Slug", "Status", "SalesCount30d", "CreatedAt", "UpdatedAt"
+        const string sql = $"""
+            SELECT {ProductColumns}
             FROM "Products"
             WHERE "StoreId" = @StoreId AND "TenantId" = @TenantId AND "Slug" = @Slug
             LIMIT 1
@@ -54,21 +43,38 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             new CommandDefinition(sql, new { StoreId = storeId, TenantId = tenantId, Slug = normalized },
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-        return row is null
-            ? null
-            : Product.Restore(
-                row.Id,
-                row.TenantId,
-                row.StoreId,
-                row.CategoryId,
-                row.Name,
-                row.Description,
-                row.Slug,
-                ProductStatusExtensions.ParsePersisted(row.Status),
-                row.SalesCount30d,
-                row.CreatedAt,
-                row.UpdatedAt);
+        return row is null ? null : RestoreProduct(row);
     }
+
+    private const string ProductColumns = """
+        "Id", "TenantId", "StoreId", "CategoryId", "BrandId", "Name", "Description", "Slug", "Status",
+        "SalesCount30d", "CreatedAt", "UpdatedAt", "PageTitle", "MetaKeywords", "MetaDescription",
+        "PublishFrom", "PublishUntil", "RecommendSimilar", "RecommendationsMode", "RestockNotification", "CustomFields"
+        """;
+
+    private static Product RestoreProduct(ProductRow row) =>
+        Product.Restore(
+            row.Id,
+            row.TenantId,
+            row.StoreId,
+            row.CategoryId,
+            row.Name,
+            row.Description,
+            row.Slug,
+            ProductStatusExtensions.ParsePersisted(row.Status),
+            row.SalesCount30d,
+            row.CreatedAt,
+            row.UpdatedAt,
+            row.BrandId,
+            row.PageTitle,
+            row.MetaKeywords,
+            row.MetaDescription,
+            row.PublishFrom,
+            row.PublishUntil,
+            row.RecommendSimilar,
+            row.RecommendationsMode,
+            row.RestockNotification,
+            row.CustomFields);
 
     public async Task<bool> SlugExistsAsync(string storeId, string slug, CancellationToken cancellationToken = default)
     {
@@ -116,8 +122,10 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             if (count == 0)
             {
                 const string insert = """
-                    INSERT INTO "Products" ("Id", "TenantId", "StoreId", "CategoryId", "Name", "Description", "Slug", "Status", "SalesCount30d", "CreatedAt", "UpdatedAt")
-                    VALUES (@Id, @TenantId, @StoreId, @CategoryId, @Name, @Description, @Slug, @Status, @SalesCount30d, @CreatedAt, @UpdatedAt)
+                    INSERT INTO "Products" ("Id", "TenantId", "StoreId", "CategoryId", "BrandId", "Name", "Description", "Slug", "Status", "SalesCount30d", "CreatedAt", "UpdatedAt",
+                        "PageTitle", "MetaKeywords", "MetaDescription", "PublishFrom", "PublishUntil", "RecommendSimilar", "RecommendationsMode", "RestockNotification", "CustomFields")
+                    VALUES (@Id, @TenantId, @StoreId, @CategoryId, @BrandId, @Name, @Description, @Slug, @Status, @SalesCount30d, @CreatedAt, @UpdatedAt,
+                        CAST(@PageTitle AS jsonb), CAST(@MetaKeywords AS jsonb), CAST(@MetaDescription AS jsonb), @PublishFrom, @PublishUntil, @RecommendSimilar, @RecommendationsMode, @RestockNotification, CAST(@CustomFields AS jsonb))
                     """;
                 await connection.ExecuteAsync(new CommandDefinition(insert, Map(product), tx, cancellationToken: cancellationToken))
                     .ConfigureAwait(false);
@@ -127,12 +135,22 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
                 const string update = """
                     UPDATE "Products" SET
                         "CategoryId" = @CategoryId,
+                        "BrandId" = @BrandId,
                         "Name" = @Name,
                         "Description" = @Description,
                         "Slug" = @Slug,
                         "Status" = @Status,
                         "SalesCount30d" = @SalesCount30d,
-                        "UpdatedAt" = @UpdatedAt
+                        "UpdatedAt" = @UpdatedAt,
+                        "PageTitle" = CAST(@PageTitle AS jsonb),
+                        "MetaKeywords" = CAST(@MetaKeywords AS jsonb),
+                        "MetaDescription" = CAST(@MetaDescription AS jsonb),
+                        "PublishFrom" = @PublishFrom,
+                        "PublishUntil" = @PublishUntil,
+                        "RecommendSimilar" = @RecommendSimilar,
+                        "RecommendationsMode" = @RecommendationsMode,
+                        "RestockNotification" = @RestockNotification,
+                        "CustomFields" = CAST(@CustomFields AS jsonb)
                     WHERE "Id" = @Id AND "TenantId" = @TenantId
                     """;
                 await connection.ExecuteAsync(new CommandDefinition(update, Map(product), tx, cancellationToken: cancellationToken))
@@ -760,7 +778,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             SELECT COUNT(*)::int
             FROM "Products" p
             WHERE p."TenantId" = @TenantId AND p."StoreId" = @StoreId
-              AND p."Status" = 'pending_approval'
+              AND p."Status" IN ('pending_approval', 'pending_archive')
             """;
 
         var total = await connection.ExecuteScalarAsync<int>(
@@ -777,13 +795,13 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             LEFT JOIN LATERAL (
                 SELECT ac."UserId", ac."CreatedAt"
                 FROM "ApprovalComments" ac
-                WHERE ac."ProductId" = p."Id" AND ac."Type" = 'submitted'
+                WHERE ac."ProductId" = p."Id" AND ac."Type" IN ('submitted', 'archive_request')
                 ORDER BY ac."CreatedAt" DESC, ac."Id" DESC
                 LIMIT 1
             ) c ON TRUE
             LEFT JOIN "Categories" cat ON cat."Id" = p."CategoryId" AND cat."TenantId" = p."TenantId"
             WHERE p."TenantId" = @TenantId AND p."StoreId" = @StoreId
-              AND p."Status" = 'pending_approval'
+              AND p."Status" IN ('pending_approval', 'pending_archive')
               AND (@AfterProductId IS NULL OR p."Id" > @AfterProductId)
             ORDER BY p."Id"
             LIMIT @LimitPlusOne
@@ -814,6 +832,118 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         return (rows, total, nextCursor);
     }
 
+    // ── Manual product recommendations (related products) ─────────────────────
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ProductRecommendationRow>> ListRecommendationsForProductAsync(string productId,
+        string tenantId, string storeId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT r."RecommendedProductId", p."Name" AS "NameJson", p."Slug", p."Status", r."SortOrder"
+            FROM "ProductRecommendations" r
+            INNER JOIN "Products" p ON p."Id" = r."RecommendedProductId"
+            WHERE r."ProductId" = @ProductId AND r."TenantId" = @TenantId AND r."StoreId" = @StoreId
+            ORDER BY r."SortOrder", r."RecommendedProductId"
+            """;
+        var rows = await connection.QueryAsync<ProductRecommendationRow>(
+            new CommandDefinition(sql, new { ProductId = productId, TenantId = tenantId, StoreId = storeId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return rows.ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> SetRecommendationsForProductAsync(string productId, string tenantId,
+        string storeId, IReadOnlyList<string> recommendedProductIds, DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var tx = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            const string ownerSql = """SELECT 1 FROM "Products" WHERE "Id" = @Id AND "TenantId" = @TenantId AND "StoreId" = @StoreId""";
+            var ownerExists = await connection.ExecuteScalarAsync<int?>(new CommandDefinition(ownerSql,
+                new { Id = productId, TenantId = tenantId, StoreId = storeId }, tx, cancellationToken: cancellationToken))
+                .ConfigureAwait(false);
+            if (ownerExists is null)
+                throw new ProductNotFoundException();
+
+            // De-dup while preserving order, drop self-references.
+            var ordered = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var raw in recommendedProductIds)
+            {
+                var id = raw?.Trim();
+                if (string.IsNullOrEmpty(id) || string.Equals(id, productId, StringComparison.Ordinal)) continue;
+                if (seen.Add(id)) ordered.Add(id);
+            }
+
+            // Keep only ids that exist in the same tenant/store.
+            var valid = new List<string>();
+            if (ordered.Count > 0)
+            {
+                const string existSql = """
+                    SELECT "Id" FROM "Products"
+                    WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId AND "Id" = ANY(@Ids)
+                    """;
+                var existing = (await connection.QueryAsync<string>(new CommandDefinition(existSql,
+                        new { TenantId = tenantId, StoreId = storeId, Ids = ordered.ToArray() }, tx,
+                        cancellationToken: cancellationToken)).ConfigureAwait(false))
+                    .ToHashSet(StringComparer.Ordinal);
+                valid = ordered.Where(existing.Contains).ToList();
+            }
+
+            const string deleteSql = """DELETE FROM "ProductRecommendations" WHERE "ProductId" = @ProductId""";
+            await connection.ExecuteAsync(new CommandDefinition(deleteSql, new { ProductId = productId }, tx,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            const string insertSql = """
+                INSERT INTO "ProductRecommendations" ("ProductId", "RecommendedProductId", "TenantId", "StoreId", "SortOrder", "CreatedAt")
+                VALUES (@ProductId, @RecommendedProductId, @TenantId, @StoreId, @SortOrder, @CreatedAt)
+                """;
+            for (var i = 0; i < valid.Count; i++)
+            {
+                await connection.ExecuteAsync(new CommandDefinition(insertSql, new
+                {
+                    ProductId = productId,
+                    RecommendedProductId = valid[i],
+                    TenantId = tenantId,
+                    StoreId = storeId,
+                    SortOrder = i,
+                    CreatedAt = now
+                }, tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            }
+
+            await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return valid;
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListProductIdsForStoreAsync(string tenantId, string storeId, int limit = 5000,
+        CancellationToken cancellationToken = default)
+    {
+        var lim = limit is > 0 and <= 10000 ? limit : 5000;
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT "Id"
+            FROM "Products"
+            WHERE "TenantId" = @TenantId AND "StoreId" = @StoreId AND "Status" <> 'archived'
+            ORDER BY "Id"
+            LIMIT @Limit
+            """;
+        var rows = await connection.QueryAsync<string>(new CommandDefinition(sql,
+            new { TenantId = tenantId, StoreId = storeId, Limit = lim }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+        return rows.ToList();
+    }
+
     /// <summary>Dapper materialization row — avoids record ctor mismatch with <see cref="DateTime"/> vs <see cref="DateTimeOffset"/>.</summary>
     private sealed class PendingApprovalDbRow
     {
@@ -842,13 +972,23 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         p.TenantId,
         p.StoreId,
         p.CategoryId,
+        p.BrandId,
         Name = p.NameJson,
         Description = p.DescriptionJson,
         p.Slug,
         Status = p.Status.ToPersistedValue(),
         SalesCount30d = p.SalesCount30d,
         p.CreatedAt,
-        p.UpdatedAt
+        p.UpdatedAt,
+        PageTitle = p.PageTitleJson,
+        MetaKeywords = p.MetaKeywordsJson,
+        MetaDescription = p.MetaDescriptionJson,
+        p.PublishFrom,
+        p.PublishUntil,
+        p.RecommendSimilar,
+        p.RecommendationsMode,
+        p.RestockNotification,
+        CustomFields = p.CustomFieldsJson
     };
 
     private sealed class VariantRow
@@ -914,6 +1054,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         public string TenantId { get; init; } = null!;
         public string StoreId { get; init; } = null!;
         public int CategoryId { get; init; }
+        public string? BrandId { get; init; }
         public string Name { get; init; } = null!;
         public string Description { get; init; } = null!;
         public string Slug { get; init; } = null!;
@@ -921,13 +1062,49 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         public int SalesCount30d { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
         public DateTimeOffset UpdatedAt { get; init; }
+        public string PageTitle { get; init; } = "{}";
+        public string MetaKeywords { get; init; } = "{}";
+        public string MetaDescription { get; init; } = "{}";
+        public DateTimeOffset? PublishFrom { get; init; }
+        public DateTimeOffset? PublishUntil { get; init; }
+        public bool RecommendSimilar { get; init; } = true;
+        public string RecommendationsMode { get; init; } = "auto";
+        public bool RestockNotification { get; init; }
+        public string CustomFields { get; init; } = "{}";
     }
 
     // ── Attribute management (DAI-592) ────────────────────────────────────────
 
     private const string AttrCols = """
-        "Id","TenantId","Name","Code","Type","Required","Description","SortOrder","CreatedAt","UpdatedAt"
+        "Id","TenantId","Name","Code","Type","Required","Description","SortOrder","CreatedAt","UpdatedAt",
+        "UseAsSearchFilter","SearchFilterCategoryIds","SearchFilterBrandCodes"
         """;
+
+    private static readonly JsonSerializerOptions AttrJson = new(JsonSerializerDefaults.Web);
+
+    private static string SerializeIntArray(IReadOnlyList<int>? ids) =>
+        JsonSerializer.Serialize(ids ?? Array.Empty<int>(), AttrJson);
+
+    private static string SerializeStringArray(IReadOnlyList<string>? codes) =>
+        JsonSerializer.Serialize(codes ?? Array.Empty<string>(), AttrJson);
+
+    private static IReadOnlyList<int> ParseIntArray(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<int>();
+        try { return JsonSerializer.Deserialize<int[]>(json, AttrJson) ?? Array.Empty<int>(); }
+        catch (JsonException) { return Array.Empty<int>(); }
+    }
+
+    private static IReadOnlyList<string> ParseStringArray(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<string>();
+        try { return JsonSerializer.Deserialize<string[]>(json, AttrJson) ?? Array.Empty<string>(); }
+        catch (JsonException) { return Array.Empty<string>(); }
+    }
+
+    private static string SlugifyValueCode(string raw) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            raw.Trim().ToLowerInvariant(), @"[^a-z0-9]+", "_").Trim('_');
 
     private sealed class AttrRow
     {
@@ -941,9 +1118,13 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         public int      SortOrder   { get; init; }
         public DateTime CreatedAt   { get; init; }
         public DateTime UpdatedAt   { get; init; }
+        public bool     UseAsSearchFilter { get; init; }
+        public string   SearchFilterCategoryIds { get; init; } = "[]";
+        public string   SearchFilterBrandCodes { get; init; } = "[]";
 
         public CatalogAttributeRow ToModel() => new(Id, TenantId, Name, Code, Type, Required, Description, SortOrder,
-            new DateTimeOffset(CreatedAt, TimeSpan.Zero), new DateTimeOffset(UpdatedAt, TimeSpan.Zero));
+            new DateTimeOffset(CreatedAt, TimeSpan.Zero), new DateTimeOffset(UpdatedAt, TimeSpan.Zero),
+            UseAsSearchFilter, ParseIntArray(SearchFilterCategoryIds), ParseStringArray(SearchFilterBrandCodes));
     }
 
     private sealed class AttrValueRow
@@ -995,6 +1176,18 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         return row?.ToModel();
     }
 
+    public async Task<CatalogAttributeRow?> GetAttributeByCodeAsync(string tenantId, string code,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        var row = await conn.QuerySingleOrDefaultAsync<AttrRow>(
+            new CommandDefinition(
+                $"""SELECT {AttrCols} FROM "CatalogAttributes" WHERE "TenantId"=@TenantId AND "Code"=@Code""",
+                new { TenantId = tenantId, Code = code.Trim().ToLowerInvariant() },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        return row?.ToModel();
+    }
+
     public async Task<bool> AttributeCodeExistsAsync(string tenantId, string code, int? excludeId,
         CancellationToken cancellationToken = default)
     {
@@ -1011,8 +1204,10 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         const string sql = """
-            INSERT INTO "CatalogAttributes"("TenantId","Name","Code","Type","Required","Description","SortOrder","CreatedAt","UpdatedAt")
-            VALUES(@TenantId,@Name,@Code,@Type,@Required,@Description,@SortOrder,@CreatedAt,@UpdatedAt)
+            INSERT INTO "CatalogAttributes"("TenantId","Name","Code","Type","Required","Description","SortOrder",
+                "CreatedAt","UpdatedAt","UseAsSearchFilter","SearchFilterCategoryIds","SearchFilterBrandCodes")
+            VALUES(@TenantId,@Name,@Code,@Type,@Required,@Description,@SortOrder,@CreatedAt,@UpdatedAt,
+                @UseAsSearchFilter,@SearchFilterCategoryIds::jsonb,@SearchFilterBrandCodes::jsonb)
             RETURNING "Id"
             """;
         var now = DateTimeOffset.UtcNow;
@@ -1020,6 +1215,9 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         {
             row.TenantId, row.Name, row.Code, row.Type, row.Required, row.Description, row.SortOrder,
             CreatedAt = now.UtcDateTime, UpdatedAt = now.UtcDateTime,
+            row.UseAsSearchFilter,
+            SearchFilterCategoryIds = SerializeIntArray(row.SearchFilterCategoryIds),
+            SearchFilterBrandCodes = SerializeStringArray(row.SearchFilterBrandCodes),
         }, cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
@@ -1029,13 +1227,19 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         const string sql = """
             UPDATE "CatalogAttributes"
             SET "Name"=@Name,"Code"=@Code,"Type"=@Type,"Required"=@Required,
-                "Description"=@Description,"SortOrder"=@SortOrder,"UpdatedAt"=@UpdatedAt
+                "Description"=@Description,"SortOrder"=@SortOrder,"UpdatedAt"=@UpdatedAt,
+                "UseAsSearchFilter"=@UseAsSearchFilter,
+                "SearchFilterCategoryIds"=@SearchFilterCategoryIds::jsonb,
+                "SearchFilterBrandCodes"=@SearchFilterBrandCodes::jsonb
             WHERE "Id"=@Id AND "TenantId"=@TenantId
             """;
         var affected = await conn.ExecuteAsync(new CommandDefinition(sql, new
         {
             row.Id, row.TenantId, row.Name, row.Code, row.Type, row.Required,
             row.Description, row.SortOrder, UpdatedAt = DateTimeOffset.UtcNow.UtcDateTime,
+            row.UseAsSearchFilter,
+            SearchFilterCategoryIds = SerializeIntArray(row.SearchFilterCategoryIds),
+            SearchFilterBrandCodes = SerializeStringArray(row.SearchFilterBrandCodes),
         }, cancellationToken: cancellationToken)).ConfigureAwait(false);
         return affected > 0;
     }
@@ -1115,5 +1319,124 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
             new CommandDefinition(sql, new { ValueId = valueId, AttributeId = attributeId, TenantId = tenantId },
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
         return affected > 0;
+    }
+
+    public async Task<int> DeleteAllAttributeValuesAsync(int attributeId, string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            DELETE FROM "CatalogAttributeValues" v
+            USING "CatalogAttributes" a
+            WHERE v."AttributeId"=@AttributeId AND a."Id"=v."AttributeId" AND a."TenantId"=@TenantId
+            """;
+        return await conn.ExecuteAsync(
+            new CommandDefinition(sql, new { AttributeId = attributeId, TenantId = tenantId },
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
+    public async Task<AttributeImportResult> ImportAttributeValuesAsync(string tenantId,
+        IReadOnlyList<AttributeImportRowInput> rows, CancellationToken cancellationToken = default)
+    {
+        var results = new List<AttributeImportRowResult>(rows.Count);
+        var imported = 0;
+        var skipped = 0;
+
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (var row in rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var code = (row.AttributeCode ?? string.Empty).Trim().ToLowerInvariant();
+            if (code.Length == 0)
+            {
+                skipped++;
+                results.Add(new AttributeImportRowResult(row.AttributeCode ?? "", "skipped", "Attribute code is required."));
+                continue;
+            }
+
+            var attr = await conn.QuerySingleOrDefaultAsync<AttrRow>(
+                new CommandDefinition(
+                    $"""SELECT {AttrCols} FROM "CatalogAttributes" WHERE "TenantId"=@TenantId AND "Code"=@Code""",
+                    new { TenantId = tenantId, Code = code }, transaction: tx,
+                    cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            if (attr is null)
+            {
+                skipped++;
+                results.Add(new AttributeImportRowResult(code, "skipped", $"Attribute '{code}' not found."));
+                continue;
+            }
+
+            var action = string.Equals(row.Action, "Replace", StringComparison.OrdinalIgnoreCase) ? "Replace" : "Merge";
+            var valueNames = (row.Values ?? Array.Empty<string>())
+                .Select(v => v.Trim())
+                .Where(v => v.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (valueNames.Count == 0)
+            {
+                skipped++;
+                results.Add(new AttributeImportRowResult(code, "skipped", "No values provided."));
+                continue;
+            }
+
+            if (action == "Replace")
+            {
+                await conn.ExecuteAsync(new CommandDefinition(
+                    """DELETE FROM "CatalogAttributeValues" WHERE "AttributeId"=@AttributeId""",
+                    new { AttributeId = attr.Id }, transaction: tx, cancellationToken: cancellationToken))
+                    .ConfigureAwait(false);
+            }
+
+            var existingCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (action == "Merge")
+            {
+                var codes = await conn.QueryAsync<string>(new CommandDefinition(
+                    """SELECT "Code" FROM "CatalogAttributeValues" WHERE "AttributeId"=@AttributeId""",
+                    new { AttributeId = attr.Id }, transaction: tx, cancellationToken: cancellationToken))
+                    .ConfigureAwait(false);
+                foreach (var c in codes) existingCodes.Add(c);
+            }
+
+            var sort = 0;
+            var added = 0;
+            foreach (var name in valueNames)
+            {
+                var valueCode = SlugifyValueCode(name);
+                if (valueCode.Length == 0) valueCode = SlugifyValueCode($"value_{sort + 1}");
+                if (action == "Merge" && existingCodes.Contains(valueCode)) continue;
+
+                await conn.ExecuteAsync(new CommandDefinition("""
+                    INSERT INTO "CatalogAttributeValues"("AttributeId","Name","Code","ColorHex","ImageUrl","SortOrder","CreatedAt")
+                    VALUES(@AttributeId,@Name,@Code,'','',@SortOrder,@CreatedAt)
+                    """, new
+                {
+                    AttributeId = attr.Id,
+                    Name = name,
+                    Code = valueCode,
+                    SortOrder = sort++,
+                    CreatedAt = DateTimeOffset.UtcNow.UtcDateTime,
+                }, transaction: tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+                existingCodes.Add(valueCode);
+                added++;
+            }
+
+            if (added == 0 && action == "Merge")
+            {
+                skipped++;
+                results.Add(new AttributeImportRowResult(code, "skipped", "All values already exist (merge)."));
+                continue;
+            }
+
+            imported++;
+            results.Add(new AttributeImportRowResult(code, "imported", $"{added} value(s) {action.ToLowerInvariant()}d."));
+        }
+
+        await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new AttributeImportResult(imported, skipped, results);
     }
 }

@@ -9,6 +9,7 @@ namespace dCMS.Infrastructure.Search;
 
 public sealed class SqlProductSearchRepository(
     ICatalogPersistence catalog,
+    IStoreProductFieldConfigPersistence fieldConfig,
     string catalogConnectionString,
     string? inventoryConnectionString,
     CatalogSearchIndexingOptions indexingOptions) : IProductSearchRepository
@@ -35,10 +36,14 @@ public sealed class SqlProductSearchRepository(
 
         var stock = await LoadStockSummariesAsync(tenantId, storeId, variants, cancellationToken).ConfigureAwait(false);
 
-        // Future: ProductAttributeSnapshot + VariantPrices + snapshot version from DB.
-        IReadOnlyDictionary<string, string> attributes = new Dictionary<string, string>(StringComparer.Ordinal);
+        var configJson = await fieldConfig
+            .GetFieldsJsonAsync(tenantId, storeId, cancellationToken)
+            .ConfigureAwait(false);
+        var fieldDefs = ProductCustomFieldsMapper.ParseDefinitions(configJson);
+        var customAttrs = ProductCustomFieldsMapper.ToIndexAttributes(fieldDefs, product.CustomFieldsJson);
+        IReadOnlyDictionary<string, string> attributes = new Dictionary<string, string>(customAttrs, StringComparer.OrdinalIgnoreCase);
         const int snapshotVersion = 0;
-        string? brandId = null;
+        var brandId = string.IsNullOrWhiteSpace(product.BrandId) ? null : product.BrandId;
 
         return new ProductIndexPayload(
             product,

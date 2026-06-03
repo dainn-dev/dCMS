@@ -9,6 +9,11 @@ import {
   IconWarning,
 } from "../../orders/icons";
 import { fetchStoreCatalogSettings, patchStoreCatalogSettings } from "../api/storeCatalogSettingsApi";
+import {
+  fetchProductFieldConfig,
+  saveProductFieldConfig,
+  type ProductFieldRecord,
+} from "../api/productFieldConfigApi";
 
 // ── Style tokens ─────────────────────────────────────────────────────────────
 const labelBase =
@@ -37,19 +42,10 @@ type TargetPage = "General" | "Product Page" | "Recommendations";
 
 type FieldOption = { name: string; value: string };
 
-type FieldRecord = {
-  id: string;
-  enabled: boolean;
-  required: boolean;
-  property: string;
-  columnLabel: string;
-  fieldName: string;
-  controlType: ControlType;
-  targetPage: TargetPage;
-  options: FieldOption[];
-};
+type FieldRecord = ProductFieldRecord;
 
 const LS_KEY = "dcms.estore.productConfigFields.v1";
+const PROPERTY_RE = /^[a-z][a-z0-9_]*$/;
 
 const CONTROL_TYPES: ControlType[] = [
   "Text Box",
@@ -210,7 +206,12 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
   const [storeApproval, setStoreApproval] = useState(false);
   const [storeLowStockRaw, setStoreLowStockRaw] = useState("");
 
-  const [fields, setFields] = useState<FieldRecord[]>(() => loadStoredFields());
+  const [fieldsReload, setFieldsReload] = useState(0);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [fieldsReady, setFieldsReady] = useState(false);
+  const [fieldsSaving, setFieldsSaving] = useState(false);
+  const [fieldsError, setFieldsError] = useState<string | null>(null);
+  const [fields, setFields] = useState<FieldRecord[]>(() => (apiStoreMode ? [] : loadStoredFields()));
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<FieldRecord, "id">>(emptyForm());
@@ -248,6 +249,29 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
       cancelled = true;
     };
   }, [tenantId, storeId, authToken, storeCatReload]);
+
+  useEffect(() => {
+    if (!tenantId || !storeId) return;
+    let cancelled = false;
+    setFieldsLoading(true);
+    setFieldsReady(false);
+    setFieldsError(null);
+    fetchProductFieldConfig(tenantId, storeId, authToken)
+      .then(({ fields: loaded }) => {
+        if (cancelled) return;
+        setFields(loaded);
+        setFieldsReady(true);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setFieldsError(e instanceof Error ? e.message : "Failed to load custom fields");
+      })
+      .finally(() => {
+        if (!cancelled) setFieldsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, storeId, authToken, fieldsReload]);
 
   async function saveStoreCatalogSettings() {
     if (!tenantId || !storeId) return;
@@ -314,7 +338,15 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
 
   function validate() {
     const e: Partial<Record<keyof FieldRecord, string>> = {};
-    if (!form.property.trim()) e.property = "Property is required";
+    const property = form.property.trim().toLowerCase();
+    if (!property) e.property = "Property is required";
+    else if (!PROPERTY_RE.test(property)) {
+      e.property = "Use lowercase letters, digits or underscores (e.g. warranty_period).";
+    } else if (
+      fields.some((f) => f.property.toLowerCase() === property && f.id !== editId)
+    ) {
+      e.property = "Property must be unique.";
+    }
     if (!form.columnLabel.trim()) e.columnLabel = "Column Label is required";
     if (!form.fieldName.trim()) e.fieldName = "Field Name is required";
 
@@ -338,6 +370,7 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
     }
 
     const optionsSnapshot = form.options.map((o) => ({ ...o }));
+    const normalizedProperty = form.property.trim().toLowerCase();
 
     if (editId) {
       setFields((prev) =>
@@ -346,6 +379,7 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
             ? {
                 ...f,
                 ...form,
+                property: normalizedProperty,
                 options: needsOptions(form.controlType) ? optionsSnapshot : [],
               }
             : f
@@ -355,7 +389,8 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
     } else {
       const newField: FieldRecord = {
         ...form,
-        id: `f${Date.now()}`,
+        id: `pfld-${Date.now()}`,
+        property: normalizedProperty,
         options: needsOptions(form.controlType) ? optionsSnapshot : [],
       };
       setFields((prev) => [...prev, newField]);
@@ -378,7 +413,28 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
     setToast(`Field "${f?.fieldName ?? "Item"}" removed.`);
   }
 
-  function saveConfiguration() {
+  async function saveConfiguration() {
+    if (apiStoreMode) {
+      if (!tenantId || !storeId) return;
+      setFieldsSaving(true);
+      setFieldsError(null);
+      try {
+        const saved = await saveProductFieldConfig(tenantId, storeId, fields, authToken);
+        setFields(saved.fields);
+        setToast(
+          saved.reindexQueued
+            ? "Configuration saved. Product search index is being refreshed in the background."
+            : "Configuration saved."
+        );
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Failed to save configuration";
+        setFieldsError(msg);
+        setToast(msg);
+      } finally {
+        setFieldsSaving(false);
+      }
+      return;
+    }
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(fields));
       setToast("Configuration saved.");
@@ -444,9 +500,14 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
             Manage additional fields displayed on the Add / Edit Product page.
           </p>
         </div>
-        <button type="button" className={`${btnPrimary} shrink-0`} onClick={saveConfiguration}>
+        <button
+          type="button"
+          className={`${btnPrimary} shrink-0`}
+          disabled={fieldsSaving || (apiStoreMode && fieldsLoading)}
+          onClick={() => void saveConfiguration()}
+        >
           <IconSave className="h-4 w-4 shrink-0" />
-          Save configuration
+          {fieldsSaving ? "Saving…" : "Save configuration"}
         </button>
       </header>
 
@@ -522,18 +583,38 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
           <p className="text-xs text-on-surface-variant leading-relaxed">
             Only <strong>enabled</strong> fields are displayed on the Add Products page. Scroll to the bottom and click{" "}
             <strong>Add Field Option</strong> to add a new custom field. Use <strong>Save configuration</strong> to persist
-            this list in the browser (demo).
+            {apiStoreMode ? " this list for the current store (Catalog API)." : " this list in the browser (demo)."}
           </p>
         </div>
+
+        {apiStoreMode && fieldsError && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-error/25 bg-error/5 px-4 py-3">
+            <p className="text-xs text-error">{fieldsError}</p>
+            <button
+              type="button"
+              className="text-[10px] font-bold uppercase tracking-widest text-primary hover:underline"
+              onClick={() => setFieldsReload((n) => n + 1)}
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
           <div className="border-b border-outline-variant/10 px-6 py-4">
             <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Custom Fields</h3>
             <p className="mt-0.5 text-[11px] text-on-surface-variant">
-              {fields.length} field{fields.length !== 1 ? "s" : ""} configured
+              {fieldsLoading
+                ? "Loading…"
+                : `${fields.length} field${fields.length !== 1 ? "s" : ""} configured`}
             </p>
           </div>
 
+          {apiStoreMode && fieldsLoading && (
+            <p className="px-6 py-8 text-xs text-on-surface-variant">Loading custom fields…</p>
+          )}
+
+          {(!apiStoreMode || fieldsReady) && (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
@@ -620,8 +701,9 @@ export function ProductConfigPage({ onNavigateToProducts, tenantId, storeId, aut
               </tbody>
             </table>
           </div>
+          )}
 
-          {!showForm && (
+          {(!apiStoreMode || fieldsReady) && !showForm && (
             <div className="border-t border-outline-variant/10 px-6 py-4">
               <button
                 type="button"

@@ -161,6 +161,92 @@ public sealed class SqlStockPersistence(string connectionString) : IInventorySto
         }
     }
 
+    public async Task<int> SetOnHandQuantityAsync(string tenantId, string storeId, string variantId, string warehouseId,
+        int quantity, string createdBy, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        if (quantity < 0)
+            throw new StockInvariantException("Quantity must be zero or positive.");
+
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var tx = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        const string warehouseSql = """
+            SELECT 1 FROM "Warehouses" WHERE "Id" = @WarehouseId AND "TenantId" = @TenantId AND "StoreId" = @StoreId
+            """;
+        var warehouseExists = await connection.ExecuteScalarAsync<int?>(new CommandDefinition(warehouseSql,
+            new { WarehouseId = warehouseId, TenantId = tenantId, StoreId = storeId }, tx,
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
+        if (warehouseExists is null)
+            throw new VariantStockNotFoundException(variantId, warehouseId);
+
+        const string currentSql = """
+            SELECT "Quantity", "ReservedQuantity"
+            FROM "VariantStock"
+            WHERE "VariantId" = @VariantId AND "WarehouseId" = @WarehouseId
+            """;
+        var current = await connection.QuerySingleOrDefaultAsync<(int Quantity, int ReservedQuantity)?>(
+            new CommandDefinition(currentSql, new { VariantId = variantId, WarehouseId = warehouseId }, tx,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        var previousQuantity = current?.Quantity ?? 0;
+        var reserved = current?.ReservedQuantity ?? 0;
+        if (quantity < reserved)
+            throw new StockInvariantException(
+                $"Cannot set on-hand to {quantity}: {reserved} unit(s) are currently reserved.");
+
+        if (current is null)
+        {
+            const string insertStock = """
+                INSERT INTO "VariantStock" ("VariantId", "WarehouseId", "Quantity", "ReservedQuantity", "Revision")
+                VALUES (@VariantId, @WarehouseId, @Quantity, 0, 1)
+                """;
+            await connection.ExecuteAsync(new CommandDefinition(insertStock,
+                new { VariantId = variantId, WarehouseId = warehouseId, Quantity = quantity }, tx,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+        else
+        {
+            const string updateStock = """
+                UPDATE "VariantStock"
+                SET "Quantity" = @Quantity, "Revision" = "Revision" + 1
+                WHERE "VariantId" = @VariantId AND "WarehouseId" = @WarehouseId
+                """;
+            await connection.ExecuteAsync(new CommandDefinition(updateStock,
+                new { VariantId = variantId, WarehouseId = warehouseId, Quantity = quantity }, tx,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+        }
+
+        var delta = quantity - previousQuantity;
+        const string insertMovement = """
+            INSERT INTO "StockMovements" ("VariantId", "WarehouseId", "Delta", "Type", "ReferenceId", "CreatedAt", "CreatedBy")
+            VALUES (@VariantId, @WarehouseId, @Delta, 'Adjustment', @ReferenceId, @CreatedAt, @CreatedBy)
+            """;
+        await connection.ExecuteAsync(new CommandDefinition(insertMovement,
+            new
+            {
+                VariantId = variantId,
+                WarehouseId = warehouseId,
+                Delta = delta,
+                ReferenceId = "set-on-hand",
+                CreatedAt = now,
+                CreatedBy = string.IsNullOrWhiteSpace(createdBy) ? "api" : createdBy
+            }, tx, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        var envelope = new StockUpdatedV1(variantId, warehouseId, tenantId, storeId, quantity, reserved, now);
+        var payload = JsonSerializer.Serialize(envelope);
+        const string insertOutbox = """
+            INSERT INTO "OutboxEvents" ("EventType", "Payload", "CreatedAt")
+            VALUES (@EventType, @Payload, @CreatedAt)
+            """;
+        await connection.ExecuteAsync(new CommandDefinition(insertOutbox,
+            new { EventType = "StockUpdated.v1", Payload = payload, CreatedAt = envelope.OccurredAt }, tx,
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return quantity;
+    }
+
     private sealed class StockRow
     {
         public int Id { get; init; }

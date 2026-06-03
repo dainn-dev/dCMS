@@ -96,6 +96,45 @@ builder.Services.AddScoped<IProductNotificationSink, ProductNotificationSink>();
 builder.Services.Configure<InternalCatalogOptions>(
     builder.Configuration.GetSection(InternalCatalogOptions.SectionName));
 builder.Services.AddSingleton<IBrandPersistence>(_ => new SqlBrandPersistence(catalogCs));
+builder.Services.AddSingleton<IBrandFieldConfigPersistence>(_ => new SqlBrandFieldConfigPersistence(catalogCs));
+builder.Services.AddSingleton<IStoreBestSellerSettingsPersistence>(_ => new SqlStoreBestSellerSettingsPersistence(catalogCs));
+builder.Services.AddSingleton<IStoreQuantityLimitPersistence>(_ => new SqlStoreQuantityLimitPersistence(catalogCs));
+builder.Services.AddSingleton<IStoreProductFieldConfigPersistence>(_ => new SqlStoreProductFieldConfigPersistence(catalogCs));
+builder.Services.Configure<CatalogSearchIndexingOptions>(
+    builder.Configuration.GetSection(CatalogSearchIndexingOptions.SectionName));
+builder.Services.AddSingleton<IProductSearchRepository>(sp =>
+{
+    var o = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CatalogSearchIndexingOptions>>().Value;
+    var inventoryCs = builder.Configuration.GetConnectionString("Inventory");
+    return new SqlProductSearchRepository(
+        sp.GetRequiredService<ICatalogPersistence>(),
+        sp.GetRequiredService<IStoreProductFieldConfigPersistence>(),
+        catalogCs,
+        inventoryCs,
+        o);
+});
+builder.Services.AddSingleton<ICatalogSearchCacheInvalidator>(sp =>
+{
+    var redis = sp.GetService<IConnectionMultiplexer>();
+    return redis is not null
+        ? new RedisCatalogSearchCacheInvalidator(redis)
+        : NoopCatalogSearchCacheInvalidator.Instance;
+});
+builder.Services.AddSingleton<ElasticsearchProductIndexer>();
+builder.Services.AddSingleton<ProductFieldConfigSyncService>();
+builder.Services.AddSingleton(sp =>
+{
+    var orderCs = builder.Configuration.GetConnectionString("Order");
+    ICustomerOrderQuantityQuery? orderQty = string.IsNullOrWhiteSpace(orderCs)
+        ? null
+        : new SqlCustomerOrderQuantityQuery(orderCs);
+    return new QuantityLimitValidationService(
+        sp.GetRequiredService<IStoreQuantityLimitPersistence>(),
+        sp.GetRequiredService<ICatalogPersistence>(),
+        orderQty);
+});
+builder.Services.AddSingleton<IBestSellerRankingPersistence>(_ => new SqlBestSellerRankingPersistence(catalogCs));
+builder.Services.AddSingleton<BestSellerRankingService>();
 builder.Services.AddSingleton<IBranchPersistence>(_ => new SqlBranchPersistence(catalogCs));
 builder.Services.AddSingleton<IStorefrontTenantValidator, BranchPersistenceTenantValidator>();
 builder.Services.AddScoped<ProductService>();
@@ -226,15 +265,20 @@ app.UseDcmsStorefrontTenantBinder();
 app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapBrandRoutes(builder.Configuration);
+app.MapBrandFieldConfigRoutes(builder.Configuration);
 app.MapAttributeRoutes(builder.Configuration);
 app.MapProductRoutes(builder.Configuration);
 app.MapStoreCatalogSettingsRoutes(builder.Configuration);
+app.MapBestSellerSettingsRoutes(builder.Configuration);
+app.MapQuantityLimitSettingsRoutes(builder.Configuration);
+app.MapProductFieldConfigRoutes(builder.Configuration);
 // P2 #6: notification feed routes moved to dCMS.Notification.Api (mounted at same /api/v1/.../notifications path).
 app.MapProductImageRoutes(builder.Configuration);
 app.MapImportJobRoutes(builder.Configuration);
 app.MapCategoryRoutes(builder.Configuration);
 app.MapVariantAxesRoutes(builder.Configuration);
 app.MapPublicProductRoutes();
+app.MapPublicQuantityLimitRoutes();
 app.MapStorefrontBranchRoutes(builder.Configuration);
 app.MapInternalCatalogRoutes(catalogCs);
 

@@ -3,7 +3,6 @@ import { DataTable } from "../../orders/components/DataTable";
 import {
   IconAddCircle,
   IconAnalytics,
-  IconArrowForward,
   IconChevronDown,
   IconCloudUpload,
   IconDelete,
@@ -229,20 +228,30 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
       <div className="flex-1 space-y-6 p-6">
         <DataTable columns={columns} data={rows} globalFilterPlaceholder="Search by name, code, or type…" emptyMessage="No attributes found." itemNoun="attributes" />
 
+        {apiLoading ? null : rows.length > 0 && (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary to-primary-container p-6 text-on-primary shadow-lg shadow-primary/20 md:col-span-2">
             <div className="relative z-10">
-              <h3 className="mb-1 text-lg font-bold">Global Schema Health</h3>
+              <h3 className="mb-1 text-lg font-bold">Schema Overview</h3>
               <p className="mb-4 text-sm text-primary-fixed/80">
-                You have 12 attributes currently in draft mode across 3 attribute sets.
+                {rows.length} attribute{rows.length !== 1 ? "s" : ""} defined
+                {rows.filter((r) => r.required).length > 0
+                  ? ` · ${rows.filter((r) => r.required).length} marked required`
+                  : ""}
+                {rows.filter((r) => r.useAsSearchFilter).length > 0
+                  ? ` · ${rows.filter((r) => r.useAsSearchFilter).length} search filter${rows.filter((r) => r.useAsSearchFilter).length !== 1 ? "s" : ""}`
+                  : ""}
               </p>
-              <button
-                type="button"
-                className="rounded bg-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary transition-colors hover:bg-surface-bright"
-                onClick={() => console.info("[Attributes] Review drafts (placeholder)")}
-              >
-                Review Drafts
-              </button>
+              <p className="text-xs text-primary-fixed/70">
+                Types:{" "}
+                {(["TEXT", "COLOR", "IMAGE", "SELECT", "BOOLEAN"] as const)
+                  .map((t) => {
+                    const n = rows.filter((r) => r.type === t).length;
+                    return n > 0 ? `${n} ${t}` : null;
+                  })
+                  .filter(Boolean)
+                  .join(" · ") || "—"}
+              </p>
             </div>
             <IconAnalytics
               className="pointer-events-none absolute -bottom-4 -right-4 h-[120px] w-[120px] rotate-12 opacity-10"
@@ -253,20 +262,23 @@ export function AttributesPage({ onCreateAttribute, onEditAttribute, onImportVal
             <div>
               <IconHistory className="mb-2 h-8 w-8 text-primary" aria-hidden />
               <h3 className="font-bold text-on-surface">Recent Activity</h3>
-              <p className="mt-1 text-xs text-on-surface-variant">
-                Attribute &quot;Material Composition&quot; updated by Sarah M.
-              </p>
+              {(() => {
+                const latest = [...rows]
+                  .filter((r) => r.updatedAt)
+                  .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0];
+                return latest ? (
+                  <p className="mt-1 text-xs text-on-surface-variant">
+                    Attribute &quot;{latest.name}&quot; last updated{" "}
+                    {new Date(latest.updatedAt!).toLocaleString()}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-on-surface-variant">No update timestamps yet.</p>
+                );
+              })()}
             </div>
-            <button
-              type="button"
-              className="mt-4 flex items-center gap-1 text-left text-[0.75rem] font-bold text-primary hover:underline"
-              onClick={() => console.info("[Attributes] Audit log (placeholder)")}
-            >
-              View Audit Log
-              <IconArrowForward className="h-3.5 w-3.5 shrink-0" />
-            </button>
           </div>
         </div>
+        )}
       </div>
 
       {deleteTargetCode && (

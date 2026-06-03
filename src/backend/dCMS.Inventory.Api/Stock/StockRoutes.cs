@@ -21,6 +21,7 @@ public static class StockRoutes
             .WithTenantStoreAccess(configuration);
 
         AuthRead(g.MapGet("/variants/{variantId}", GetVariantStockAcrossWarehouses), auth);
+        Auth(g.MapPost("/set-on-hand", SetOnHand), auth);
         Auth(g.MapPost("/adjust", AdjustStock), auth);
         Auth(g.MapPost("/reserve", ReserveStock), auth);
         Auth(g.MapPost("/release", ReleaseStock), auth);
@@ -174,6 +175,72 @@ public static class StockRoutes
 
         return ApiEnvelope.Ok(new { succeeded, failed },
             new { requested = body.Items.Count, succeeded = succeeded.Count, failed = failed.Count });
+    }
+
+    private const string DefaultWarehouseId = "main";
+
+    private sealed record SetOnHandBody(string? VariantId, string? WarehouseId, int Quantity, string? CreatedBy);
+
+    /// <summary>
+    /// Sets the absolute on-hand quantity for a variant (backoffice product editor). When no warehouse is supplied the
+    /// store's first warehouse is used, auto-provisioning a default "main" warehouse if the store has none yet.
+    /// </summary>
+    private static async Task<IResult> SetOnHand(
+        string tenantId,
+        string storeId,
+        [FromBody] SetOnHandBody? body,
+        IInventoryStockPersistence persistence,
+        CancellationToken cancellationToken)
+    {
+        if (body is null)
+            return ApiEnvelope.Error("validation", "Request body is required.", StatusCodes.Status400BadRequest);
+
+        var variantId = (body.VariantId ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(variantId))
+            return ApiEnvelope.Error("validation", "variantId is required.", StatusCodes.Status400BadRequest);
+        if (body.Quantity < 0)
+            return ApiEnvelope.Error("validation", "quantity must be zero or positive.", StatusCodes.Status400BadRequest);
+
+        var warehouseId = (body.WarehouseId ?? "").Trim();
+        if (warehouseId.Length == 0)
+        {
+            var warehouses = await persistence.ListWarehousesForStoreAsync(tenantId, storeId, cancellationToken)
+                .ConfigureAwait(false);
+            var first = warehouses.FirstOrDefault(w => w.IsActive) ?? warehouses.FirstOrDefault();
+            if (first is not null)
+            {
+                warehouseId = first.Id;
+            }
+            else
+            {
+                warehouseId = DefaultWarehouseId;
+                try
+                {
+                    await persistence.CreateWarehouseAsync(tenantId, storeId, warehouseId, "Main Warehouse", null,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (DuplicateWarehouseException)
+                {
+                    // Concurrent create — fine, the warehouse now exists.
+                }
+            }
+        }
+
+        try
+        {
+            var createdBy = string.IsNullOrWhiteSpace(body.CreatedBy) ? "api" : body.CreatedBy.Trim();
+            var quantity = await persistence.SetOnHandQuantityAsync(tenantId, storeId, variantId, warehouseId,
+                body.Quantity, createdBy, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { variantId, warehouseId, quantity });
+        }
+        catch (VariantStockNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (StockInvariantException ex)
+        {
+            return ApiEnvelope.Error("invalid_stock", ex.Message, StatusCodes.Status400BadRequest);
+        }
     }
 
     private static async Task<IResult> AdjustStock(

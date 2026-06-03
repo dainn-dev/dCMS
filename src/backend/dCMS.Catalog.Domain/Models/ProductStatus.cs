@@ -6,7 +6,8 @@ public enum ProductStatus
     PendingApproval = 1,
     Active = 2,
     Hidden = 3,
-    Archived = 4
+    Archived = 4,
+    PendingArchive = 5
 }
 
 public static class ProductStatusExtensions
@@ -19,6 +20,7 @@ public static class ProductStatusExtensions
             ProductStatus.Active => "active",
             ProductStatus.Hidden => "hidden",
             ProductStatus.Archived => "archived",
+            ProductStatus.PendingArchive => "pending_archive",
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
         };
 
@@ -30,6 +32,7 @@ public static class ProductStatusExtensions
             "active" => ProductStatus.Active,
             "hidden" => ProductStatus.Hidden,
             "archived" => ProductStatus.Archived,
+            "pending_archive" => ProductStatus.PendingArchive,
             _ => throw new ArgumentException($"Unknown product status '{value}'.", nameof(value))
         };
 }

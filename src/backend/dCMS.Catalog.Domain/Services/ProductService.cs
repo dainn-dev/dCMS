@@ -27,7 +27,14 @@ public sealed class ProductService(ICatalogPersistence persistence, IProductNoti
             command.NameJson,
             command.DescriptionJson,
             command.Slug,
-            now);
+            now,
+            command.BrandId);
+
+        if (command.Metadata is not null)
+            product.UpdatePageMetadata(command.Metadata, now);
+
+        if (command.CustomFieldsJson is not null)
+            product.UpdateCustomFields(command.CustomFieldsJson, now);
 
         await _persistence.SaveProductWithOutboxAsync(product, cancellationToken).ConfigureAwait(false);
         product.ClearDomainEvents();
@@ -46,10 +53,26 @@ public sealed class ProductService(ICatalogPersistence persistence, IProductNoti
                 cancellationToken).ConfigureAwait(false))
             throw new DuplicateProductSlugException(product.StoreId, normalizedSlug);
 
-        product.UpdateDetails(command.CategoryId, command.NameJson, command.DescriptionJson, command.Slug, now);
+        product.UpdateDetails(command.CategoryId, command.NameJson, command.DescriptionJson, command.Slug, now,
+            command.BrandId);
+        if (command.Metadata is not null)
+            product.UpdatePageMetadata(command.Metadata, now);
+        if (command.CustomFieldsJson is not null)
+            product.UpdateCustomFields(command.CustomFieldsJson, now);
         await _persistence.SaveProductWithOutboxAsync(product, cancellationToken).ConfigureAwait(false);
         product.ClearDomainEvents();
     }
+
+    /// <summary>Ordered manual recommendations (related products) for a product.</summary>
+    public Task<IReadOnlyList<ProductRecommendationRow>> ListRecommendationsAsync(string productId, string tenantId,
+        string storeId, CancellationToken cancellationToken = default) =>
+        _persistence.ListRecommendationsForProductAsync(productId, tenantId, storeId, cancellationToken);
+
+    /// <summary>Replaces the manual recommendation list for a product; returns the persisted ordered ids.</summary>
+    public Task<IReadOnlyList<string>> SetRecommendationsAsync(string productId, string tenantId, string storeId,
+        IReadOnlyList<string> recommendedProductIds, DateTimeOffset now, CancellationToken cancellationToken = default) =>
+        _persistence.SetRecommendationsForProductAsync(productId, tenantId, storeId, recommendedProductIds, now,
+            cancellationToken);
 
     public async Task PublishProductAsync(string productId, string tenantId, string storeId, DateTimeOffset now,
         CancellationToken cancellationToken = default)
@@ -81,6 +104,20 @@ public sealed class ProductService(ICatalogPersistence persistence, IProductNoti
         await _persistence.SaveProductWithOutboxAsync(product, cancellationToken).ConfigureAwait(false);
         await _persistence.InsertApprovalCommentAsync(product.Id, actorUserId, actorRole, "Submitted for approval.",
             "submitted", now, cancellationToken).ConfigureAwait(false);
+        await _notificationSink.OnProductSubmittedAsync(tenantId, storeId, productId, actorUserId, cancellationToken)
+            .ConfigureAwait(false);
+        product.ClearDomainEvents();
+    }
+
+    /// <summary>active|hidden → pending_archive; records an "archive_request" approval comment for the queue.</summary>
+    public async Task SubmitForArchiveAsync(string productId, string tenantId, string storeId, string actorUserId,
+        string actorRole, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var product = await LoadForStoreAsync(productId, tenantId, storeId, cancellationToken).ConfigureAwait(false);
+        product.SubmitForArchive(now);
+        await _persistence.SaveProductWithOutboxAsync(product, cancellationToken).ConfigureAwait(false);
+        await _persistence.InsertApprovalCommentAsync(product.Id, actorUserId, actorRole, "Submitted for archive.",
+            "archive_request", now, cancellationToken).ConfigureAwait(false);
         await _notificationSink.OnProductSubmittedAsync(tenantId, storeId, productId, actorUserId, cancellationToken)
             .ConfigureAwait(false);
         product.ClearDomainEvents();
@@ -147,10 +184,22 @@ public sealed class ProductService(ICatalogPersistence persistence, IProductNoti
         return row?.ApprovalRequired ?? false;
     }
 
-    public async Task ApprovePendingProductAsync(string productId, string tenantId, string storeId, string userId, string role,
-        DateTimeOffset now, CancellationToken cancellationToken = default)
+    public async Task<ProductStatus> ApprovePendingProductAsync(string productId, string tenantId, string storeId, string userId,
+        string role, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         var product = await LoadForStoreAsync(productId, tenantId, storeId, cancellationToken).ConfigureAwait(false);
+
+        if (product.Status == ProductStatus.PendingArchive)
+        {
+            product.ApproveArchive(now);
+            await _persistence.SaveProductWithOutboxAsync(product, cancellationToken).ConfigureAwait(false);
+            await _persistence.InsertApprovalCommentAsync(product.Id, userId, role, "Archive approved.", "approve_archive",
+                now, cancellationToken).ConfigureAwait(false);
+            await _notificationSink.OnProductApprovedAsync(tenantId, storeId, product.Id, cancellationToken).ConfigureAwait(false);
+            product.ClearDomainEvents();
+            return product.Status;
+        }
+
         if (product.Status != ProductStatus.PendingApproval)
             throw new InvalidProductStateException("Product is not pending approval.");
 
@@ -160,6 +209,7 @@ public sealed class ProductService(ICatalogPersistence persistence, IProductNoti
             .ConfigureAwait(false);
         await _notificationSink.OnProductApprovedAsync(tenantId, storeId, product.Id, cancellationToken).ConfigureAwait(false);
         product.ClearDomainEvents();
+        return product.Status;
     }
 
     public async Task RequestChangesOnPendingProductAsync(string productId, string tenantId, string storeId, string message,
@@ -196,6 +246,19 @@ public sealed class ProductService(ICatalogPersistence persistence, IProductNoti
             throw new ArgumentException("Comment must be at most 8000 characters.");
 
         var product = await LoadForStoreAsync(productId, tenantId, storeId, cancellationToken).ConfigureAwait(false);
+
+        if (product.Status == ProductStatus.PendingArchive)
+        {
+            product.CancelArchiveRequest(now);
+            await _persistence.SaveProductWithOutboxAsync(product, cancellationToken).ConfigureAwait(false);
+            await _persistence.InsertApprovalCommentAsync(product.Id, userId, role, trimmed, "reject_archive", now,
+                cancellationToken).ConfigureAwait(false);
+            await _notificationSink.OnProductRejectedAsync(tenantId, storeId, product.Id, trimmed, cancellationToken)
+                .ConfigureAwait(false);
+            product.ClearDomainEvents();
+            return;
+        }
+
         if (product.Status != ProductStatus.PendingApproval)
             throw new InvalidProductStateException("Product is not pending approval.");
 

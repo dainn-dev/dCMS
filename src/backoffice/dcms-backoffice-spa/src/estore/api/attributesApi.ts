@@ -19,6 +19,15 @@ export type AttributeValueRow = {
   createdAt: string;
 };
 
+export type AttributeDetail = AttributeListRow & {
+  description: string;
+  sortOrder: number;
+  useAsSearchFilter: boolean;
+  searchFilterCategoryIds: number[];
+  searchFilterBrandCodes: string[];
+  values?: AttributeValueRow[];
+};
+
 export type AttributePayload = {
   name: string;
   code: string;
@@ -26,6 +35,9 @@ export type AttributePayload = {
   required?: boolean;
   description?: string;
   sortOrder?: number;
+  useAsSearchFilter?: boolean;
+  searchFilterCategoryIds?: number[];
+  searchFilterBrandCodes?: string[];
 };
 
 export type ValuePayload = {
@@ -34,6 +46,24 @@ export type ValuePayload = {
   colorHex?: string;
   imageUrl?: string;
   sortOrder?: number;
+};
+
+export type AttributeImportRowPayload = {
+  attributeCode: string;
+  values: string[];
+  action?: "Replace" | "Merge";
+};
+
+export type AttributeImportRowResult = {
+  attributeCode: string;
+  status: string;
+  message?: string | null;
+};
+
+export type AttributeImportResult = {
+  imported: number;
+  skipped: number;
+  rows: AttributeImportRowResult[];
 };
 
 type AttributeDto = {
@@ -47,6 +77,9 @@ type AttributeDto = {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  useAsSearchFilter?: boolean;
+  searchFilterCategoryIds?: number[];
+  searchFilterBrandCodes?: string[];
   values?: AttributeValueRow[];
 };
 
@@ -59,7 +92,12 @@ function headers(token?: string): Record<string, string> {
 async function checkOk(res: Response): Promise<void> {
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
-    try { const b = await res.json(); if (b?.error?.message) msg = b.error.message; } catch {}
+    try {
+      const b = await res.json();
+      if (b?.error?.message) msg = b.error.message;
+    } catch {
+      // ignore
+    }
     throw new Error(msg);
   }
 }
@@ -69,7 +107,29 @@ function dtoToRow(dto: AttributeDto, seq: string): AttributeListRow {
   const type = validTypes.includes(dto.type as AttributeType)
     ? (dto.type as AttributeType)
     : "TEXT";
-  return { seq, name: dto.name, code: dto.code, type, required: dto.required, id: dto.id };
+  return {
+    seq,
+    name: dto.name,
+    code: dto.code,
+    type,
+    required: dto.required,
+    id: dto.id,
+    updatedAt: dto.updatedAt,
+    useAsSearchFilter: Boolean(dto.useAsSearchFilter),
+  };
+}
+
+function dtoToDetail(dto: AttributeDto): AttributeDetail {
+  const row = dtoToRow(dto, "00");
+  return {
+    ...row,
+    description: dto.description ?? "",
+    sortOrder: dto.sortOrder ?? 0,
+    useAsSearchFilter: Boolean(dto.useAsSearchFilter),
+    searchFilterCategoryIds: dto.searchFilterCategoryIds ?? [],
+    searchFilterBrandCodes: dto.searchFilterBrandCodes ?? [],
+    values: dto.values,
+  };
 }
 
 /** GET /attributes?page=1&pageSize=200 */
@@ -85,6 +145,21 @@ export async function fetchAttributes(
   const body = await res.json();
   const items: AttributeDto[] = Array.isArray(body.data) ? body.data : [];
   return items.map((d, i) => dtoToRow(d, String(i + 1).padStart(2, "0")));
+}
+
+/** GET /attributes/{id} */
+export async function fetchAttribute(
+  tenantId: string,
+  id: number,
+  token?: string
+): Promise<AttributeDetail> {
+  const res = await fetch(`${BASE}/tenants/${tenantId}/attributes/${id}`, {
+    credentials: "same-origin",
+    headers: headers(token),
+  });
+  await checkOk(res);
+  const body = await res.json();
+  return dtoToDetail(body.data as AttributeDto);
 }
 
 /** POST /attributes → 201 */
@@ -201,4 +276,21 @@ export async function deleteAttributeValue(
     headers: headers(token),
   });
   await checkOk(res);
+}
+
+/** POST /attributes/import-values */
+export async function importAttributeValues(
+  tenantId: string,
+  rows: AttributeImportRowPayload[],
+  token?: string
+): Promise<AttributeImportResult> {
+  const res = await fetch(`${BASE}/tenants/${tenantId}/attributes/import-values`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: headers(token),
+    body: JSON.stringify({ rows }),
+  });
+  await checkOk(res);
+  const body = await res.json();
+  return body.data as AttributeImportResult;
 }

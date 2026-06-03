@@ -30,11 +30,13 @@ builder.Services.Configure<CatalogSearchIndexingOptions>(
     builder.Configuration.GetSection(CatalogSearchIndexingOptions.SectionName));
 
 builder.Services.AddSingleton<ICatalogPersistence>(_ => new SqlCatalogPersistence(catalogCs));
+builder.Services.AddSingleton<IStoreProductFieldConfigPersistence>(_ => new SqlStoreProductFieldConfigPersistence(catalogCs));
 builder.Services.AddSingleton<IProductSearchRepository>(sp =>
 {
     var o = sp.GetRequiredService<IOptions<CatalogSearchIndexingOptions>>().Value;
     return new SqlProductSearchRepository(
         sp.GetRequiredService<ICatalogPersistence>(),
+        sp.GetRequiredService<IStoreProductFieldConfigPersistence>(),
         catalogCs,
         inventoryCs,
         o);

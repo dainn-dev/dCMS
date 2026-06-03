@@ -34,4 +34,29 @@ public sealed class RedisCatalogSearchCacheInvalidator(IConnectionMultiplexer mu
             }
         }
     }
+
+    public async Task InvalidateStoreAsync(string storeId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeId);
+        var db = _multiplexer.GetDatabase();
+
+        foreach (var endpoint in _multiplexer.GetEndPoints())
+        {
+            var server = _multiplexer.GetServer(endpoint);
+            if (!server.IsConnected || server.IsReplica)
+                continue;
+
+            foreach (var key in server.Keys(database: db.Database, pattern: $"dcms:product:{storeId}:*", pageSize: 256))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await db.KeyDeleteAsync(key).ConfigureAwait(false);
+            }
+
+            foreach (var key in server.Keys(database: db.Database, pattern: $"dcms:search:{storeId}:*", pageSize: 256))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await db.KeyDeleteAsync(key).ConfigureAwait(false);
+            }
+        }
+    }
 }

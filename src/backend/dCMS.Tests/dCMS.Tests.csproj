@@ -72,6 +72,15 @@
     <None Include="..\dCMS.Notification.Api\Migrations\002_CreateEmailDeliveryLog.sql" Link="Migrations\026_CreateEmailDeliveryLog.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Approval.Api\Migrations\001_CreateApprovalRequests.sql" Link="Migrations\027_CreateApprovalRequests.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\028_AddProductActivation.sql" Link="Migrations\028_AddProductActivation.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\034_AddBrandIdToProducts.sql" Link="Migrations\034_AddBrandIdToProducts.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\035_AddProductPageMetadata.sql" Link="Migrations\035_AddProductPageMetadata.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\036_CreateStoreBestSellerSettings.sql" Link="Migrations\036_CreateStoreBestSellerSettings.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\037_AddPageViewsAndBestSellerHistory.sql" Link="Migrations\037_AddPageViewsAndBestSellerHistory.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\038_CreateStoreQuantityLimitSettings.sql" Link="Migrations\038_CreateStoreQuantityLimitSettings.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\039_StoreQuantityLimitHistory.sql" Link="Migrations\039_StoreQuantityLimitHistory.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\040_CreateStoreProductFieldConfig.sql" Link="Migrations\040_CreateStoreProductFieldConfig.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\041_AddProductCustomFields.sql" Link="Migrations\041_AddProductCustomFields.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\042_AddAttributeSearchFilter.sql" Link="Migrations\042_AddAttributeSearchFilter.sql" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

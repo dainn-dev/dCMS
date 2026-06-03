@@ -11,6 +11,7 @@ import { EditBrandPage } from "./pages/EditBrandPage";
 import { EditProductPage } from "./pages/EditProductPage";
 import { ProductImageImportPage } from "./pages/ProductImageImportPage";
 import { createBrand, deleteBrand, fetchBrands, updateBrand } from "./api/brandsApi";
+import { fetchBrandFieldConfig, saveBrandFieldConfig } from "./api/brandConfigApi";
 import {
   createCollectionLocationApi,
   createFulfillmentGrouping,
@@ -47,7 +48,6 @@ import type { ProductListRow } from "./pages/ProductsPage";
 import { ProductsPage } from "./pages/ProductsPage";
 import { BestSellerSettingsPage } from "./pages/BestSellerSettingsPage";
 import { ProductQuantityLimitSettingsPage } from "./pages/ProductQuantityLimitSettingsPage";
-import { DEMO_PRODUCT_ROWS } from "./demo/demoProductRows";
 import { AttributesPage } from "./pages/AttributesPage";
 import {
   BrandConfigPage,
@@ -250,14 +250,6 @@ const LS_KEYS = {
   collectionLocations: "dcms.estore.fulfillment.collectionLocations.v1",
   logisticPartners: "dcms.estore.fulfillment.logisticPartners.v1",
   brandAdditionalFields: "dcms.estore.brandAdditionalFields.v1",
-  bestSellerFlags: "dcms.estore.bestSellerFlags.v1",
-};
-
-const DEFAULT_BEST_SELLER_FLAGS: Record<string, boolean> = {
-  "1": true,
-  "2": true,
-  "3": false,
-  "4": true,
 };
 
 const DEFAULT_BRANDS: BrandListRow[] = [
@@ -524,17 +516,30 @@ export function EStoreApp({
     };
   }, [tenantId, authToken]);
 
-  const [brandAdditionalFields, setBrandAdditionalFields] = useState<BrandAdditionalField[]>(
-    () =>
-      safeJsonParse<BrandAdditionalField[]>(localStorage.getItem(LS_KEYS.brandAdditionalFields)) ??
-      DEFAULT_BRAND_ADDITIONAL_FIELDS
+  // Brand Configuration (Add/Edit Brand "Other" tab fields).
+  // API-backed & tenant-scoped when tenantId is present (DAI: server persistence);
+  // localStorage fallback only in demo/offline mode (no tenant).
+  const [brandAdditionalFields, setBrandAdditionalFields] = useState<BrandAdditionalField[]>(() =>
+    tenantId
+      ? DEFAULT_BRAND_ADDITIONAL_FIELDS
+      : safeJsonParse<BrandAdditionalField[]>(localStorage.getItem(LS_KEYS.brandAdditionalFields)) ??
+        DEFAULT_BRAND_ADDITIONAL_FIELDS
   );
+  const brandFieldsLoadedRef = useRef(false);
 
-  const [bestSellerFlags, setBestSellerFlags] = useState<Record<string, boolean>>(
-    () =>
-      safeJsonParse<Record<string, boolean>>(localStorage.getItem(LS_KEYS.bestSellerFlags)) ??
-      DEFAULT_BEST_SELLER_FLAGS
-  );
+  useEffect(() => {
+    if (!tenantId) return;
+    if (brandFieldsLoadedRef.current) return;
+    brandFieldsLoadedRef.current = true;
+    fetchBrandFieldConfig(tenantId, authToken)
+      .then(({ configured, fields }) => {
+        // Use the tenant's saved config; keep seed defaults when nothing is stored yet.
+        if (configured) setBrandAdditionalFields(fields);
+      })
+      .catch(() => {
+        /* non-fatal: keep seed defaults so the page still works; a Save will create the row */
+      });
+  }, [tenantId, authToken]);
 
   const [predefinedFieldSettings, setPredefinedFieldSettings] = useState<FulfillmentPredefinedFieldSetting[]>(() =>
     tenantId
@@ -575,12 +580,10 @@ export function EStoreApp({
   }, [logisticPartners, tenantId]);
 
   useEffect(() => {
+    // Demo/offline only — in tenant mode the config is persisted server-side via the API.
+    if (tenantId) return;
     localStorage.setItem(LS_KEYS.brandAdditionalFields, JSON.stringify(brandAdditionalFields));
-  }, [brandAdditionalFields]);
-
-  useEffect(() => {
-    localStorage.setItem(LS_KEYS.bestSellerFlags, JSON.stringify(bestSellerFlags));
-  }, [bestSellerFlags]);
+  }, [brandAdditionalFields, tenantId]);
 
   const [stockLocations, setStockLocations] = useState<StockLocation[]>(() => (tenantId ? [] : DEMO_STOCK_LOCATIONS));
 
@@ -899,16 +902,24 @@ export function EStoreApp({
       {page === "brand-configuration" && (
         <BrandConfigPage
           savedFields={brandAdditionalFields}
-          onSave={setBrandAdditionalFields}
+          onSave={async (next) => {
+            if (tenantId) {
+              // Server validates (dup/empty/options) and returns the normalised list.
+              const saved = await saveBrandFieldConfig(tenantId, next, authToken);
+              setBrandAdditionalFields(saved);
+            } else {
+              setBrandAdditionalFields(next); // demo mode → localStorage effect persists
+            }
+          }}
           onNavigateToBrands={() => handlePageChange("brands")}
         />
       )}
       {page === "categories" && <CategoriesPage tenantId={tenantId} authToken={authToken} />}
       {page === "product-best-sellers" && (
         <BestSellerSettingsPage
-          rows={DEMO_PRODUCT_ROWS}
-          bestSellerById={bestSellerFlags}
-          onBestSellerChange={setBestSellerFlags}
+          tenantId={tenantId}
+          storeId={storeId}
+          authToken={authToken}
           onNavigateToProducts={() => handlePageChange("products")}
         />
       )}
@@ -916,7 +927,12 @@ export function EStoreApp({
         <CategoryAssignmentPage onNavigateToProducts={() => handlePageChange("products")} />
       )}
       {page === "product-quantity-limit-settings" && (
-        <ProductQuantityLimitSettingsPage onNavigateToProducts={() => handlePageChange("products")} />
+        <ProductQuantityLimitSettingsPage
+          tenantId={tenantId}
+          storeId={storeId}
+          authToken={authToken}
+          onNavigateToProducts={() => handlePageChange("products")}
+        />
       )}
       {page === "product-configuration" && (
         <ProductConfigPage
@@ -941,6 +957,9 @@ export function EStoreApp({
             mode={productForm.mode === "add" ? "add" : "edit"}
             product={productForm.mode === "edit" ? productForm.data : undefined}
             onBack={() => setProductForm({ mode: "idle" })}
+            tenantId={tenantId}
+            storeId={storeId}
+            authToken={authToken}
           />
         ) : (
           <ProductsPage
@@ -976,7 +995,11 @@ export function EStoreApp({
         ))}
       {page === "attributes" &&
         (attributeForm.mode === "attr-import" ? (
-          <AttributeImportPage onBack={() => setAttributeForm({ mode: "idle" })} />
+          <AttributeImportPage
+            onBack={() => setAttributeForm({ mode: "idle" })}
+            tenantId={tenantId}
+            authToken={authToken}
+          />
         ) : attributeForm.mode !== "idle" ? (
           <EditAttributePage
             mode={attributeForm.mode === "add" ? "add" : "edit"}

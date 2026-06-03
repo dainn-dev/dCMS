@@ -13,6 +13,9 @@ public sealed class CreateOrderApiRequest
     public string? CustomerPhone { get; set; }
     /// <summary>DAI-693: optional promo code applied to this order — evaluated against Promotions.Api at create time.</summary>
     public string? PromoCode { get; set; }
+    /// <summary>Optional membership context for quantity-limit rule qualifiers.</summary>
+    public string? MembershipType { get; set; }
+    public string? MembershipTier { get; set; }
 }
 
 public sealed class CreateOrderLineApiRequest

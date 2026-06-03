@@ -14,8 +14,13 @@ public sealed record CatalogAttributeRow(
     string         Description,
     int            SortOrder,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt)
+    DateTimeOffset UpdatedAt,
+    bool           UseAsSearchFilter = false,
+    IReadOnlyList<int>? SearchFilterCategoryIds = null,
+    IReadOnlyList<string>? SearchFilterBrandCodes = null)
 {
+    public IReadOnlyList<int> CategoryFilterIds => SearchFilterCategoryIds ?? Array.Empty<int>();
+    public IReadOnlyList<string> BrandFilterCodes => SearchFilterBrandCodes ?? Array.Empty<string>();
     /// <summary>Valid attribute types matching SPA + DB contract.</summary>
     public static readonly IReadOnlySet<string> ValidTypes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)

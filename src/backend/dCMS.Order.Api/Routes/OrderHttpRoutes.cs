@@ -11,7 +11,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using dCMS.Core.Exceptions;
+using dCMS.Core.Services;
 using dCMS.Promotions.Contracts.Evaluate;
+using OutOfStockException = dCMS.Order.Core.Integration.OutOfStockException;
 
 namespace dCMS.Order.Api.Routes;
 
@@ -619,6 +622,7 @@ public static class OrderHttpRoutes
         HttpContext http,
         [FromBody] CreateOrderApiRequest? body,
         [FromServices] IOrderService orders,
+        [FromServices] QuantityLimitValidationService quantityLimits,
         [FromServices] IConfiguration configuration,
         [FromServices] IPromotionsClient promotions,
         [FromServices] ILoggerFactory loggerFactory,
@@ -671,6 +675,35 @@ public static class OrderHttpRoutes
         if (promoErr is not null)
             return promoErr;
         command = enrichedCommand;
+
+        try
+        {
+            await quantityLimits.EnsureCartValidAsync(
+                tenantId,
+                storeId,
+                command.Lines.Select(l => new QuantityLimitCartLine(l.ProductId, l.Quantity)).ToList(),
+                new QuantityLimitValidationContext(command.CustomerId, body.MembershipType, body.MembershipTier),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (QuantityLimitExceededException ex)
+        {
+            return Results.Json(
+                new
+                {
+                    error = new
+                    {
+                        code = "QUANTITY_LIMIT_EXCEEDED",
+                        message = ex.Message,
+                        productId = ex.ProductId,
+                        requested = ex.Requested,
+                        limit = ex.Limit,
+                        limitScope = ex.LimitScope,
+                        ruleId = ex.RuleId,
+                        ruleName = ex.RuleName
+                    }
+                },
+                statusCode: StatusCodes.Status422UnprocessableEntity);
+        }
 
         try
         {

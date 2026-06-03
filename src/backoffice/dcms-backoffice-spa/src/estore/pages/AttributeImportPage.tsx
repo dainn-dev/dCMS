@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import ExcelJS from "exceljs";
 import {
   IconArrowBack,
   IconCheckCircle,
   IconCloudUpload,
   IconInfo,
 } from "../../orders/icons";
+import {
+  importAttributeValues,
+  type AttributeImportRowPayload,
+} from "../api/attributesApi";
+import { ATTR_VALUES_IMPORT_HEADERS } from "../exportAttributeTemplates";
 
-// ── Style tokens ─────────────────────────────────────────────────────────────
 const btnPrimary =
   "flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 text-xs font-bold uppercase tracking-widest text-on-primary shadow-lg shadow-primary/20 transition-all hover:scale-[1.02] active:scale-95 disabled:pointer-events-none disabled:opacity-40";
 const btnGhost =
   "text-xs font-bold uppercase tracking-widest text-on-surface-variant px-4 py-2.5 hover:bg-surface-container-high rounded-md transition-colors";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 type ImportAction = "Replace" | "Merge";
 
 type AttrImportRow = {
@@ -25,83 +29,142 @@ type AttrImportRow = {
   errorMsg?: string;
 };
 
-// ── Mock parsed data ──────────────────────────────────────────────────────────
-const MOCK_IMPORT_ROWS: AttrImportRow[] = [
-  {
-    id: "ai1",
-    attributeName: "Material Composition",
-    attributeCode: "mat_composition",
-    values: ["Cotton", "Polyester", "Silk", "Wool", "Linen"],
-    action: "Replace",
-    status: "ready",
-  },
-  {
-    id: "ai2",
-    attributeName: "Primary Color",
-    attributeCode: "color_primary",
-    values: ["Red", "Blue", "Green", "Black", "White", "Yellow"],
-    action: "Merge",
-    status: "ready",
-  },
-  {
-    id: "ai3",
-    attributeName: "Country of Origin",
-    attributeCode: "geo_origin",
-    values: ["Malaysia", "Singapore", "Thailand", "Indonesia", "Vietnam"],
-    action: "Replace",
-    status: "ready",
-  },
-  {
-    id: "ai4",
-    attributeName: "Washing Instructions",
-    attributeCode: "instruction_wash",
-    values: ["Hand Wash Only", "Machine Wash Cold", "Dry Clean Only"],
-    action: "Merge",
-    status: "ready",
-  },
-  {
-    id: "ai5",
-    attributeName: "Primary Color (Duplicate)",
-    attributeCode: "color_primary",
-    values: ["Magenta", "Cyan"],
-    action: "Merge",
-    status: "error",
-    errorMsg: "Duplicate attribute code in this file",
-  },
-];
+type Props = {
+  onBack: () => void;
+  tenantId?: string;
+  authToken?: string;
+};
 
-// ── Component ─────────────────────────────────────────────────────────────────
-type Props = { onBack: () => void };
+function splitValues(raw: string): string[] {
+  return raw
+    .split(";")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
 
-export function AttributeImportPage({ onBack }: Props) {
-  // ── Step 1 ────────────────────────────────────────────────────────────────
+function normalizeHeader(cell: string): string {
+  return cell.trim().toLowerCase();
+}
+
+async function parseSpreadsheet(file: File): Promise<Omit<AttrImportRow, "id" | "status">[]> {
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const rows: Omit<AttrImportRow, "id" | "status">[] = [];
+
+  if (ext === "csv") {
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length < 2) return rows;
+    const headers = lines[0].split(",").map(normalizeHeader);
+    const nameIdx = headers.findIndex((h) => h.includes("attribute name"));
+    const codeIdx = headers.findIndex((h) => h.includes("attribute code"));
+    const valuesIdx = headers.findIndex((h) => h.includes("values"));
+    if (codeIdx < 0 || valuesIdx < 0) throw new Error("Missing required columns in CSV.");
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(",");
+      const attributeCode = (cols[codeIdx] ?? "").trim().toLowerCase();
+      const attributeName = nameIdx >= 0 ? (cols[nameIdx] ?? "").trim() : attributeCode;
+      const values = splitValues(cols[valuesIdx] ?? "");
+      rows.push({ attributeName, attributeCode, values, action: "Merge" });
+    }
+    return rows;
+  }
+
+  const buf = await file.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buf);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return rows;
+
+  const headerRow = sheet.getRow(1);
+  const headers: string[] = [];
+  headerRow.eachCell((cell, col) => {
+    headers[col] = normalizeHeader(String(cell.value ?? ""));
+  });
+
+  const nameCol = headers.findIndex((h) => h?.includes("attribute name"));
+  const codeCol = headers.findIndex((h) => h?.includes("attribute code"));
+  const valuesCol = headers.findIndex((h) => h?.includes("values"));
+  const actionCol = headers.findIndex((h) => h === "action");
+
+  if (codeCol < 0 || valuesCol < 0) {
+    throw new Error(`File must include headers: ${ATTR_VALUES_IMPORT_HEADERS.join(", ")}`);
+  }
+
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const attributeCode = String(row.getCell(codeCol).value ?? "").trim().toLowerCase();
+    if (!attributeCode) return;
+    const attributeName =
+      nameCol >= 0 ? String(row.getCell(nameCol).value ?? "").trim() : attributeCode;
+    const values = splitValues(String(row.getCell(valuesCol).value ?? ""));
+    const actionRaw = actionCol >= 0 ? String(row.getCell(actionCol).value ?? "").trim() : "Merge";
+    const action: ImportAction =
+      actionRaw.toLowerCase() === "replace" ? "Replace" : "Merge";
+    rows.push({ attributeName, attributeCode, values, action });
+  });
+
+  return rows;
+}
+
+function validateParsedRows(parsed: Omit<AttrImportRow, "id" | "status">[]): AttrImportRow[] {
+  const seenCodes = new Set<string>();
+  return parsed.map((row, index) => {
+    const id = `row-${index}`;
+    if (!row.attributeCode) {
+      return { ...row, id, status: "error", errorMsg: "Attribute code is required." };
+    }
+    if (seenCodes.has(row.attributeCode)) {
+      return { ...row, id, status: "error", errorMsg: "Duplicate attribute code in this file." };
+    }
+    seenCodes.add(row.attributeCode);
+    if (row.values.length === 0) {
+      return { ...row, id, status: "error", errorMsg: "At least one value is required." };
+    }
+    return { ...row, id, status: "ready" };
+  });
+}
+
+export function AttributeImportPage({ onBack, tenantId, authToken }: Props) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadDone, setUploadDone] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Step 2 ────────────────────────────────────────────────────────────────
   const [rows, setRows] = useState<AttrImportRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // ── Toast ─────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3000);
+    const t = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(t);
   }, [toast]);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     setSelectedFile(e.target.files?.[0] ?? null);
+    setParseError(null);
+    setUploadDone(false);
+    setRows([]);
+    setSelectedIds(new Set());
   }
 
-  function handleUpload() {
+  async function handleUpload() {
     if (!selectedFile) return;
-    const readyRows = MOCK_IMPORT_ROWS.filter((r) => r.status === "ready");
-    setRows(MOCK_IMPORT_ROWS);
-    setSelectedIds(new Set(readyRows.map((r) => r.id)));
-    setUploadDone(true);
+    setParseError(null);
+    try {
+      const parsed = validateParsedRows(await parseSpreadsheet(selectedFile));
+      const readyRows = parsed.filter((r) => r.status === "ready");
+      setRows(parsed);
+      setSelectedIds(new Set(readyRows.map((r) => r.id)));
+      setUploadDone(true);
+      if (readyRows.length === 0) {
+        setParseError("No valid rows found. Fix errors below or update the file.");
+      }
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : "Could not parse file.");
+    }
   }
 
   function toggleRow(id: string) {
@@ -120,17 +183,38 @@ export function AttributeImportPage({ onBack }: Props) {
     setSelectedIds(checked ? new Set(readyRows.map((r) => r.id)) : new Set());
   }
 
-  function handleImport() {
-    const count = selectedIds.size;
-    setToast(`${count} attribute value set${count !== 1 ? "s" : ""} imported successfully.`);
-    setTimeout(() => onBack(), 2200);
+  async function handleImport() {
+    if (!tenantId) {
+      setToast("Import requires an active store tenant.");
+      return;
+    }
+    const selected = rows.filter((r) => selectedIds.has(r.id) && r.status === "ready");
+    if (selected.length === 0) return;
+
+    const payload: AttributeImportRowPayload[] = selected.map((r) => ({
+      attributeCode: r.attributeCode,
+      values: r.values,
+      action: r.action,
+    }));
+
+    setImporting(true);
+    try {
+      const result = await importAttributeValues(tenantId, payload, authToken);
+      setToast(
+        `${result.imported} attribute value set${result.imported !== 1 ? "s" : ""} imported` +
+          (result.skipped > 0 ? ` (${result.skipped} skipped)` : "") +
+          "."
+      );
+      setTimeout(() => onBack(), 2200);
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setImporting(false);
+    }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
-
-      {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4">
         <div>
           <button
@@ -148,10 +232,7 @@ export function AttributeImportPage({ onBack }: Props) {
         </div>
       </div>
 
-      {/* ── Body ────────────────────────────────────────────────────────── */}
       <div className="flex-1 space-y-6 p-6 pb-24">
-
-        {/* ── Step 1: File Upload ──────────────────────────────────────── */}
         <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm">
           <div className="mb-5 flex items-center gap-3">
             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${uploadDone ? "bg-secondary-container/30 text-secondary" : "bg-primary text-on-primary"}`}>
@@ -160,16 +241,13 @@ export function AttributeImportPage({ onBack }: Props) {
             <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Upload File</h3>
           </div>
 
-          {/* Info banner */}
           <div className="mb-6 flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
             <IconInfo className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div className="space-y-2 text-xs text-on-surface-variant leading-relaxed">
               <p className="font-semibold text-on-surface">File Requirements</p>
-              <p>
-                The spreadsheet must include the following column headers in the first row:
-              </p>
+              <p>The spreadsheet must include the following column headers in the first row:</p>
               <div className="flex flex-wrap gap-1.5">
-                {["Attribute Name", "Attribute Code", "Values (semicolon-separated)"].map((h) => (
+                {ATTR_VALUES_IMPORT_HEADERS.map((h) => (
                   <code key={h} className="rounded bg-outline-variant/20 px-1.5 py-0.5 text-[10px]">{h}</code>
                 ))}
               </div>
@@ -177,18 +255,16 @@ export function AttributeImportPage({ onBack }: Props) {
                 <strong>Note:</strong> Multiple values per attribute must be separated by{" "}
                 <code className="rounded bg-outline-variant/20 px-1.5 py-0.5">;</code>
               </p>
-              <p>
-                Don&apos;t have a template? Use{" "}
-                <strong>Actions → Import Template</strong>{" "}
-                on the Attributes page to download the <strong>.xlsx</strong> template.
-              </p>
             </div>
           </div>
 
+          {parseError && (
+            <p className="mb-4 text-xs text-error" role="alert">{parseError}</p>
+          )}
+
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            {/* File picker */}
             <div className="space-y-2">
-              <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
+              <label htmlFor="attribute-import-file" className="block text-[0.6875rem] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
                 Import File <span className="text-error">*</span>
               </label>
               <div
@@ -214,6 +290,8 @@ export function AttributeImportPage({ onBack }: Props) {
               </div>
               <input
                 ref={fileInputRef}
+                id="attribute-import-file"
+                name="attribute-import-file"
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 className="hidden"
@@ -221,14 +299,8 @@ export function AttributeImportPage({ onBack }: Props) {
               />
             </div>
 
-            {/* Upload button */}
             <div className="flex items-end">
-              <button
-                type="button"
-                className={btnPrimary}
-                disabled={!selectedFile}
-                onClick={handleUpload}
-              >
+              <button type="button" className={btnPrimary} disabled={!selectedFile} onClick={() => void handleUpload()}>
                 <IconCloudUpload className="h-4 w-4 shrink-0" />
                 Upload File
               </button>
@@ -236,10 +308,8 @@ export function AttributeImportPage({ onBack }: Props) {
           </div>
         </section>
 
-        {/* ── Step 2: Review & Import ──────────────────────────────────── */}
         {uploadDone && (
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
-            {/* Section header */}
             <div className="flex flex-wrap items-center gap-3 border-b border-outline-variant/10 px-6 py-4">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-on-primary">2</span>
               <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Review Attribute Values</h3>
@@ -248,7 +318,6 @@ export function AttributeImportPage({ onBack }: Props) {
               </span>
             </div>
 
-            {/* Table */}
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left">
                 <thead>
@@ -293,40 +362,25 @@ export function AttributeImportPage({ onBack }: Props) {
                         <td className="px-4 py-3.5">
                           <div className="flex flex-wrap gap-1">
                             {row.values.map((v) => (
-                              <span
-                                key={v}
-                                className="rounded-full bg-surface-container-high px-2 py-0.5 text-[9px] font-medium text-on-surface-variant"
-                              >
+                              <span key={v} className="rounded-full bg-surface-container-high px-2 py-0.5 text-[9px] font-medium text-on-surface-variant">
                                 {v}
                               </span>
                             ))}
                           </div>
                         </td>
                         <td className="px-4 py-3.5">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${
-                              row.action === "Replace"
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-blue-50 text-blue-700"
-                            }`}
-                          >
+                          <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${row.action === "Replace" ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>
                             {row.action}
                           </span>
                         </td>
                         <td className="px-4 py-3.5">
                           {isError ? (
                             <span className="flex flex-col gap-0.5">
-                              <span className="rounded-full bg-error-container px-2 py-0.5 text-[9px] font-bold uppercase text-on-error-container">
-                                Error
-                              </span>
-                              {row.errorMsg && (
-                                <span className="text-[9px] text-error">{row.errorMsg}</span>
-                              )}
+                              <span className="rounded-full bg-error-container px-2 py-0.5 text-[9px] font-bold uppercase text-on-error-container">Error</span>
+                              {row.errorMsg && <span className="text-[9px] text-error">{row.errorMsg}</span>}
                             </span>
                           ) : (
-                            <span className="rounded-full bg-secondary-container/20 px-2 py-0.5 text-[9px] font-bold uppercase text-on-secondary-container">
-                              Ready
-                            </span>
+                            <span className="rounded-full bg-secondary-container/20 px-2 py-0.5 text-[9px] font-bold uppercase text-on-secondary-container">Ready</span>
                           )}
                         </td>
                       </tr>
@@ -336,7 +390,6 @@ export function AttributeImportPage({ onBack }: Props) {
               </table>
             </div>
 
-            {/* Footer action bar */}
             <div className="flex flex-col items-start justify-between gap-4 border-t border-outline-variant/10 px-6 py-4 sm:flex-row sm:items-center">
               <div className="flex items-center gap-3 text-sm text-on-surface-variant">
                 <label className="flex cursor-pointer items-center gap-2 select-none">
@@ -355,17 +408,15 @@ export function AttributeImportPage({ onBack }: Props) {
               </div>
 
               <div className="flex items-center gap-3">
-                <button type="button" className={btnGhost} onClick={onBack}>
-                  Cancel
-                </button>
+                <button type="button" className={btnGhost} onClick={onBack}>Cancel</button>
                 <button
                   type="button"
                   className={btnPrimary}
-                  disabled={selectedIds.size === 0}
-                  onClick={handleImport}
+                  disabled={selectedIds.size === 0 || importing || !tenantId}
+                  onClick={() => void handleImport()}
                 >
                   <IconCheckCircle className="h-4 w-4 shrink-0" />
-                  Import Values
+                  {importing ? "Importing…" : "Import Values"}
                 </button>
               </div>
             </div>
@@ -373,7 +424,6 @@ export function AttributeImportPage({ onBack }: Props) {
         )}
       </div>
 
-      {/* ── Toast ───────────────────────────────────────────────────────── */}
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 flex items-center gap-3 rounded-full border border-secondary/20 bg-surface-container-lowest px-6 py-3 shadow-2xl">
           <IconCheckCircle className="h-5 w-5 shrink-0 text-secondary" />

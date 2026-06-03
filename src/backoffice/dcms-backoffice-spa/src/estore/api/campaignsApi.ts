@@ -4,7 +4,13 @@
  */
 
 import { GATEWAY } from "./gatewayConfig";
-import type { CampaignListRow, CampaignStatus, CampaignChannel, CampaignEditorKind } from "../campaigns-columns";
+import type {
+  CampaignListRow,
+  CampaignStatus,
+  CampaignChannel,
+  CampaignEditorKind,
+  CampaignWorkflowState,
+} from "../campaigns-columns";
 
 const BASE = GATEWAY.promotions;
 
@@ -34,7 +40,7 @@ export type HistoryEntry = {
   createdAt: string;
 };
 
-type CampaignDto = {
+export type CampaignDetail = {
   id: string;
   tenantId: string;
   code: string;
@@ -44,12 +50,19 @@ type CampaignDto = {
   channel: string;
   startDate: string | null;
   endDate: string | null;
+  activeDaysJson?: string;
+  activeMonthsJson?: string;
+  qualifiersJson?: string;
+  mechanicsJson?: string;
+  promotionDetailsJson?: string;
   budget: string;
   audience: string;
   conversions: number;
   createdAt: string;
   updatedAt: string;
 };
+
+type CampaignDto = CampaignDetail;
 
 function headers(token?: string): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
@@ -100,9 +113,8 @@ function dtoToRow(d: CampaignDto): CampaignListRow {
     audience: d.audience || "—",
     budget: d.budget || "—",
     conversions: d.conversions,
-    // carry raw workflowState for EditCampaignPage
-    _workflowState: d.workflowState,
-  } as CampaignListRow & { _workflowState: string };
+    workflowState: d.workflowState as CampaignWorkflowState,
+  };
 }
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -126,7 +138,7 @@ export async function fetchCampaigns(
   return items.map(dtoToRow);
 }
 
-export async function getCampaign(tenantId: string, id: string, token?: string): Promise<CampaignDto> {
+export async function getCampaign(tenantId: string, id: string, token?: string): Promise<CampaignDetail> {
   const res = await fetch(`${BASE}/tenants/${tenantId}/campaigns/${id}`, {
     credentials: "same-origin", headers: headers(token),
   });

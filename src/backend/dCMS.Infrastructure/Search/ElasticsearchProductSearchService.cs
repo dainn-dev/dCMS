@@ -27,15 +27,32 @@ public sealed class ElasticsearchProductSearchService(
         var filters = new List<Query>
         {
             Query.Term(new TermQuery(Field.FromString("storeId")!) { Value = FieldValue.String(query.StoreId) }),
-            Query.Term(new TermQuery(Field.FromString("tenantId")!) { Value = FieldValue.String(query.TenantId) }),
-            Query.Term(new TermQuery(Field.FromString("status")!) { Value = FieldValue.String("active") })
+            Query.Term(new TermQuery(Field.FromString("tenantId")!) { Value = FieldValue.String(query.TenantId) })
         };
+
+        // Status scope: null/empty → storefront default ("active" only). Admin can request additional statuses.
+        if (query.Statuses is { Count: > 0 } statuses)
+        {
+            var statusShould = statuses
+                .Where(static s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => Query.Term(new TermQuery(Field.FromString("status")!) { Value = FieldValue.String(s) }))
+                .ToList();
+            if (statusShould.Count > 0)
+                filters.Add(Query.Bool(new BoolQuery { Should = statusShould, MinimumShouldMatch = 1 }));
+        }
+        else
+        {
+            filters.Add(Query.Term(new TermQuery(Field.FromString("status")!) { Value = FieldValue.String("active") }));
+        }
 
         if (query.InStockOnly == true)
             filters.Add(Query.Term(new TermQuery(Field.FromString("hasInStockVariant")!) { Value = FieldValue.Boolean(true) }));
 
         if (query.CategoryAncestorId is int cid && cid > 0)
             filters.Add(Query.Term(new TermQuery(Field.FromString("categoryAncestors")!) { Value = FieldValue.Long(cid) }));
+
+        if (!string.IsNullOrWhiteSpace(query.BrandId))
+            filters.Add(Query.Term(new TermQuery(Field.FromString("brandId")!) { Value = FieldValue.String(query.BrandId.Trim()) }));
 
         if (query.MinPriceAmount is not null || query.MaxPriceAmount is not null)
         {
@@ -48,36 +65,64 @@ public sealed class ElasticsearchProductSearchService(
 
         if (query.AttributeFilters is { Count: > 0 })
         {
-            var nestedMust = new List<Query>();
             foreach (var kv in query.AttributeFilters)
             {
-                var field = $"variants.attributes.{kv.Key}";
-                nestedMust.Add(Query.Term(new TermQuery(Field.FromString(field)!)
-                    { Value = FieldValue.String(kv.Value) }));
+                var productAttr = Query.Term(new TermQuery(Field.FromString($"attributes.{kv.Key}")!)
+                    { Value = FieldValue.String(kv.Value) });
+
+                var nestedMust = new List<Query>
+                {
+                    Query.Term(new TermQuery(Field.FromString($"variants.attributes.{kv.Key}")!)
+                        { Value = FieldValue.String(kv.Value) }),
+                    Query.Term(new TermQuery(Field.FromString("variants.inStock")!)
+                        { Value = FieldValue.Boolean(true) })
+                };
+
+                filters.Add(Query.Bool(new BoolQuery
+                {
+                    Should = new Query[]
+                    {
+                        productAttr,
+                        Query.Nested(new NestedQuery
+                        {
+                            Path = Field.FromString("variants")!,
+                            Query = new BoolQuery { Must = nestedMust }
+                        })
+                    },
+                    MinimumShouldMatch = 1
+                }));
             }
-
-            nestedMust.Add(Query.Term(new TermQuery(Field.FromString("variants.inStock")!)
-                { Value = FieldValue.Boolean(true) }));
-
-            filters.Add(Query.Nested(new NestedQuery
-            {
-                Path = Field.FromString("variants")!,
-                Query = new BoolQuery { Must = nestedMust }
-            }));
         }
 
         var boolQuery = new BoolQuery { Filter = filters };
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
             var kw = query.Keyword.Trim();
+            // Relevance: require all query terms to match the analyzed text fields (typo-tolerant via fuzziness),
+            // OR all query n-grams to match the ngram subfield (substring search). The ngram subfield shares its
+            // analyzer at query time, so without Operator.And a single shared 2-gram (e.g. "te") would match
+            // unrelated products — hence the explicit AND on both clauses.
             boolQuery.Must = new[]
             {
-                Query.MultiMatch(new MultiMatchQuery
+                Query.Bool(new BoolQuery
                 {
-                    Query = kw,
-                    Fields = new[] { "name.vi^3", "name.en^1", "name.vi.ngram", "slug^2" },
-                    Type = TextQueryType.BestFields,
-                    Fuzziness = new Fuzziness("AUTO")
+                    Should = new[]
+                    {
+                        Query.MultiMatch(new MultiMatchQuery
+                        {
+                            Query = kw,
+                            Fields = new[] { "name.vi^3", "name.en^1", "slug^2" },
+                            Type = TextQueryType.BestFields,
+                            Operator = Operator.And,
+                            Fuzziness = new Fuzziness("AUTO")
+                        }),
+                        Query.Match(new MatchQuery(Field.FromString("name.vi.ngram")!)
+                        {
+                            Query = kw,
+                            Operator = Operator.And
+                        })
+                    },
+                    MinimumShouldMatch = 1
                 })
             };
         }
@@ -112,6 +157,21 @@ public sealed class ElasticsearchProductSearchService(
                     ExecutionHint = TermsAggregationExecutionHint.Map
                 })
             };
+
+            if (query.CustomFieldFacetProperties is { Count: > 0 } facetProps)
+            {
+                foreach (var property in facetProps)
+                {
+                    if (string.IsNullOrWhiteSpace(property) || property.Length > 64)
+                        continue;
+                    var aggKey = $"cf_{property.Replace(".", "_")}";
+                    searchRequest.Aggregations[aggKey] = Aggregation.Terms(new TermsAggregation
+                    {
+                        Field = Field.FromString($"attributes.{property}")!,
+                        Size = 20
+                    });
+                }
+            }
         }
 
         SearchResponse<ProductDocument> response;
@@ -147,7 +207,7 @@ public sealed class ElasticsearchProductSearchService(
                 ? vi
                 : nameByLocale.Values.FirstOrDefault(static s => !string.IsNullOrWhiteSpace(s)) ?? src.Slug;
             items.Add(new ProductSearchItem(src.Id, display, nameByLocale, src.MinBasePrice, src.HasInStockVariant,
-                src.Slug));
+                src.Slug, src.Status));
         }
 
         string? next = null;
@@ -155,11 +215,12 @@ public sealed class ElasticsearchProductSearchService(
         if (last?.Sort is { Count: > 0 } sortValues && items.Count == size)
             next = EncodeSearchAfter(sortValues);
 
-        var facets = query.IncludeFacets ? ParseFacets(response) : null;
+        var facets = query.IncludeFacets ? ParseFacets(response, query.CustomFieldFacetProperties) : null;
         return new ProductSearchResult(items, total, next, facets);
     }
 
-    private static SearchFacets? ParseFacets(SearchResponse<ProductDocument> response)
+    private static SearchFacets? ParseFacets(SearchResponse<ProductDocument> response,
+        IReadOnlyList<string>? customFieldFacetProperties)
     {
         if (response.Aggregations is null || !response.Aggregations.Any())
             return new SearchFacets(Array.Empty<FacetTermBucket>(), new Dictionary<string, IReadOnlyList<FacetTermBucket>>(),
@@ -181,8 +242,30 @@ public sealed class ElasticsearchProductSearchService(
                 catBuckets.Add(new FacetTermBucket(b.Key.ToString(CultureInfo.InvariantCulture), b.DocCount));
         }
 
-        return new SearchFacets(catBuckets, new Dictionary<string, IReadOnlyList<FacetTermBucket>>(StringComparer.Ordinal),
-            pMin, pMax);
+        var attributeTerms = new Dictionary<string, IReadOnlyList<FacetTermBucket>>(StringComparer.Ordinal);
+        if (customFieldFacetProperties is { Count: > 0 })
+        {
+            foreach (var property in customFieldFacetProperties)
+            {
+                if (string.IsNullOrWhiteSpace(property))
+                    continue;
+                var aggKey = $"cf_{property.Replace(".", "_")}";
+                if (!response.Aggregations.TryGetValue(aggKey, out var agg))
+                    continue;
+
+                var buckets = new List<FacetTermBucket>();
+                if (agg is StringTermsAggregate sTerms)
+                {
+                    foreach (var b in sTerms.Buckets)
+                        buckets.Add(new FacetTermBucket(b.Key.ToString(), b.DocCount));
+                }
+
+                if (buckets.Count > 0)
+                    attributeTerms[property] = buckets;
+            }
+        }
+
+        return new SearchFacets(catBuckets, attributeTerms, pMin, pMax);
     }
 
     private static string? EncodeSearchAfter(IReadOnlyCollection<FieldValue> sort)

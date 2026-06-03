@@ -24,6 +24,14 @@ public static class ProductSearchCacheKey
             ["size"] = query.PageSize.ToString(CultureInfo.InvariantCulture),
             ["cursor"] = query.SearchAfterCursor ?? "",
             ["facets"] = query.IncludeFacets.ToString(),
+            ["statuses"] = query.Statuses is { Count: > 0 }
+                ? string.Join(",", query.Statuses.Where(static s => !string.IsNullOrWhiteSpace(s))
+                    .Select(static s => s.ToLowerInvariant()).OrderBy(static s => s, StringComparer.Ordinal))
+                : "",
+            ["brand"] = query.BrandId?.Trim() ?? "",
+            ["cffacets"] = query.CustomFieldFacetProperties is { Count: > 0 }
+                ? string.Join(",", query.CustomFieldFacetProperties.OrderBy(static s => s, StringComparer.Ordinal))
+                : "",
         };
         if (query.AttributeFilters is { Count: > 0 })
         {

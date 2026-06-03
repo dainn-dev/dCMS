@@ -19,6 +19,8 @@ export type AttributeListRow = {
   required: boolean;
   /** Numeric DB id — present when loaded from API, absent for localStorage-only rows. */
   id?: number;
+  updatedAt?: string;
+  useAsSearchFilter?: boolean;
 };
 
 function typePillClasses(type: AttributeType) {

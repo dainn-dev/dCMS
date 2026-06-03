@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using dCMS.AspNetCore.Auth;
 using dCMS.Catalog.Api.Http;
+using dCMS.Catalog.Api.Stores;
 using dCMS.Core.Commands;
 using dCMS.Core.Exceptions;
 using dCMS.Core.Models;
@@ -25,6 +26,8 @@ public static class ProductRoutes
         Auth(g.MapGet("", SearchProducts), auth, write: false);
         AuthApproval(g.MapGet("pending-approvals", ListPendingApprovals), auth);
         Auth(g.MapGet("{productId}/variants", ListVariants), auth, write: false);
+        Auth(g.MapGet("{productId}/recommendations", ListRecommendations), auth, write: false);
+        Auth(g.MapPut("{productId}/recommendations", SetRecommendations), auth, write: true);
         Auth(g.MapGet("{productId}/approval-comments", ListApprovalComments), auth, write: false);
         Auth(g.MapPost("{productId}/approval-comments", PostApprovalComment), auth, write: true);
         Auth(g.MapGet("{productId}", GetProduct), auth, write: false);
@@ -35,6 +38,7 @@ public static class ProductRoutes
         Auth(g.MapPatch("{productId}", UpdateProduct), auth, write: true);
         Auth(g.MapDelete("{productId}", DeleteProductAsArchive), auth, write: true);
         Auth(g.MapPost("{productId}/submit-for-approval", SubmitForApproval), auth, write: true);
+        Auth(g.MapPost("{productId}/submit-for-archive", SubmitForArchive), auth, write: true);
         AuthApproval(g.MapPost("{productId}/approve", ApprovePending), auth);
         AuthApproval(g.MapPost("{productId}/request-changes", RequestChanges), auth);
         AuthApproval(g.MapPost("{productId}/reject", RejectPending), auth);
@@ -74,6 +78,19 @@ public static class ProductRoutes
         user.IsInRole(DcmsRoles.SuperAdmin) || user.IsInRole(DcmsRoles.ChainAdmin) ||
         user.IsInRole(DcmsRoles.BrandManager);
 
+    /// <summary>Maps the backoffice eStore status filter to persisted status values. No filter → all non-archived.</summary>
+    private static IReadOnlyList<string> MapAdminStatuses(string? status) =>
+        status?.Trim().ToLowerInvariant() switch
+        {
+            "live" or "active" => new[] { "active" },
+            "draft" => new[] { "draft" },
+            "pending" or "pending_approval" => new[] { "pending_approval" },
+            "pending_archive" => new[] { "pending_archive" },
+            "inactive" or "hidden" => new[] { "hidden" },
+            "archived" => new[] { "archived" },
+            _ => new[] { "draft", "pending_approval", "pending_archive", "active", "hidden" },
+        };
+
     /// <summary>US-6/7: Elasticsearch search + filters/facets; optional Redis cache (30s) when <c>ConnectionStrings:Redis</c> is set.</summary>
     private static async Task<IResult> SearchProducts(
         HttpContext http,
@@ -91,6 +108,8 @@ public static class ProductRoutes
         string? sort,
         bool? facets,
         string? filters,
+        string? status,
+        string? brand,
         CancellationToken cancellationToken)
     {
         var redisConfigured = !string.IsNullOrWhiteSpace(configuration.GetConnectionString("Redis"));
@@ -109,9 +128,13 @@ public static class ProductRoutes
         };
 
         var ps = pageSize ?? 20;
+        // Backoffice admin search: by default surface all non-archived statuses (drafts included) so newly
+        // created products are visible before publish. The eStore Status filter narrows this set.
+        var statuses = MapAdminStatuses(status);
+        var brandFilter = string.IsNullOrWhiteSpace(brand) ? null : brand.Trim();
         var result = await search
             .SearchAsync(new ProductSearchQuery(tenantId, storeId, q, inStock, category, ps, cursor, minPrice, maxPrice,
-                sortEnum, attrFilters, facets == true), cancellationToken)
+                sortEnum, attrFilters, facets == true, statuses, brandFilter), cancellationToken)
             .ConfigureAwait(false);
         var items = result.Items.Select(i => new
         {
@@ -120,7 +143,8 @@ public static class ProductRoutes
             nameByLocale = i.NameByLocale,
             minBasePrice = new { amount = i.MinBasePrice.Amount, currency = i.MinBasePrice.Currency },
             hasInStockVariant = i.HasInStockVariant,
-            slug = i.Slug
+            slug = i.Slug,
+            status = i.Status
         }).ToList();
 
         object meta = result.Facets is null
@@ -297,6 +321,7 @@ public static class ProductRoutes
             tenantId = p.TenantId,
             storeId = p.StoreId,
             categoryId = p.CategoryId,
+            brandId = p.BrandId,
             nameJson = p.NameJson,
             descriptionJson = p.DescriptionJson,
             slug = p.Slug,
@@ -304,8 +329,88 @@ public static class ProductRoutes
             salesCount30d = p.SalesCount30d,
             createdAt = p.CreatedAt,
             updatedAt = p.UpdatedAt,
+            pageTitleJson = p.PageTitleJson,
+            metaKeywordsJson = p.MetaKeywordsJson,
+            metaDescriptionJson = p.MetaDescriptionJson,
+            publishFrom = p.PublishFrom,
+            publishUntil = p.PublishUntil,
+            recommendSimilar = p.RecommendSimilar,
+            recommendationsMode = p.RecommendationsMode,
+            restockNotification = p.RestockNotification,
+            customFieldsJson = p.CustomFieldsJson,
             attributes = Array.Empty<object>()
         });
+    }
+
+    private static async Task<(bool Ok, string? Json, string? Error)> NormalizeCustomFieldsAsync(
+        JsonElement? raw,
+        string tenantId,
+        string storeId,
+        IStoreProductFieldConfigPersistence fieldConfig,
+        CancellationToken cancellationToken)
+    {
+        var (ok, json, error) = await ProductCustomFieldsNormalizer
+            .NormalizeAsync(raw, tenantId, storeId, fieldConfig, cancellationToken)
+            .ConfigureAwait(false);
+        return ok ? (true, json, null) : (false, null, error);
+    }
+
+    /// <summary>Maps the posted metadata block to the domain value object (null when no metadata was supplied).</summary>
+    private static ProductPageMetadata? ToMetadata(ProductPageMetadataBody? body)
+    {
+        if (body is null)
+            return null;
+        return new ProductPageMetadata(
+            body.PageTitleJson,
+            body.MetaKeywordsJson,
+            body.MetaDescriptionJson,
+            body.PublishFrom,
+            body.PublishUntil,
+            body.RecommendSimilar ?? true,
+            body.RecommendationsMode,
+            body.RestockNotification ?? false);
+    }
+
+    private static async Task<IResult> ListRecommendations(
+        string tenantId,
+        string storeId,
+        string productId,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        var rows = await products.ListRecommendationsAsync(productId, tenantId, storeId, cancellationToken)
+            .ConfigureAwait(false);
+        var items = rows.Select(r => new
+        {
+            id = r.RecommendedProductId,
+            nameJson = r.NameJson,
+            slug = r.Slug,
+            status = r.Status,
+            sortOrder = r.SortOrder
+        });
+        return ApiEnvelope.Ok(new { items });
+    }
+
+    private static async Task<IResult> SetRecommendations(
+        string tenantId,
+        string storeId,
+        string productId,
+        SetRecommendationsBody? body,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var ids = body?.RecommendedProductIds ?? new List<string>();
+            var saved = await products
+                .SetRecommendationsAsync(productId, tenantId, storeId, ids, DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { items = saved });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
     }
 
     private static async Task<IResult> CreateProduct(
@@ -313,14 +418,20 @@ public static class ProductRoutes
         string storeId,
         CreateProductBody body,
         ProductService products,
+        IStoreProductFieldConfigPersistence fieldConfig,
         CancellationToken cancellationToken)
     {
         try
         {
+            var (cfOk, cfJson, cfError) = await NormalizeCustomFieldsAsync(body.CustomFields, tenantId, storeId, fieldConfig,
+                cancellationToken).ConfigureAwait(false);
+            if (!cfOk)
+                return ApiEnvelope.Error("validation_error", cfError!, StatusCodes.Status400BadRequest);
+
             var now = DateTimeOffset.UtcNow;
             var p = await products.CreateProductAsync(
                 new CreateProductCommand(tenantId, storeId, body.CategoryId, body.NameJson, body.DescriptionJson ?? "{}",
-                    body.Slug), now, cancellationToken).ConfigureAwait(false);
+                    body.Slug, body.BrandId, ToMetadata(body.Metadata), cfJson), now, cancellationToken).ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = p.Id, slug = p.Slug, status = p.Status.ToPersistedValue() });
         }
         catch (ArgumentException ex)
@@ -339,14 +450,26 @@ public static class ProductRoutes
         string productId,
         UpdateProductBody body,
         ProductService products,
+        IStoreProductFieldConfigPersistence fieldConfig,
         CancellationToken cancellationToken)
     {
         try
         {
+            string? cfJson = null;
+            if (body.CustomFields is not null)
+            {
+                var (cfOk, normalized, cfError) = await NormalizeCustomFieldsAsync(body.CustomFields, tenantId, storeId,
+                    fieldConfig, cancellationToken).ConfigureAwait(false);
+                if (!cfOk)
+                    return ApiEnvelope.Error("validation_error", cfError!, StatusCodes.Status400BadRequest);
+                cfJson = normalized;
+            }
+
             var now = DateTimeOffset.UtcNow;
             await products.UpdateProductAsync(
                 new UpdateProductCommand(productId, tenantId, storeId, body.CategoryId, body.NameJson,
-                    body.DescriptionJson ?? "{}", body.Slug), now, cancellationToken).ConfigureAwait(false);
+                    body.DescriptionJson ?? "{}", body.Slug, body.BrandId, ToMetadata(body.Metadata), cfJson), now,
+                cancellationToken).ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = productId });
         }
         catch (ProductNotFoundException ex)
@@ -382,6 +505,32 @@ public static class ProductRoutes
                     DateTimeOffset.UtcNow, cancellationToken)
                 .ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.PendingApproval.ToPersistedValue() });
+        }
+        catch (ProductNotFoundException ex)
+        {
+            return ApiEnvelope.Error("not_found", ex.Message, StatusCodes.Status404NotFound);
+        }
+        catch (InvalidProductStateException ex)
+        {
+            return ApiEnvelope.Error("invalid_state", ex.Message, StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> SubmitForArchive(
+        HttpContext http,
+        string tenantId,
+        string storeId,
+        string productId,
+        ProductService products,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await products
+                .SubmitForArchiveAsync(productId, tenantId, storeId, ActorUserId(http.User), ActorCatalogRole(http.User),
+                    DateTimeOffset.UtcNow, cancellationToken)
+                .ConfigureAwait(false);
+            return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.PendingArchive.ToPersistedValue() });
         }
         catch (ProductNotFoundException ex)
         {
@@ -483,10 +632,10 @@ public static class ProductRoutes
         var role = PrimaryApprovalRole(http.User);
         try
         {
-            await products
+            var resultStatus = await products
                 .ApprovePendingProductAsync(productId, tenantId, storeId, userId, role, DateTimeOffset.UtcNow, cancellationToken)
                 .ConfigureAwait(false);
-            return ApiEnvelope.Ok(new { id = productId, status = ProductStatus.Active.ToPersistedValue() });
+            return ApiEnvelope.Ok(new { id = productId, status = resultStatus.ToPersistedValue() });
         }
         catch (ProductNotFoundException ex)
         {
@@ -878,9 +1027,24 @@ public static class ProductRoutes
         }
     }
 
-    public sealed record CreateProductBody(int CategoryId, string NameJson, string? DescriptionJson, string Slug);
+    public sealed record CreateProductBody(int CategoryId, string NameJson, string? DescriptionJson, string Slug,
+        string? BrandId = null, ProductPageMetadataBody? Metadata = null, JsonElement? CustomFields = null);
 
-    public sealed record UpdateProductBody(int CategoryId, string NameJson, string? DescriptionJson, string Slug);
+    public sealed record UpdateProductBody(int CategoryId, string NameJson, string? DescriptionJson, string Slug,
+        string? BrandId = null, ProductPageMetadataBody? Metadata = null, JsonElement? CustomFields = null);
+
+    /// <summary>Product Page / SEO metadata + visibility flags posted from the backoffice product editor.</summary>
+    public sealed record ProductPageMetadataBody(
+        string? PageTitleJson,
+        string? MetaKeywordsJson,
+        string? MetaDescriptionJson,
+        DateTimeOffset? PublishFrom,
+        DateTimeOffset? PublishUntil,
+        bool? RecommendSimilar,
+        string? RecommendationsMode,
+        bool? RestockNotification);
+
+    public sealed record SetRecommendationsBody(List<string>? RecommendedProductIds);
 
     public sealed record GenerateVariantsBody(List<VariantAxisJson>? Axes, string? SkuPrefix);
 

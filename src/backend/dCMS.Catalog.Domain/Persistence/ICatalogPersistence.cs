@@ -94,6 +94,9 @@ public interface ICatalogPersistence
     Task<CatalogAttributeRow?> GetAttributeByIdAsync(int id, string tenantId,
         CancellationToken cancellationToken = default);
 
+    Task<CatalogAttributeRow?> GetAttributeByCodeAsync(string tenantId, string code,
+        CancellationToken cancellationToken = default);
+
     /// <summary>True if another attribute in this tenant already uses <paramref name="code"/> (excludes <paramref name="excludeId"/>).</summary>
     Task<bool> AttributeCodeExistsAsync(string tenantId, string code, int? excludeId,
         CancellationToken cancellationToken = default);
@@ -117,6 +120,12 @@ public interface ICatalogPersistence
 
     Task<bool> DeleteAttributeValueAsync(int valueId, int attributeId, string tenantId,
         CancellationToken cancellationToken = default);
+
+    Task<int> DeleteAllAttributeValuesAsync(int attributeId, string tenantId,
+        CancellationToken cancellationToken = default);
+
+    Task<AttributeImportResult> ImportAttributeValuesAsync(string tenantId,
+        IReadOnlyList<AttributeImportRowInput> rows, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ApprovalCommentRow>> ListApprovalCommentsForProductAsync(string productId, string tenantId, string storeId,
         CancellationToken cancellationToken = default);
@@ -143,5 +152,22 @@ public interface ICatalogPersistence
         string storeId,
         int limit,
         string? afterProductId,
+        CancellationToken cancellationToken = default);
+
+    // ── Manual product recommendations (related products) ─────────────────────
+
+    /// <summary>Ordered recommended products for a product (only edges whose target still exists in the store).</summary>
+    Task<IReadOnlyList<ProductRecommendationRow>> ListRecommendationsForProductAsync(string productId, string tenantId,
+        string storeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Replaces the full ordered recommendation list for a product. Validates that the product and every recommended
+    /// product belong to the tenant/store (skipping self / unknown ids). Returns the persisted ordered ids.
+    /// </summary>
+    Task<IReadOnlyList<string>> SetRecommendationsForProductAsync(string productId, string tenantId, string storeId,
+        IReadOnlyList<string> recommendedProductIds, DateTimeOffset now, CancellationToken cancellationToken = default);
+
+    /// <summary>Non-archived product ids for store-scoped maintenance (e.g. ES reindex after field-config change).</summary>
+    Task<IReadOnlyList<string>> ListProductIdsForStoreAsync(string tenantId, string storeId, int limit = 5000,
         CancellationToken cancellationToken = default);
 }

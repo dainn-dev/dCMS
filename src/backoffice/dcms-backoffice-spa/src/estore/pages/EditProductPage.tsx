@@ -30,6 +30,85 @@ import {
   IconVisibility,
 } from "../../orders/icons";
 import type { ProductListRow } from "./ProductsPage";
+import {
+  createProduct,
+  createManualVariant,
+  fetchProducts,
+  getProduct,
+  hideProduct,
+  listRecommendations,
+  listVariants,
+  productToPayload,
+  setRecommendations,
+  unhideProduct,
+  updateProduct,
+  updateVariant,
+  type ProductVariantDto,
+} from "../api/productsApi";
+import { fetchCategories } from "../api/categoriesApi";
+import { fetchBrands } from "../api/brandsApi";
+import { fetchProductFieldConfig, type ProductFieldRecord } from "../api/productFieldConfigApi";
+import { ProductCustomFieldsSection } from "../components/ProductCustomFieldsSection";
+import {
+  buildCustomFieldsPayload,
+  findMissingRequiredCustomField,
+  initCustomFieldValues,
+  parseProductCustomFields,
+  tabForTargetPage,
+  type ProductCustomFieldsMap,
+} from "../utils/productCustomFieldUtils";
+import { getVariantStock, setVariantOnHand } from "../api/inventoryApi";
+import type { CatNode } from "./CategoriesPage";
+
+/** Build a URL-safe slug from a product name. */
+function slugify(input: string): string {
+  return input
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 200);
+}
+
+/** ISO timestamp → value for an <input type="datetime-local"> (local "YYYY-MM-DDTHH:mm"), or "" when empty. */
+function isoToLocalInput(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** datetime-local value → ISO string (UTC), or null when empty/invalid. */
+function localInputToIso(value: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** Parse a JSON map of locale→string; returns {} on any error. */
+function parseLocaleMap(json?: string | null): Record<string, string> {
+  if (!json) return {};
+  try {
+    const parsed = JSON.parse(json) as Record<string, string>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Flatten the category tree to "id → indented label" options for the category select. */
+function flattenCategoryNodes(nodes: CatNode[], depth = 0): { id: number; label: string }[] {
+  const out: { id: number; label: string }[] = [];
+  for (const n of nodes) {
+    const idNum = Number(n.id);
+    if (Number.isInteger(idNum)) out.push({ id: idNum, label: `${"\u00A0\u00A0".repeat(depth)}${n.name}` });
+    if (n.children?.length) out.push(...flattenCategoryNodes(n.children, depth + 1));
+  }
+  return out;
+}
 
 // ── Style tokens ────────────────────────────────────────────────────────────
 const labelBase =
@@ -79,13 +158,14 @@ type Props = {
   mode: "add" | "edit";
   product?: ProductListRow;
   onBack: () => void;
+  tenantId?: string;
+  storeId?: string;
+  authToken?: string;
 };
 
 // ── Mock data ───────────────────────────────────────────────────────────────
 const MOCK_STORES = ["Main Store", "Outlet A", "Outlet B", "Online Store", "Pop-up Boutique"];
 const MOCK_ATTRIBUTES = ["Color", "Size", "Material", "Weight", "Dimensions", "Style", "Pattern"];
-const MOCK_BRANDS = ["Cronos Ltd.", "Sonic Bloom", "Velocity Sport", "Optic Visions", "Luxe Heritage Group"];
-const MOCK_CATEGORIES = ["Electronics", "Audio", "Footwear", "Photography", "Timepieces", "Luxury", "Athletics"];
 const MOCK_CARD_TIERS = ["Gold", "Silver", "Platinum", "Bronze"];
 const MOCK_CARD_TYPES = ["Standard", "Premium", "Elite"];
 
@@ -203,9 +283,457 @@ function SearchablePicker({
   );
 }
 
+// ── Variants panel (real SKU / price / stock, wired to Catalog + Inventory) ──
+type VariantRow = ProductVariantDto & { qty: number };
+
+/** Parse a major-unit price string (e.g. "199.00") into integer minor units. */
+function priceToMinor(value: string): number {
+  const n = Number(value.replace(/[^0-9.]/g, ""));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n * 100);
+}
+
+function minorToPrice(minor: number): string {
+  return (Number.isFinite(minor) ? minor / 100 : 0).toFixed(2);
+}
+
+function VariantsPanel({
+  tenantId,
+  storeId,
+  productId,
+  authToken,
+}: {
+  tenantId: string;
+  storeId: string;
+  productId: string;
+  authToken?: string;
+}) {
+  const [rows, setRows] = useState<VariantRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Add-variant form
+  const [newSku, setNewSku] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [newQty, setNewQty] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  // Per-row edit buffers keyed by variant id
+  const [edits, setEdits] = useState<Record<string, { price: string; qty: string; status: string }>>({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const variants = await listVariants(tenantId, storeId, productId, authToken);
+      const withStock = await Promise.all(
+        variants.map(async (v) => {
+          let qty = 0;
+          try {
+            const stock = await getVariantStock(tenantId, storeId, v.id, authToken);
+            qty = stock.totalQuantity;
+          } catch {
+            qty = 0;
+          }
+          return { ...v, qty } as VariantRow;
+        })
+      );
+      setRows(withStock);
+      setEdits(
+        Object.fromEntries(
+          withStock.map((v) => [v.id, { price: minorToPrice(v.basePriceAmount), qty: String(v.qty), status: v.status }])
+        )
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load variants.");
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId, storeId, productId, authToken]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  async function handleAdd() {
+    const sku = newSku.trim();
+    if (!sku) {
+      setError("SKU is required to add a variant.");
+      return;
+    }
+    setAdding(true);
+    setError(null);
+    try {
+      const created = await createManualVariant(
+        tenantId,
+        storeId,
+        productId,
+        { sku, basePriceAmount: priceToMinor(newPrice), status: "active" },
+        authToken
+      );
+      const qtyValue = Number(newQty);
+      if (Number.isFinite(qtyValue) && qtyValue > 0) {
+        await setVariantOnHand(tenantId, storeId, created.id, qtyValue, undefined, authToken);
+      }
+      setNewSku("");
+      setNewPrice("");
+      setNewQty("");
+      setNotice(`Variant ${sku} added.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add variant.");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function handleSaveRow(v: VariantRow) {
+    const edit = edits[v.id];
+    if (!edit) return;
+    setBusyId(v.id);
+    setError(null);
+    try {
+      const nextPrice = priceToMinor(edit.price);
+      if (nextPrice !== v.basePriceAmount || edit.status !== v.status) {
+        await updateVariant(
+          tenantId,
+          storeId,
+          productId,
+          v.id,
+          { basePriceAmount: nextPrice, status: edit.status },
+          authToken
+        );
+      }
+      const nextQty = Number(edit.qty);
+      if (Number.isFinite(nextQty) && nextQty >= 0 && nextQty !== v.qty) {
+        await setVariantOnHand(tenantId, storeId, v.id, nextQty, undefined, authToken);
+      }
+      setNotice(`Variant ${v.sku} updated.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update variant.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function patchEdit(id: string, patch: Partial<{ price: string; qty: string; status: string }>) {
+    setEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  }
+
+  const inputCell =
+    "w-full bg-surface-container-lowest border border-outline-variant/20 rounded-md py-1.5 px-2 text-xs focus:ring-1 focus:ring-primary outline-none";
+
+  return (
+    <div className="space-y-3">
+      {notice ? (
+        <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-primary">{notice}</p>
+      ) : null}
+      {error ? (
+        <p className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-[11px] text-on-error-container">{error}</p>
+      ) : null}
+
+      <div className="overflow-x-auto rounded-lg border border-outline-variant/20 bg-surface">
+        <table className="w-full text-left text-xs">
+          <thead className="border-b border-outline-variant/20 bg-surface-container-low text-[10px] uppercase tracking-wider text-on-surface-variant">
+            <tr>
+              <th className="px-3 py-2 font-bold">SKU</th>
+              <th className="px-3 py-2 font-bold">Base Price</th>
+              <th className="px-3 py-2 font-bold">On-hand Qty</th>
+              <th className="px-3 py-2 font-bold">Status</th>
+              <th className="px-3 py-2 font-bold text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={5} className="px-3 py-6 text-center text-on-surface-variant">
+                  Loading variants…
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-3 py-6 text-center text-on-surface-variant">
+                  No variants yet. Add a SKU below to set its price and stock.
+                </td>
+              </tr>
+            ) : (
+              rows.map((v) => {
+                const edit = edits[v.id] ?? { price: minorToPrice(v.basePriceAmount), qty: String(v.qty), status: v.status };
+                const dirty =
+                  priceToMinor(edit.price) !== v.basePriceAmount ||
+                  edit.status !== v.status ||
+                  Number(edit.qty) !== v.qty;
+                return (
+                  <tr key={v.id} className="border-b border-outline-variant/10 last:border-0">
+                    <td className="px-3 py-2 font-mono text-on-surface">{v.sku}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        className={`${inputCell} font-mono`}
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={edit.price}
+                        onChange={(e) => patchEdit(v.id, { price: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        className={inputCell}
+                        type="number"
+                        min={0}
+                        value={edit.qty}
+                        onChange={(e) => patchEdit(v.id, { qty: e.target.value })}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        className={`${inputCell} appearance-none`}
+                        value={edit.status}
+                        onChange={(e) => patchEdit(v.id, { status: e.target.value })}
+                      >
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        className="rounded-md bg-primary px-3 py-1.5 text-[11px] font-bold text-on-primary disabled:opacity-40"
+                        disabled={!dirty || busyId === v.id}
+                        onClick={() => void handleSaveRow(v)}
+                      >
+                        {busyId === v.id ? "Saving…" : "Save"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add a new SKU */}
+      <div className="grid grid-cols-1 gap-2 rounded-lg border border-dashed border-primary/30 bg-primary/5 p-3 sm:grid-cols-[1.5fr_1fr_1fr_auto] sm:items-end">
+        <div className="space-y-1">
+          <label className={labelBase}>New SKU</label>
+          <input
+            className={inputCell + " font-mono"}
+            type="text"
+            value={newSku}
+            onChange={(e) => setNewSku(e.target.value)}
+            placeholder="e.g. WT-550-B"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className={labelBase}>Base Price</label>
+          <input
+            className={inputCell + " font-mono"}
+            type="number"
+            min={0}
+            step="0.01"
+            value={newPrice}
+            onChange={(e) => setNewPrice(e.target.value)}
+            placeholder="0.00"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className={labelBase}>Initial Qty</label>
+          <input
+            className={inputCell}
+            type="number"
+            min={0}
+            value={newQty}
+            onChange={(e) => setNewQty(e.target.value)}
+            placeholder="0"
+          />
+        </div>
+        <button
+          type="button"
+          className="flex h-[34px] items-center justify-center gap-1.5 rounded-md bg-primary px-4 text-[11px] font-bold uppercase tracking-widest text-on-primary disabled:opacity-40"
+          disabled={adding || !newSku.trim()}
+          onClick={() => void handleAdd()}
+        >
+          <IconAdd className="h-4 w-4 shrink-0" />
+          {adding ? "Adding…" : "Add"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Manual "related products" picker (Recommendations tab). Lists products in the store as
+ * candidates, pre-checks the ones already recommended, and persists the selection (replace-all).
+ */
+function RecommendationsPanel({
+  tenantId,
+  storeId,
+  productId,
+  authToken,
+}: {
+  tenantId: string;
+  storeId: string;
+  productId: string;
+  authToken?: string;
+}) {
+  const [candidates, setCandidates] = useState<{ id: string; name: string; sku: string }[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [{ rows }, recos] = await Promise.all([
+        fetchProducts(tenantId, storeId, undefined, { page: 1, pageSize: 100 }, authToken),
+        listRecommendations(tenantId, storeId, productId, authToken),
+      ]);
+      const recoIds = recos.map((r) => r.id);
+      const list = rows
+        .filter((r) => r.id !== productId)
+        .map((r) => ({ id: r.id, name: r.name, sku: r.sku ?? "" }));
+      // Surface already-recommended products even if outside the first page.
+      for (const r of recos) {
+        if (!list.some((c) => c.id === r.id)) {
+          let nm = r.id;
+          try {
+            const parsed = JSON.parse(r.nameJson) as Record<string, string>;
+            nm = parsed.vi ?? parsed.en ?? Object.values(parsed)[0] ?? r.id;
+          } catch {
+            // keep id as fallback
+          }
+          list.unshift({ id: r.id, name: nm, sku: "" });
+        }
+      }
+      setCandidates(list);
+      setSelected(recoIds);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load recommendations.");
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId, storeId, productId, authToken]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  function toggle(id: string, checked: boolean) {
+    setSelected((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await setRecommendations(tenantId, storeId, productId, selected, authToken);
+      setSelected(saved);
+      setNotice(`Saved ${saved.length} recommendation${saved.length === 1 ? "" : "s"}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save recommendations.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? candidates.filter((c) => c.name.toLowerCase().includes(q) || c.sku.toLowerCase().includes(q))
+    : candidates;
+
+  return (
+    <div className="mt-4 space-y-3">
+      {notice ? (
+        <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-primary">{notice}</p>
+      ) : null}
+      {error ? (
+        <p className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-[11px] text-on-error-container">{error}</p>
+      ) : null}
+
+      <input
+        className={inputBase}
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search products by name or SKU…"
+      />
+
+      <div className="space-y-2">
+        {loading ? (
+          <p className="px-3 py-6 text-center text-xs text-on-surface-variant">Loading products…</p>
+        ) : visible.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-on-surface-variant">No products found.</p>
+        ) : (
+          visible.map((p) => {
+            const checked = selected.includes(p.id);
+            return (
+              <label
+                key={p.id}
+                className={`flex cursor-pointer items-center gap-4 rounded-lg border p-3 transition-colors ${
+                  checked ? "border-primary/30 bg-primary/5" : "border-outline-variant/20 hover:bg-surface-container-low"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-primary shrink-0"
+                  checked={checked}
+                  onChange={(e) => toggle(p.id, e.target.checked)}
+                />
+                {p.sku ? <span className="w-24 shrink-0 font-mono text-xs text-on-surface-variant">{p.sku}</span> : null}
+                <span className="flex-1 text-sm font-medium text-on-surface">{p.name}</span>
+                {checked && (
+                  <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-primary">
+                    Recommended
+                  </span>
+                )}
+              </label>
+            );
+          })
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-outline-variant/20 pt-4">
+        <p className="text-xs text-on-surface-variant">
+          <span className="font-bold text-on-surface">{selected.length}</span> selected
+        </p>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-[11px] font-bold uppercase tracking-widest text-on-primary disabled:opacity-40"
+          disabled={saving}
+          onClick={() => void handleSave()}
+        >
+          <IconSave className="h-4 w-4 shrink-0" />
+          {saving ? "Saving…" : "Save Recommendations"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Component ───────────────────────────────────────────────────────────────
-export function EditProductPage({ mode, product, onBack }: Props) {
+export function EditProductPage({ mode, product, onBack, tenantId, storeId, authToken }: Props) {
   const isAdd = mode === "add";
+  const apiReady = Boolean(tenantId && storeId);
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [tab, setTab] = useState<EditTab>("general");
@@ -213,6 +741,124 @@ export function EditProductPage({ mode, product, onBack }: Props) {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const actionsRef = useRef<HTMLDivElement>(null);
+
+  // ── Persisted-product fields (wired to the Catalog API) ─────────────────────
+  const [name, setName] = useState(isAdd ? "" : product?.name ?? "");
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [brandCode, setBrandCode] = useState<string>("");
+  const [descriptionByLocale, setDescriptionByLocale] = useState<Record<string, string>>({});
+  const [descriptionInitial, setDescriptionInitial] = useState<Record<string, string>>({});
+  const [slug, setSlug] = useState("");
+  const [slugTouched, setSlugTouched] = useState(false);
+  const [categoryChoices, setCategoryChoices] = useState<{ id: number; label: string }[]>([]);
+  const [brandChoices, setBrandChoices] = useState<{ code: string; name: string }[]>([]);
+  const [loadedStatus, setLoadedStatus] = useState<string>("");
+  const [hiddenProduct, setHiddenProduct] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [productFieldConfig, setProductFieldConfig] = useState<ProductFieldRecord[]>([]);
+  const [customFieldValues, setCustomFieldValues] = useState<ProductCustomFieldsMap>({});
+
+  // Load category + brand choices for the pickers.
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    fetchCategories(tenantId, authToken)
+      .then((tree) => {
+        if (!cancelled) setCategoryChoices(flattenCategoryNodes(tree));
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryChoices([]);
+      });
+    fetchBrands(tenantId, { active: true, pageSize: 200 }, authToken)
+      .then(({ rows }) => {
+        if (!cancelled) setBrandChoices(rows.map((b) => ({ code: b.code, name: b.name })));
+      })
+      .catch(() => {
+        if (!cancelled) setBrandChoices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, authToken]);
+
+  useEffect(() => {
+    if (!tenantId || !storeId) return;
+    let cancelled = false;
+    fetchProductFieldConfig(tenantId, storeId, authToken)
+      .then(({ fields }) => {
+        if (cancelled) return;
+        setProductFieldConfig(fields);
+      })
+      .catch(() => {
+        if (!cancelled) setProductFieldConfig([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, storeId, authToken]);
+
+  // In edit mode, hydrate the persisted fields from the API (the list row lacks categoryId/slug).
+  useEffect(() => {
+    if (isAdd || !apiReady || !product?.id) return;
+    let cancelled = false;
+    getProduct(tenantId!, storeId!, product.id, authToken)
+      .then((d) => {
+        if (cancelled) return;
+        let display = product?.name ?? "";
+        try {
+          const parsed = JSON.parse(d.nameJson) as Record<string, string>;
+          display = parsed.vi || parsed.en || Object.values(parsed)[0] || display;
+        } catch {
+          // keep fallback display name
+        }
+        setName(display);
+        setCategoryId(d.categoryId);
+        setBrandCode(d.brandId ?? "");
+        setSlug(d.slug);
+        setLoadedStatus(d.status);
+        setHiddenProduct(d.status === "hidden");
+        const parsedDesc = parseLocaleMap(d.descriptionJson);
+        setDescriptionByLocale(parsedDesc);
+        setDescriptionInitial(parsedDesc);
+
+        // Product Page / SEO metadata + flags
+        const pageTitle = parseLocaleMap(d.pageTitleJson);
+        setPageTitleByLocale(pageTitle);
+        setPageTitleInitial(pageTitle);
+        const metaKeywords = parseLocaleMap(d.metaKeywordsJson);
+        setMetaKeywordsByLocale(metaKeywords);
+        setMetaKeywordsInitial(metaKeywords);
+        const metaDescription = parseLocaleMap(d.metaDescriptionJson);
+        setMetaDescriptionByLocale(metaDescription);
+        setMetaDescriptionInitial(metaDescription);
+        setPublishFrom(isoToLocalInput(d.publishFrom));
+        setPublishUntil(isoToLocalInput(d.publishUntil));
+        setRecommendSimilar(d.recommendSimilar ?? true);
+        setRecommendationsMode(d.recommendationsMode ?? "auto");
+        setRestockNotification(d.restockNotification ?? false);
+        const storedCustom = parseProductCustomFields(d.customFieldsJson);
+        setCustomFieldValues((prev) => initCustomFieldValues(productFieldConfig, { ...prev, ...storedCustom }));
+      })
+      .catch(() => {
+        // leave defaults; save will surface validation errors if needed
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdd, apiReady, product?.id, tenantId, storeId, authToken, productFieldConfig]);
+
+  useEffect(() => {
+    if (productFieldConfig.length === 0) return;
+    setCustomFieldValues((prev) => initCustomFieldValues(productFieldConfig, prev));
+  }, [productFieldConfig]);
+
+  const effectiveSlug = slugTouched ? slug : slug || slugify(name);
+
+  function setCustomFieldValue(id: string, val: string | string[]) {
+    setCustomFieldValues((prev) => ({ ...prev, [id]: val }));
+  }
 
   // ── Image state ───────────────────────────────────────────────────────────
   const MOCK_IMAGES: ProductImage[] = isAdd
@@ -306,26 +952,19 @@ export function EditProductPage({ mode, product, onBack }: Props) {
   const [allowOversell, setAllowOversell] = useState(false);
 
   // ── Product Page tab state ────────────────────────────────────────────────
-  const [selectedBrands, setSelectedBrands] = useState<string[]>(
-    isAdd ? [] : [product?.brand ?? ""]
-  );
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    isAdd ? [] : (product?.categoryPath ? [product.categoryPath.split(" > ")[0]] : [])
-  );
-  const [hiddenProduct, setHiddenProduct] = useState(false);
   const [recommendSimilar, setRecommendSimilar] = useState(!isAdd);
   const [restockNotification, setRestockNotification] = useState(false);
+  const [recommendationsMode, setRecommendationsMode] = useState("auto");
   const [useTitleForUrl, setUseTitleForUrl] = useState(false);
   const [useTitleForPageTitle, setUseTitleForPageTitle] = useState(false);
-
-  // ── Recommendations tab state ─────────────────────────────────────────────
-  const otherProducts = [
-    { id: "1", name: "Vantage Series 5 Watch", sku: "WT-550-B" },
-    { id: "2", name: "Echo-Noise Headphones", sku: "AU-102-S" },
-    { id: "3", name: "SwiftRun Pro Z", sku: "FT-99-R" },
-    { id: "4", name: "InstaCam Retro X", sku: "CM-42-P" },
-  ].filter((p) => p.id !== product?.id);
-  const [recommendedIds, setRecommendedIds] = useState<string[]>([]);
+  const [publishFrom, setPublishFrom] = useState("");
+  const [publishUntil, setPublishUntil] = useState("");
+  const [pageTitleByLocale, setPageTitleByLocale] = useState<Record<string, string>>({});
+  const [pageTitleInitial, setPageTitleInitial] = useState<Record<string, string>>({});
+  const [metaKeywordsByLocale, setMetaKeywordsByLocale] = useState<Record<string, string>>({});
+  const [metaKeywordsInitial, setMetaKeywordsInitial] = useState<Record<string, string>>({});
+  const [metaDescriptionByLocale, setMetaDescriptionByLocale] = useState<Record<string, string>>({});
+  const [metaDescriptionInitial, setMetaDescriptionInitial] = useState<Record<string, string>>({});
 
   // ── Close actions dropdown on outside click ───────────────────────────────
   useEffect(() => {
@@ -338,10 +977,97 @@ export function EditProductPage({ mode, product, onBack }: Props) {
   }, []);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  function handleSave(message: string) {
+  async function handleSave(message: string) {
     setActionsOpen(false);
-    setSuccessMessage(message);
-    setShowSuccessModal(true);
+    setSaveError(null);
+
+    // When not embedded with API context (e.g. standalone demo), keep the original confirmation behaviour.
+    if (!apiReady) {
+      setSuccessMessage(message);
+      setShowSuccessModal(true);
+      return;
+    }
+
+    if (saving) return;
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setSaveError("Product Name is required.");
+      setTab("general");
+      return;
+    }
+    if (categoryId == null) {
+      setSaveError("Please select a Category before saving.");
+      setTab("general");
+      return;
+    }
+
+    const missingField = findMissingRequiredCustomField(productFieldConfig, customFieldValues);
+    if (missingField) {
+      setSaveError(`${missingField.fieldName || missingField.columnLabel} is required.`);
+      setTab(tabForTargetPage(missingField.targetPage));
+      return;
+    }
+
+    // Preserve any locales the user didn't touch; ensure the edited name locales are present.
+    const descriptionToSave =
+      Object.keys(descriptionByLocale).length > 0 ? descriptionByLocale : descriptionInitial;
+
+    const payload = productToPayload({
+      name: trimmedName,
+      categoryId,
+      slug: effectiveSlug || slugify(trimmedName),
+      nameByLocale: { vi: trimmedName, en: trimmedName },
+      descriptionByLocale: descriptionToSave,
+      brandId: brandCode || null,
+      metadata: {
+        pageTitleByLocale:
+          Object.keys(pageTitleByLocale).length > 0 ? pageTitleByLocale : pageTitleInitial,
+        metaKeywordsByLocale:
+          Object.keys(metaKeywordsByLocale).length > 0 ? metaKeywordsByLocale : metaKeywordsInitial,
+        metaDescriptionByLocale:
+          Object.keys(metaDescriptionByLocale).length > 0 ? metaDescriptionByLocale : metaDescriptionInitial,
+        publishFrom: localInputToIso(publishFrom),
+        publishUntil: localInputToIso(publishUntil),
+        recommendSimilar,
+        recommendationsMode,
+        restockNotification,
+      },
+      customFields: buildCustomFieldsPayload(customFieldValues),
+    });
+
+    setSaving(true);
+    try {
+      if (isAdd) {
+        await createProduct(tenantId!, storeId!, payload, authToken);
+      } else if (product?.id) {
+        await updateProduct(tenantId!, storeId!, product.id, payload, authToken);
+        await reconcileVisibility(product.id);
+      } else {
+        throw new Error("Missing product id for update.");
+      }
+      setSuccessMessage(message);
+      setShowSuccessModal(true);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Failed to save product.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /**
+   * Reconcile the "Hidden Product" toggle with the catalog visibility state.
+   * Only active↔hidden transitions are valid; drafts/pending/archived are left untouched.
+   */
+  async function reconcileVisibility(productId: string) {
+    if (!apiReady) return;
+    if (hiddenProduct && loadedStatus === "active") {
+      await hideProduct(tenantId!, storeId!, productId, authToken);
+      setLoadedStatus("hidden");
+    } else if (!hiddenProduct && loadedStatus === "hidden") {
+      await unhideProduct(tenantId!, storeId!, productId, authToken);
+      setLoadedStatus("active");
+    }
   }
 
   function addProductOption() {
@@ -358,12 +1084,6 @@ export function EditProductPage({ mode, product, onBack }: Props) {
   function updateProductOption(id: string, patch: Partial<ProductOption>) {
     setProductOptions((prev) =>
       prev.map((o) => (o.id === id ? { ...o, ...patch } : o))
-    );
-  }
-
-  function toggleRecommended(id: string, checked: boolean) {
-    setRecommendedIds((prev) =>
-      checked ? [...prev, id] : prev.filter((r) => r !== id)
     );
   }
 
@@ -472,6 +1192,14 @@ export function EditProductPage({ mode, product, onBack }: Props) {
         </div>
       </div>
 
+      {/* ── Save error banner ─────────────────────────────────────────────── */}
+      {saveError && (
+        <div className="mx-6 mt-4 flex items-start gap-2 rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-xs font-medium text-on-error-container">
+          <span className="font-bold uppercase tracking-wider">Save failed:</span>
+          <span>{saveError}</span>
+        </div>
+      )}
+
       {/* ── Body: sidebar + form ─────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1 flex-col gap-8 p-6 lg:flex-row">
 
@@ -542,8 +1270,52 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                     <input
                       className={inputBase}
                       type="text"
-                      defaultValue={isAdd ? "" : product?.name}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
                       placeholder="Name for printed documents (orders, delivery notes)"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={labelBase}>Category <span className="text-error">*</span></label>
+                    <select
+                      className={`${inputBase} appearance-none`}
+                      value={categoryId ?? ""}
+                      onChange={(e) => setCategoryId(e.target.value === "" ? null : Number(e.target.value))}
+                    >
+                      <option value="">— Select a category —</option>
+                      {categoryChoices.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={labelBase}>Brand</label>
+                    <select
+                      className={`${inputBase} appearance-none`}
+                      value={brandCode}
+                      onChange={(e) => setBrandCode(e.target.value)}
+                    >
+                      <option value="">— No brand —</option>
+                      {brandChoices.map((b) => (
+                        <option key={b.code} value={b.code}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={labelBase}>URL Slug</label>
+                    <input
+                      className={`${inputBase} font-mono`}
+                      type="text"
+                      value={effectiveSlug}
+                      onChange={(e) => {
+                        setSlugTouched(true);
+                        setSlug(e.target.value);
+                      }}
+                      placeholder="auto-generated-from-name"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -687,7 +1459,16 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                 )}
               </div>
 
-              {/* Product Options */}
+              {/* Product Options — legacy mock UI; hidden when store Product Configuration is active */}
+              {apiReady && productFieldConfig.some((f) => f.enabled) ? (
+                <div className="rounded-lg border border-outline-variant/20 bg-surface-container-low px-4 py-3">
+                  <p className="text-xs text-on-surface-variant">
+                    Custom product fields are managed in{" "}
+                    <span className="font-semibold text-on-surface">Product Configuration</span>. Use that page to
+                    define field types, labels, and options for this store.
+                  </p>
+                </div>
+              ) : (
               <div>
                 <h3 className={sectionTitle}>Product Options</h3>
                 <div className="space-y-3">
@@ -769,6 +1550,7 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                   </button>
                 </div>
               </div>
+              )}
 
               {/* Product Attributes */}
               <div>
@@ -1066,29 +1848,34 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                 )}
               </div>
 
-              {/* Variants */}
+              {apiReady && productFieldConfig.some((f) => f.enabled && f.targetPage === "General") ? (
+                <ProductCustomFieldsSection
+                  fields={productFieldConfig}
+                  targetPage="General"
+                  values={customFieldValues}
+                  onChange={setCustomFieldValue}
+                  sectionTitleClass={sectionTitle}
+                />
+              ) : null}
+
+              {/* Variants — SKU / price / stock (wired to Catalog + Inventory) */}
               <div>
-                <h3 className={sectionTitle}>Variants</h3>
-                {variantNotice ? (
-                  <p className="mb-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] text-primary">
-                    {variantNotice}
-                  </p>
-                ) : null}
-                <div className="flex items-center gap-4 rounded-lg border border-outline-variant/20 bg-surface p-4">
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-on-surface">Main Product Configuration</p>
+                <h3 className={sectionTitle}>Variants · Pricing · Stock</h3>
+                {isAdd || !apiReady || !product?.id ? (
+                  <div className="rounded-lg border border-outline-variant/20 bg-surface p-4">
                     <p className="text-[11px] text-on-surface-variant">
-                      If this product has variants, configure which one serves as the main product listing.
+                      Save the product first to manage SKUs, base price and on-hand stock. Each SKU's base price drives
+                      the storefront price and its on-hand quantity drives stock availability.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-md bg-surface-container-high px-4 py-2 text-xs font-bold text-on-surface-variant transition-colors hover:bg-surface-variant"
-                    onClick={() => setConfigureMainOpen(true)}
-                  >
-                    Configure Main Product
-                  </button>
-                </div>
+                ) : (
+                  <VariantsPanel
+                    tenantId={tenantId!}
+                    storeId={storeId!}
+                    productId={product.id}
+                    authToken={authToken}
+                  />
+                )}
               </div>
 
               {!isAdd && (
@@ -1125,38 +1912,37 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                     hint="This is the title customers use to identify the product on the storefront."
                   />
 
-                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                    <SearchablePicker
-                      label="Brand"
-                      options={MOCK_BRANDS}
-                      selected={selectedBrands}
-                      onChange={setSelectedBrands}
-                      placeholder="Type brand name to find a match..."
-                    />
-                    <SearchablePicker
-                      label="Category"
-                      options={MOCK_CATEGORIES}
-                      selected={selectedCategories}
-                      onChange={setSelectedCategories}
-                      placeholder="Type category name to find a match..."
-                    />
-                  </div>
+                  <p className="rounded-md border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-[11px] text-on-surface-variant">
+                    Brand &amp; Category are set on the <span className="font-semibold text-on-surface">General</span> tab.
+                  </p>
 
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <label className={labelBase}>Publish From</label>
-                      <input className={inputBase} type="datetime-local" defaultValue={isAdd ? "" : "2024-01-01T09:00"} />
+                      <input
+                        className={inputBase}
+                        type="datetime-local"
+                        value={publishFrom}
+                        onChange={(e) => setPublishFrom(e.target.value)}
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <label className={labelBase}>Publish Until</label>
-                      <input className={inputBase} type="datetime-local" />
+                      <input
+                        className={inputBase}
+                        type="datetime-local"
+                        value={publishUntil}
+                        onChange={(e) => setPublishUntil(e.target.value)}
+                      />
                     </div>
                   </div>
 
-                  {/* Overview */}
+                  {/* Overview → persisted as the product description (descriptionJson) */}
                   <MultiLangLexicalRichText
+                    key={`overview-${product?.id ?? "add"}-${Object.keys(descriptionInitial).length}`}
                     label="Overview"
-                    defaultValues={{ en: isAdd ? "" : "" }}
+                    defaultValues={descriptionInitial}
+                    onValuesChange={setDescriptionByLocale}
                     placeholders={{
                       en: "Enter product overview and description...",
                       vn: "Nhập mô tả sản phẩm...",
@@ -1189,10 +1975,14 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                     <div className="space-y-1.5">
                       <label className={labelBase}>Recommendations Mode</label>
                       <div className="relative">
-                        <select className={`${inputBase} appearance-none pr-10`}>
-                          <option>Auto</option>
-                          <option>Manual</option>
-                          <option>Disabled</option>
+                        <select
+                          className={`${inputBase} appearance-none pr-10`}
+                          value={recommendationsMode}
+                          onChange={(e) => setRecommendationsMode(e.target.value)}
+                        >
+                          <option value="auto">Auto</option>
+                          <option value="manual">Manual</option>
+                          <option value="disabled">Disabled</option>
                         </select>
                         <IconChevronDown className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-on-surface-variant" />
                       </div>
@@ -1209,16 +1999,17 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                   {/* Left: fields */}
                   <div className="space-y-6">
                     <div className="space-y-1.5">
-                      <label className={labelBase}>Product URL</label>
+                      <label className={labelBase}>Product URL (slug)</label>
                       <input
                         className={`${inputBase} ${useTitleForUrl ? "text-on-surface-variant" : ""}`}
                         type="text"
                         readOnly={useTitleForUrl}
                         placeholder="product-url-slug"
-                        defaultValue={isAdd ? "" : product?.name?.toLowerCase().replace(/\s+/g, "-")}
+                        value={useTitleForUrl ? slugify(name) : slug}
+                        onChange={(e) => setSlug(e.target.value)}
                       />
                       <label className="flex cursor-pointer items-center gap-2 text-[10px] text-on-surface-variant select-none">
-                        <input type="checkbox" className="h-3 w-3 accent-primary" checked={useTitleForUrl} onChange={(e) => setUseTitleForUrl(e.target.checked)} />
+                        <input type="checkbox" className="h-3 w-3 accent-primary" checked={useTitleForUrl} onChange={(e) => { setUseTitleForUrl(e.target.checked); if (e.target.checked) setSlug(slugify(name)); }} />
                         Use product title as URL
                       </label>
                     </div>
@@ -1229,7 +2020,8 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                         type="text"
                         readOnly={useTitleForPageTitle}
                         placeholder="Page title for browser tab"
-                        defaultValue={isAdd ? "" : product?.name}
+                        value={useTitleForPageTitle ? name : (pageTitleByLocale.vi ?? "")}
+                        onChange={(e) => setPageTitleByLocale((prev) => ({ ...prev, vi: e.target.value }))}
                       />
                       <label className="flex cursor-pointer items-center gap-2 text-[10px] text-on-surface-variant select-none">
                         <input type="checkbox" className="h-3 w-3 accent-primary" checked={useTitleForPageTitle} onChange={(e) => setUseTitleForPageTitle(e.target.checked)} />
@@ -1237,7 +2029,10 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                       </label>
                     </div>
                     <MultiLangInput
+                      key={`metakw-${product?.id ?? "add"}-${Object.keys(metaKeywordsInitial).length}`}
                       label="Meta Keywords"
+                      defaultValues={metaKeywordsInitial}
+                      onValuesChange={setMetaKeywordsByLocale}
                       placeholders={{
                         en: "Enter keywords separated by commas…",
                         vn: "Nhập từ khóa cách nhau bằng dấu phẩy...",
@@ -1247,8 +2042,11 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                       hint="List relevant keywords that customers might use to find this product."
                     />
                     <MultiLangTextarea
+                      key={`metadesc-${product?.id ?? "add"}-${Object.keys(metaDescriptionInitial).length}`}
                       label="Meta Description"
                       rows={3}
+                      defaultValues={metaDescriptionInitial}
+                      onValuesChange={setMetaDescriptionByLocale}
                       placeholders={{
                         en: "Brief description for search results listings…",
                         vn: "Mô tả ngắn cho kết quả tìm kiếm...",
@@ -1294,6 +2092,16 @@ export function EditProductPage({ mode, product, onBack }: Props) {
                 </div>
               </div>
 
+              {apiReady && productFieldConfig.some((f) => f.enabled && f.targetPage === "Product Page") ? (
+                <ProductCustomFieldsSection
+                  fields={productFieldConfig}
+                  targetPage="Product Page"
+                  values={customFieldValues}
+                  onChange={setCustomFieldValue}
+                  sectionTitleClass={sectionTitle}
+                />
+              ) : null}
+
               {!isAdd && (
                 <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
                   <button type="button" className={btnFooterGhost} onClick={() => console.info("[EditProduct] Discard")}>
@@ -1311,62 +2119,36 @@ export function EditProductPage({ mode, product, onBack }: Props) {
           {/* ── RECOMMENDATIONS TAB ──────────────────────────────────── */}
           {tab === "recommendations" && (
             <>
+              {apiReady && productFieldConfig.some((f) => f.enabled && f.targetPage === "Recommendations") ? (
+                <ProductCustomFieldsSection
+                  fields={productFieldConfig}
+                  targetPage="Recommendations"
+                  values={customFieldValues}
+                  onChange={setCustomFieldValue}
+                  sectionTitleClass={sectionTitleRow}
+                />
+              ) : null}
+
               <div>
                 <h3 className={sectionTitleRow}>Product Recommendations</h3>
                 <p className={sectionIntroText}>
-                  Select the products that will be recommended on this product's page.
+                  Manually curate the related products shown on this product's storefront page.
                 </p>
               </div>
 
-              <div className="mt-4 space-y-3">
-                {otherProducts.map((p) => {
-                  const checked = recommendedIds.includes(p.id);
-                  return (
-                    <label
-                      key={p.id}
-                      className={`flex cursor-pointer items-center gap-4 rounded-lg border p-4 transition-colors ${
-                        checked
-                          ? "border-primary/30 bg-primary/5"
-                          : "border-outline-variant/20 hover:bg-surface-container-low"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 accent-primary shrink-0"
-                        checked={checked}
-                        onChange={(e) => toggleRecommended(p.id, e.target.checked)}
-                      />
-                      <span className="font-mono text-xs text-on-surface-variant w-20 shrink-0">{p.sku}</span>
-                      <span className="flex-1 text-sm font-medium text-on-surface">{p.name}</span>
-                      {checked && (
-                        <span className="ml-auto shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-primary">
-                          Recommended
-                        </span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-
-              {recommendedIds.length > 0 && (
-                <div className="mt-4 rounded-lg border border-outline-variant/20 bg-surface-container-low p-3">
-                  <p className="text-xs text-on-surface-variant">
-                    <span className="font-bold text-on-surface">{recommendedIds.length} product{recommendedIds.length !== 1 ? "s" : ""} selected</span>
-                    {" — these will be shown as recommendations on this product's page."}
+              {isAdd || !apiReady || !product?.id ? (
+                <div className="mt-4 rounded-lg border border-outline-variant/20 bg-surface p-4">
+                  <p className="text-[11px] text-on-surface-variant">
+                    Save the product first to curate its recommended products.
                   </p>
                 </div>
-              )}
-
-              {!isAdd && (
-                <div className="flex items-center justify-end gap-3 border-t border-outline-variant/20 pt-8 mt-8">
-                  <button type="button" className={btnFooterGhost} onClick={() => setRecommendedIds([])}>
-                    Reset
-                  </button>
-                  <button type="button" className={btnFooterPrimary} onClick={() => handleSave("Save Changes")}>
-                    <IconSave className="h-4 w-4 shrink-0" />
-                    Update Recommendations
-                  </button>
-                </div>
+              ) : (
+                <RecommendationsPanel
+                  tenantId={tenantId!}
+                  storeId={storeId!}
+                  productId={product.id}
+                  authToken={authToken}
+                />
               )}
             </>
           )}

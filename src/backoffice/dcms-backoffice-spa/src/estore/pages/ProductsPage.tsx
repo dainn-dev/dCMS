@@ -22,9 +22,34 @@ import {
   downloadInventoryImportTemplateXlsx,
   downloadProductImportTemplateXlsx,
 } from "../exportProductImportTemplates";
-import { bulkOperateProducts, fetchAllProductsForExport, fetchProducts, type BulkProductOp, type ProductFilters } from "../api/productsApi";
+import {
+  bulkApprove,
+  bulkChangeCategory,
+  bulkOperateProducts,
+  bulkReject,
+  bulkRestore,
+  bulkSubmitForApproval,
+  bulkSubmitForArchive,
+  fetchAllProductsForExport,
+  fetchProducts,
+  type BulkProductOp,
+  type ProductFilters,
+} from "../api/productsApi";
+import { fetchCategories } from "../api/categoriesApi";
+import { fetchBrands } from "../api/brandsApi";
+import type { CatNode } from "./CategoriesPage";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import * as XLSX from "xlsx";
+
+/** Flatten the category tree to "id → indented label" options for the filter dropdown. */
+function flattenCategories(nodes: CatNode[], depth = 0): { id: string; label: string }[] {
+  const out: { id: string; label: string }[] = [];
+  for (const n of nodes) {
+    out.push({ id: n.id, label: `${"\u00A0\u00A0".repeat(depth)}${n.name}` });
+    if (n.children?.length) out.push(...flattenCategories(n.children, depth + 1));
+  }
+  return out;
+}
 
 const labelFilter = "text-[10px] font-bold text-on-surface-variant uppercase tracking-wider";
 const inputFilter =
@@ -159,6 +184,12 @@ export function ProductsPage({
   const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
 
+  // Group-action modals
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectComment, setRejectComment] = useState("");
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [categoryModalTarget, setCategoryModalTarget] = useState<number | null>(null);
+
   // Filter state (controlled inputs)
   const [upc, setUpc] = useState("");
   const [sku, setSku] = useState("");
@@ -170,6 +201,32 @@ export function ProductsPage({
   const [brand, setBrand] = useState("all");
   const [category, setCategory] = useState("all");
   const [estoreStatus, setEstoreStatus] = useState<"all" | "live" | "draft" | "inactive">("all");
+
+  // Filter option sources (loaded from the Catalog API instead of demo data).
+  const [categoryOptions, setCategoryOptions] = useState<{ id: string; label: string }[]>([]);
+  const [brandOptions, setBrandOptions] = useState<{ code: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    fetchCategories(tenantId, authToken)
+      .then((tree) => {
+        if (!cancelled) setCategoryOptions(flattenCategories(tree));
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryOptions([]);
+      });
+    fetchBrands(tenantId, { active: true, pageSize: 200 }, authToken)
+      .then(({ rows }) => {
+        if (!cancelled) setBrandOptions(rows.map((b) => ({ code: b.code, name: b.name })));
+      })
+      .catch(() => {
+        if (!cancelled) setBrandOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, authToken]);
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -506,6 +563,48 @@ export function ProductsPage({
     }
   }
 
+  /** Generic runner for bulk workflow actions (approval / restore / change category). */
+  async function runBulkAction(
+    label: string,
+    fn: (ids: string[]) => Promise<{ succeeded: number; failed: number }>
+  ) {
+    if (!tenantId || !storeId) return;
+    if (selectedIds.size === 0) return;
+    setBulkLoading(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const { succeeded, failed } = await fn(ids);
+      if (failed > 0) {
+        setToast({ kind: "error", message: `${failed} product(s) failed: ${label}.` });
+        if (succeeded === 0) return;
+      } else {
+        setToast({ kind: "success", message: `${succeeded} product(s): ${label}` });
+      }
+      setSelectedIds(new Set());
+      setSearchNonce((n) => n + 1);
+    } catch (e: unknown) {
+      setToast({ kind: "error", message: e instanceof Error ? e.message : `${label} failed` });
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
+  async function confirmReject() {
+    const comment = rejectComment.trim();
+    if (!comment) return;
+    setRejectModalOpen(false);
+    await runBulkAction("Rejected", (ids) => bulkReject(tenantId!, storeId!, ids, comment, authToken));
+    setRejectComment("");
+  }
+
+  async function confirmChangeCategory() {
+    if (categoryModalTarget == null) return;
+    const target = categoryModalTarget;
+    setCategoryModalOpen(false);
+    await runBulkAction("Category updated", (ids) => bulkChangeCategory(tenantId!, storeId!, ids, target, authToken));
+    setCategoryModalTarget(null);
+  }
+
   return (
     <div
       className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low"
@@ -682,7 +781,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Send for Approval", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); void runBulkAction("Sent for approval", (ids) => bulkSubmitForApproval(tenantId!, storeId!, ids, authToken)); }}
                 >
                   <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
                   Send for Approval
@@ -690,7 +789,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Approve", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); void runBulkAction("Approved", (ids) => bulkApprove(tenantId!, storeId!, ids, authToken)); }}
                 >
                   <IconAddCircle className="h-4 w-4 shrink-0 text-primary" />
                   Approve
@@ -698,7 +797,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Reject", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); setRejectComment(""); setRejectModalOpen(true); }}
                 >
                   <IconClose className="h-4 w-4 shrink-0 text-primary" />
                   Reject
@@ -714,7 +813,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Send for Archive", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); void runBulkAction("Sent for archive", (ids) => bulkSubmitForArchive(tenantId!, storeId!, ids, authToken)); }}
                 >
                   <IconCloudUpload className="h-4 w-4 shrink-0 text-primary" />
                   Send for Archive
@@ -722,7 +821,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Restore", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); void runBulkAction("Restored", (ids) => bulkRestore(tenantId!, storeId!, ids, authToken)); }}
                 >
                   <IconOpenInNew className="h-4 w-4 shrink-0 text-primary" />
                   Restore
@@ -730,7 +829,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Add Category", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); setCategoryModalTarget(null); setCategoryModalOpen(true); }}
                 >
                   <IconAddCircle className="h-4 w-4 shrink-0 text-primary" />
                   Add Category
@@ -738,7 +837,7 @@ export function ProductsPage({
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
-                  onClick={() => { setGroupOpen(false); console.info("[Products] Change Category", Array.from(selectedIds)); }}
+                  onClick={() => { setGroupOpen(false); setCategoryModalTarget(null); setCategoryModalOpen(true); }}
                 >
                   <IconEdit className="h-4 w-4 shrink-0 text-primary" />
                   Change Category
@@ -836,9 +935,11 @@ export function ProductsPage({
               }}
             >
               <option value="all">All Brands</option>
-              <option value="Premium Collection">Premium Collection</option>
-              <option value="Eco-Essentials">Eco-Essentials</option>
-              <option value="Luxe Goods">Luxe Goods</option>
+              {brandOptions.map((b) => (
+                <option key={b.code} value={b.code}>
+                  {b.name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1.5">
@@ -852,9 +953,11 @@ export function ProductsPage({
               }}
             >
               <option value="all">All Categories</option>
-              <option value="Electronics">Electronics</option>
-              <option value="Home & Living">Home &amp; Living</option>
-              <option value="Apparel">Apparel</option>
+              {categoryOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1.5">
@@ -1258,6 +1361,89 @@ export function ProductsPage({
                 disabled={bulkLoading}
               >
                 Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rejectModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[440px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="p-6">
+              <h3 className="text-sm font-bold text-on-surface">Reject products</h3>
+              <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
+                Reject <strong>{selectedIds.size}</strong> selected product(s) and return them to draft. A reason is
+                required.
+              </p>
+              <textarea
+                className={`${inputFilter} mt-3 min-h-[80px] resize-y`}
+                placeholder="Reason for rejection (sent to the submitter)…"
+                value={rejectComment}
+                onChange={(e) => setRejectComment(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setRejectModalOpen(false)}
+                disabled={bulkLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-error px-5 py-2.5 text-xs font-bold text-on-error hover:opacity-90 disabled:opacity-40"
+                onClick={() => void confirmReject()}
+                disabled={bulkLoading || !rejectComment.trim()}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {categoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[440px] rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-2xl">
+            <div className="p-6">
+              <h3 className="text-sm font-bold text-on-surface">Change category</h3>
+              <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
+                Assign <strong>{selectedIds.size}</strong> selected product(s) to a category.
+              </p>
+              <select
+                className={`${inputFilter} mt-3 appearance-none`}
+                value={categoryModalTarget ?? ""}
+                onChange={(e) => setCategoryModalTarget(e.target.value === "" ? null : Number(e.target.value))}
+                autoFocus
+              >
+                <option value="">— Select a category —</option>
+                {categoryOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-outline-variant/10 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 px-5 py-2.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={() => setCategoryModalOpen(false)}
+                disabled={bulkLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-5 py-2.5 text-xs font-bold text-on-primary hover:opacity-90 disabled:opacity-40"
+                onClick={() => void confirmChangeCategory()}
+                disabled={bulkLoading || categoryModalTarget == null}
+              >
+                Apply
               </button>
             </div>
           </div>

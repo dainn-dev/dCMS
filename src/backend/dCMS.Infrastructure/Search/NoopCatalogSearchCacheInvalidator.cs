@@ -8,4 +8,7 @@ public sealed class NoopCatalogSearchCacheInvalidator : ICatalogSearchCacheInval
 
     public Task InvalidateAfterIndexChangeAsync(string storeId, string? slug, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
+
+    public Task InvalidateStoreAsync(string storeId, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 }

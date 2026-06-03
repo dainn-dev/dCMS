@@ -1413,7 +1413,7 @@ function OtherTab({
         <p className="mt-2 text-sm text-on-surface-variant">
           Custom fields defined in{" "}
           <span className="font-semibold text-on-surface">Brand Configuration</span>.
-          Enabled fields are shown below, grouped by section.
+          Enabled fields are shown below, grouped by heading.
         </p>
       </div>
 

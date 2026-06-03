@@ -1,3 +1,5 @@
+using dCMS.Core.Models;
+
 namespace dCMS.Core.Commands;
 
 public sealed record CreateProductCommand(
@@ -6,4 +8,7 @@ public sealed record CreateProductCommand(
     int CategoryId,
     string NameJson,
     string DescriptionJson,
-    string Slug);
+    string Slug,
+    string? BrandId = null,
+    ProductPageMetadata? Metadata = null,
+    string? CustomFieldsJson = null);

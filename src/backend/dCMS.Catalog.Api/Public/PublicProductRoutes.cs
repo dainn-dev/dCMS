@@ -1,6 +1,7 @@
 using System.Text.Json;
 using dCMS.Catalog.Api.Http;
 using dCMS.Catalog.Api.Products;
+using dCMS.Catalog.Api.Stores;
 using dCMS.Core.Caching;
 using dCMS.Core.Models;
 using dCMS.Core.Persistence;
@@ -21,6 +22,8 @@ public static class PublicProductRoutes
             .AllowAnonymous();
 
         g.MapGet("", PublicSearchProducts);
+        g.MapGet("best-sellers", PublicBestSellers);
+        g.MapGet("custom-fields", PublicGetCustomFieldConfig);
         g.MapGet("slug-check", PublicSlugCheck).RequireRateLimiting("PublicSlugCheck");
         g.MapGet("{slug}", PublicGetProductBySlug);
     }
@@ -50,9 +53,37 @@ public static class PublicProductRoutes
         return true;
     }
 
+    private static async Task<IResult> PublicBestSellers(
+        HttpContext http,
+        BestSellerRankingService ranking,
+        string? tenantId,
+        string? storeId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateTenantStore(tenantId, storeId, out var tenant, out var store, out var err))
+            return err!;
+
+        http.Response.Headers.CacheControl = "public, max-age=60";
+
+        var (cfg, _) = await ranking.LoadSettingsAsync(tenant, store, cancellationToken).ConfigureAwait(false);
+        if (!cfg.DisplayList)
+            return ApiEnvelope.Ok(Array.Empty<object>(), new { displayList = false, logic = cfg.RecommendationLogic });
+
+        var rows = await ranking.ResolveAsync(tenant, store, cancellationToken).ConfigureAwait(false);
+        var items = rows.Select(BestSellerSettingsRoutes.MapProductRow).ToList();
+        return ApiEnvelope.Ok(items, new
+        {
+            displayList = true,
+            logic = cfg.RecommendationLogic,
+            maxItems = cfg.MaxItems,
+            count = items.Count
+        });
+    }
+
     private static async Task<IResult> PublicSearchProducts(
         HttpContext http,
         IProductSearchQuery search,
+        IStoreProductFieldConfigPersistence fieldConfig,
         string? tenantId,
         string? storeId,
         string? q,
@@ -89,9 +120,19 @@ public static class PublicProductRoutes
 
         var cat = categoryId ?? category;
         var ps = pageSize ?? 20;
+
+        IReadOnlyList<string>? facetProperties = null;
+        if (facets == true)
+        {
+            var configJson = await fieldConfig.GetFieldsJsonAsync(tenant, store, cancellationToken).ConfigureAwait(false);
+            facetProperties = ProductCustomFieldsMapper.FilterableFacetProperties(
+                ProductCustomFieldsMapper.ParseDefinitions(configJson));
+        }
+
         var result = await search
             .SearchAsync(new ProductSearchQuery(tenant, store, q, inStock, cat, ps, cursor, minPrice, maxPrice,
-                sortEnum, attrFilters, facets == true), cancellationToken)
+                sortEnum, attrFilters, facets == true, Statuses: null, BrandId: null, CustomFieldFacetProperties: facetProperties),
+                cancellationToken)
             .ConfigureAwait(false);
 
         var items = result.Items.Select(i => new
@@ -122,6 +163,33 @@ public static class PublicProductRoutes
         return ApiEnvelope.Ok(items, meta);
     }
 
+    private static async Task<IResult> PublicGetCustomFieldConfig(
+        IStoreProductFieldConfigPersistence fieldConfig,
+        string? tenantId,
+        string? storeId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateTenantStore(tenantId, storeId, out var tenant, out var store, out var err))
+            return err!;
+
+        var json = await fieldConfig.GetFieldsJsonAsync(tenant, store, cancellationToken).ConfigureAwait(false);
+        var defs = ProductCustomFieldsMapper.ParseDefinitions(json);
+        var items = defs
+            .Where(static f => f.Enabled)
+            .Select(f => new
+            {
+                property = f.Property,
+                columnLabel = f.ColumnLabel,
+                fieldName = f.FieldName,
+                controlType = f.ControlType,
+                targetPage = f.TargetPage,
+                options = f.Options.Select(o => new { name = o.Name, value = o.Value }).ToArray()
+            })
+            .ToList();
+
+        return ApiEnvelope.Ok(items, new { count = items.Count });
+    }
+
     private static async Task<IResult> PublicSlugCheck(
         ICatalogPersistence persistence,
         string? tenantId,
@@ -146,12 +214,14 @@ public static class PublicProductRoutes
         ICatalogPersistence persistence,
         ProductService products,
         IProductPublicDetailCache detailCache,
+        IStoreProductFieldConfigPersistence fieldConfig,
         string slug,
         string? tenantId,
         string? storeId,
         CancellationToken cancellationToken)
     {
-        if (string.Equals(slug, "slug-check", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(slug, "slug-check", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(slug, "custom-fields", StringComparison.OrdinalIgnoreCase))
             return ApiEnvelope.Error("not_found", "Not found.", StatusCodes.Status404NotFound);
 
         if (!TryValidateTenantStore(tenantId, storeId, out var tenant, out var store, out var err))
@@ -184,8 +254,11 @@ public static class PublicProductRoutes
         var variants = await products.ListVariantsAsync(product.Id, tenant, store, cancellationToken)
             .ConfigureAwait(false);
 
+        var configJson = await fieldConfig.GetFieldsJsonAsync(tenant, store, cancellationToken).ConfigureAwait(false);
+        var fieldDefs = ProductCustomFieldsMapper.ParseDefinitions(configJson);
+
         var vu = product.UpdatedAt.ToUnixTimeSeconds();
-        var body = BuildPublicProductBody(product, variants);
+        var body = BuildPublicProductBody(product, variants, fieldDefs);
         var etagLive = BuildEtag(product.Id, vu);
         http.Response.Headers.ETag = etagLive;
         if (EtagsMatch(http.Request.Headers.IfNoneMatch.ToString(), etagLive))
@@ -249,8 +322,24 @@ public static class PublicProductRoutes
         return t;
     }
 
-    private static object BuildPublicProductBody(Product product, IReadOnlyList<ProductVariant> variants)
+    private static object BuildPublicProductBody(
+        Product product,
+        IReadOnlyList<ProductVariant> variants,
+        IReadOnlyList<ProductCustomFieldsMapper.FieldDef> fieldDefs)
     {
+        var customFields = ProductCustomFieldsMapper
+            .ToPublicFields(fieldDefs, product.CustomFieldsJson, ProductCustomFieldsMapper.IsStorefrontDetailTarget)
+            .Select(f => new
+            {
+                property = f.Property,
+                columnLabel = f.ColumnLabel,
+                fieldName = f.FieldName,
+                controlType = f.ControlType,
+                targetPage = f.TargetPage,
+                value = f.Value
+            })
+            .ToList();
+
         var combinations = new Dictionary<string, object>(StringComparer.Ordinal);
         foreach (var v in variants)
         {
@@ -274,6 +363,7 @@ public static class PublicProductRoutes
             description = JsonSerializer.Deserialize<object>(product.DescriptionJson),
             slug = product.Slug,
             status = product.Status.ToPersistedValue(),
+            customFields,
             variantMatrix = new
             {
                 axes = Array.Empty<object>(),

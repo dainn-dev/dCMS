@@ -1,3 +1,5 @@
+using dCMS.Core.Models;
+
 namespace dCMS.Core.Commands;
 
 public sealed record UpdateProductCommand(
@@ -7,4 +9,7 @@ public sealed record UpdateProductCommand(
     int CategoryId,
     string NameJson,
     string DescriptionJson,
-    string Slug);
+    string Slug,
+    string? BrandId = null,
+    ProductPageMetadata? Metadata = null,
+    string? CustomFieldsJson = null);

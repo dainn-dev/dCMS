@@ -75,7 +75,8 @@ public sealed class RedisCachingProductSearchQuery(
                         : new Dictionary<string, string>(i.NameByLocale, StringComparer.Ordinal),
                     MinBasePrice = i.MinBasePrice,
                     HasInStockVariant = i.HasInStockVariant,
-                    Slug = i.Slug
+                    Slug = i.Slug,
+                    Status = i.Status
                 }).ToList(),
                 TotalCount = r.TotalCount,
                 NextCursor = r.NextCursor,
@@ -97,7 +98,7 @@ public sealed class RedisCachingProductSearchQuery(
         {
             var items = (Items ?? []).Select(static i => new ProductSearchItem(i.Id, i.Name,
                 i.NameByLocale ?? new Dictionary<string, string>(StringComparer.Ordinal), i.MinBasePrice,
-                i.HasInStockVariant, i.Slug)).ToList();
+                i.HasInStockVariant, i.Slug, string.IsNullOrEmpty(i.Status) ? "active" : i.Status)).ToList();
 
             SearchFacets? facets = null;
             if (Facets is not null)
@@ -123,6 +124,7 @@ public sealed class RedisCachingProductSearchQuery(
         public MoneyAmount MinBasePrice { get; set; } = new(0, "");
         public bool HasInStockVariant { get; set; }
         public string Slug { get; set; } = "";
+        public string Status { get; set; } = "active";
     }
 
     private sealed class FacetsCacheDto

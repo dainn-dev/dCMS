@@ -212,6 +212,28 @@ public sealed class AttributeApiIntegrationTests(CatalogApiFixture fixture)
         (await client.GetAsync(AttrUrl(attrId))).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    [SkippableFact]
+    public async Task Post_import_values_merges_by_code()
+    {
+        Skip();
+        using var client = Client(fixture);
+        var attrId = await PostAttr(client, "Import Target", Code("imp"));
+        var resp = await client.PostAsJsonAsync($"{AttrsUrl()}/import-values", new
+        {
+            rows = new[]
+            {
+                new { attributeCode = Code("imp"), values = new[] { "Alpha", "Beta" }, action = "Merge" },
+            },
+        });
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("data").GetProperty("imported").GetInt32().Should().Be(1);
+
+        var values = await client.GetAsync(ValuesUrl(attrId));
+        var vdoc = JsonDocument.Parse(await values.Content.ReadAsStringAsync());
+        vdoc.RootElement.GetProperty("data").GetArrayLength().Should().Be(2);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private async Task<int> PostAttr(HttpClient c, string name, string code, string tenant = "t1", string type = "TEXT")

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  createCampaign, updateCampaign,
+  createCampaign, updateCampaign, getCampaign,
   submitCampaign, approveCampaign, rejectCampaign,
   activateCampaign, pauseCampaign, archiveCampaign,
   fetchCampaignHistory,
@@ -15,13 +15,22 @@ import {
 import {
   deriveCampaignWorkflow,
   type CampaignEditorKind as CampaignKind,
+  type CampaignChannel,
   type CampaignListRow,
   type CampaignWorkflowState,
 } from "../campaigns-columns";
+import {
+  CAMPAIGN_CHANNELS,
+  datetimeLocalToIso,
+  historyFromApi,
+  serializePromotionDetailsJson,
+  serializeQualifiersJson,
+  snapshotFromDetail,
+  workflowFromDetail,
+} from "../utils/campaignFormUtils";
 import { MultiLangInput } from "../components/MultiLangField";
 import { CampaignActionButtons } from "./campaign-sections/CampaignActionButtons";
 import {
-  buildSeedChangeHistory,
   CampaignChangeHistoryPanel,
   type CampaignChangeHistoryEntry,
 } from "./campaign-sections/CampaignChangeHistoryPanel";
@@ -203,8 +212,8 @@ type Props = {
 };
 
 export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }: Props) {
-  const isAdd = mode === "add";
-
+  const [savedCampaignId, setSavedCampaignId] = useState(campaign?.id ?? "");
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [campaignKind, setCampaignKind] = useState<CampaignKind>(() => campaign?.editorKind ?? "pwp-item");
   const [workflow, setWorkflow] = useState<CampaignWorkflowState>(() => deriveCampaignWorkflow(campaign));
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -213,6 +222,9 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
   const [nameLocales, setNameLocales] = useState<Record<string, string>>(() => ({
     en: campaign?.name ?? "",
   }));
+  const [channel, setChannel] = useState<CampaignChannel>(() => campaign?.channel ?? "Email");
+  const [budget, setBudget] = useState(() => (campaign?.budget && campaign.budget !== "—" ? campaign.budget : ""));
+  const [audience, setAudience] = useState(() => (campaign?.audience && campaign.audience !== "—" ? campaign.audience : ""));
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [activeDays, setActiveDays] = useState<typeof DAYS[number][]>([]);
@@ -280,27 +292,88 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
     return () => clearTimeout(t);
   }, [toast]);
 
-  useEffect(() => {
-    setCampaignKind(campaign?.editorKind ?? "pwp-item");
-    setWorkflow(deriveCampaignWorkflow(campaign));
-  }, [campaign?.id, campaign?.editorKind, campaign?.workflowState, campaign?.status]);
+  function applyFormSnapshot(snapshot: ReturnType<typeof snapshotFromDetail>) {
+    setCampaignKind(snapshot.campaignKind);
+    setCode(snapshot.code);
+    setNameLocales(snapshot.nameLocales);
+    setChannel(snapshot.channel);
+    setBudget(snapshot.budget);
+    setAudience(snapshot.audience);
+    setStartDate(snapshot.startDate);
+    setEndDate(snapshot.endDate);
+    setActiveDays(snapshot.activeDays as typeof DAYS[number][]);
+    setActiveMonths(snapshot.activeMonths as typeof MONTHS[number][]);
+    const q = snapshot.qualifiers;
+    setInclusionEnabled(q.inclusionEnabled);
+    setIncBrands(q.incBrands);
+    setIncCategories(q.incCategories);
+    setIncPid1(q.incPid1);
+    setIncPid2(q.incPid2);
+    setIncProducts(q.incProducts);
+    setCartAllQualifiers(q.cartAllQualifiers);
+    setMinSpend(q.minSpend);
+    setMinSpendNet(q.minSpendNet);
+    setExclusionEnabled(q.exclusionEnabled);
+    setExcBrands(q.excBrands);
+    setExcCategories(q.excCategories);
+    setExcPid1(q.excPid1);
+    setExcPid2(q.excPid2);
+    setExcProducts(q.excProducts);
+    setExcMembershipTypes(q.excMembershipTypes);
+    setExcMembershipTiers(q.excMembershipTiers);
+    setItemMechanics(snapshot.itemMechanics);
+    setDiscountMechanics(snapshot.discountMechanics);
+    setMixMatchMechanics(snapshot.mixMatchMechanics);
+    setProductDiscountMechanics(snapshot.productDiscountMechanics);
+    setAfterSalesMechanics(snapshot.afterSalesMechanics);
+    const p = snapshot.promotionDetails;
+    setOrderDetailMessage(p.orderDetailMessage);
+    setPromotionDetails(p.promotionDetails);
+    setShowPromoOnProductPage(p.showPromoOnProductPage);
+    setPromotionMessagePriority(p.promotionMessagePriority);
+    setCampaignPriority(p.campaignPriority);
+    setBlockOtherPromos(p.blockOtherPromos);
+    setBlockSamePriority(p.blockSamePriority);
+    setActivationCodeEnabled(p.activationCodeEnabled);
+    setActivationCode(p.activationCode);
+  }
 
   useEffect(() => {
-    if (campaign) {
-      setHistoryEntries(buildSeedChangeHistory(campaign.code, campaign.name));
-    } else {
-      setHistoryEntries([
-        {
-          id: "session-new",
-          at: new Date().toISOString(),
-          user: "You (demo)",
-          field: "Session",
-          oldValue: "—",
-          newValue: "New campaign draft",
-        },
-      ]);
-    }
-  }, [campaign?.id, campaign?.code, campaign?.name]);
+    if (!tenantId || !savedCampaignId) return;
+    let cancelled = false;
+    setLoadingDetail(true);
+    getCampaign(tenantId, savedCampaignId, authToken)
+      .then((detail) => {
+        if (cancelled) return;
+        applyFormSnapshot(snapshotFromDetail(detail));
+        setWorkflow(workflowFromDetail(detail));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("[EditCampaignPage] load failed", err);
+          setToast(err instanceof Error ? err.message : "Failed to load campaign");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDetail(false);
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, savedCampaignId, authToken]);
+
+  useEffect(() => {
+    if (savedCampaignId) return;
+    setHistoryEntries([
+      {
+        id: "session-new",
+        at: new Date().toISOString(),
+        user: "You",
+        field: "Session",
+        oldValue: "—",
+        newValue: "New campaign draft",
+      },
+    ]);
+  }, [savedCampaignId]);
 
   function appendHistory(entry: Omit<CampaignChangeHistoryEntry, "id">) {
     setHistoryEntries((prev) => [{ id: newHistoryId(), ...entry }, ...prev]);
@@ -308,19 +381,47 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
 
   const typeLocked = workflow === "approved" || workflow === "active";
 
-  // ── API helpers ───────────────────────────────────────────────────────────────
-  const campaignId = (campaign as (typeof campaign & { id?: string }) | undefined)?.id;
-
-  async function apiSave() {
-    if (!tenantId) return;
-    const payload = {
-      code: code || "CAMPAIGN",
-      nameJson: JSON.stringify({ en: Object.values(nameLocales)[0] ?? code }),
+  function buildPayload() {
+    const qualifiers = {
+      inclusionEnabled,
+      incBrands,
+      incCategories,
+      incPid1,
+      incPid2,
+      incProducts,
+      cartAllQualifiers,
+      minSpend,
+      minSpendNet,
+      exclusionEnabled,
+      excBrands,
+      excCategories,
+      excPid1,
+      excPid2,
+      excProducts,
+      excMembershipTypes,
+      excMembershipTiers,
+    };
+    const promotion = {
+      orderDetailMessage,
+      promotionDetails,
+      showPromoOnProductPage,
+      promotionMessagePriority,
+      campaignPriority,
+      blockOtherPromos,
+      blockSamePriority,
+      activationCodeEnabled,
+      activationCode,
+    };
+    return {
+      code: code.trim().toUpperCase() || "CAMPAIGN",
+      nameJson: JSON.stringify(nameLocales),
       editorKind: campaignKind,
-      qualifiersJson: JSON.stringify({
-        inclusion: { brands: incBrands, categories: incCategories, pid1: incPid1, pid2: incPid2, products: incProducts, cartAllQualifiers, minSpend, minSpendNet },
-        exclusion: { brands: excBrands, categories: excCategories, pid1: excPid1, pid2: excPid2, products: excProducts, membershipTypes: excMembershipTypes, membershipTiers: excMembershipTiers },
-      }),
+      channel,
+      startDate: datetimeLocalToIso(startDate),
+      endDate: datetimeLocalToIso(endDate),
+      activeDaysJson: JSON.stringify(activeDays),
+      activeMonthsJson: JSON.stringify(activeMonths),
+      qualifiersJson: serializeQualifiersJson(qualifiers),
       mechanicsJson: JSON.stringify(
         campaignKind === "pwp-item" ? itemMechanics :
         campaignKind === "pwp-discount" ? discountMechanics :
@@ -328,73 +429,168 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
         campaignKind === "product-discount" ? productDiscountMechanics :
         afterSalesMechanics
       ),
-      promotionDetailsJson: JSON.stringify({ orderDetailMessage, promotionDetails, showPromoOnProductPage, promotionMessagePriority, campaignPriority, blockOtherPromos, blockSamePriority }),
+      promotionDetailsJson: serializePromotionDetailsJson(promotion),
+      budget: budget.trim(),
+      audience: audience.trim(),
     };
-    if (isAdd) {
-      await createCampaign(tenantId, payload, authToken);
-    } else if (campaignId) {
-      await updateCampaign(tenantId, campaignId, payload, authToken);
+  }
+
+  async function apiSave(): Promise<CampaignListRow | null> {
+    if (!tenantId) {
+      setToast("Tenant not configured.");
+      return null;
+    }
+    if (!code.trim()) {
+      setToast("Code is required.");
+      return null;
+    }
+    if (!startDate.trim()) {
+      setToast("Start date is required.");
+      return null;
+    }
+    const payload = buildPayload();
+    try {
+      if (savedCampaignId) {
+        const row = await updateCampaign(tenantId, savedCampaignId, payload, authToken);
+        setWorkflow(deriveCampaignWorkflow(row));
+        setToast("Campaign saved.");
+        return row;
+      }
+      const row = await createCampaign(tenantId, payload, authToken);
+      setSavedCampaignId(row.id);
+      setWorkflow(deriveCampaignWorkflow(row));
+      setToast("Campaign created.");
+      return row;
+    } catch (err) {
+      setToast(`Save failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      return null;
     }
   }
 
-  async function doTransition(fn: () => Promise<void>, nextState: CampaignWorkflowState, msg: string) {
-    if (tenantId && campaignId) {
-      try { await fn(); } catch (err) {
-        setToast(`API error: ${err instanceof Error ? err.message : "Unknown"}`);
-        return;
-      }
+  async function refreshHistory(campaignId: string) {
+    if (!tenantId) return;
+    try {
+      const rows = await fetchCampaignHistory(tenantId, campaignId, authToken);
+      setHistoryEntries(historyFromApi(rows));
+    } catch (err) {
+      console.error("[EditCampaignPage] history fetch failed", err);
+    }
+  }
+
+  async function doTransition(
+    campaignId: string,
+    fn: () => Promise<void>,
+    nextState: CampaignWorkflowState,
+    msg: string
+  ) {
+    if (!tenantId) {
+      setToast("Tenant not configured.");
+      return;
+    }
+    try {
+      await fn();
+    } catch (err) {
+      setToast(`API error: ${err instanceof Error ? err.message : "Unknown"}`);
+      return;
     }
     const prev = WORKFLOW_LABEL[workflow];
     setWorkflow(nextState);
-    appendHistory({ at: new Date().toISOString(), user: "You", field: "Workflow", oldValue: prev, newValue: WORKFLOW_LABEL[nextState] });
+    appendHistory({
+      at: new Date().toISOString(),
+      user: "You",
+      field: "Workflow",
+      oldValue: prev,
+      newValue: WORKFLOW_LABEL[nextState],
+    });
     setToast(msg);
+    await refreshHistory(campaignId);
   }
 
   async function handleSaveAndApprove() {
-    try { await apiSave(); } catch { /* ignore */ }
-    const next: CampaignWorkflowState = applyOnEStore ? "active" : "approved";
-    await doTransition(
-      () => approveCampaign(tenantId!, campaignId!, undefined, authToken),
-      next,
-      applyOnEStore ? "Approved and activated." : "Approved — pending eStore activation."
-    );
+    const row = await apiSave();
+    if (!row?.id || !tenantId) return;
+    const id = row.id;
+    try {
+      if (workflow === "draft" || workflow === "rejected") {
+        await submitCampaign(tenantId, id, undefined, authToken);
+      }
+      await approveCampaign(tenantId, id, undefined, authToken);
+      if (applyOnEStore) {
+        await activateCampaign(tenantId, id, undefined, authToken);
+        setWorkflow("active");
+        setToast("Approved and activated.");
+      } else {
+        setWorkflow("approved");
+        setToast("Approved — pending eStore activation.");
+      }
+      await refreshHistory(id);
+    } catch (err) {
+      setToast(`API error: ${err instanceof Error ? err.message : "Unknown"}`);
+    }
   }
 
   async function handleSaveAndSendForApproval() {
-    try { await apiSave(); } catch { /* ignore */ }
+    const row = await apiSave();
+    if (!row?.id) return;
     await doTransition(
-      () => submitCampaign(tenantId!, campaignId!, undefined, authToken),
+      row.id,
+      () => submitCampaign(tenantId!, row.id, undefined, authToken),
       "pending_approval",
       "Sent for approval."
     );
   }
 
   async function handleSaveAndArchive() {
+    const row = await apiSave();
+    if (!row?.id) return;
     await doTransition(
-      () => archiveCampaign(tenantId!, campaignId!, undefined, authToken),
+      row.id,
+      () => archiveCampaign(tenantId!, row.id, undefined, authToken),
       "archived",
       "Campaign archived."
     );
   }
 
   async function handleDeactivate() {
+    if (!savedCampaignId) {
+      setToast("Save the campaign before deactivating.");
+      return;
+    }
     await doTransition(
-      () => pauseCampaign(tenantId!, campaignId!, undefined, authToken),
+      savedCampaignId,
+      () => pauseCampaign(tenantId!, savedCampaignId, undefined, authToken),
       "deactivated",
       "Campaign deactivated."
     );
   }
 
   async function handleReject() {
+    if (!savedCampaignId) {
+      setToast("Save the campaign before rejecting.");
+      return;
+    }
     await doTransition(
-      () => rejectCampaign(tenantId!, campaignId!, undefined, authToken),
+      savedCampaignId,
+      () => rejectCampaign(tenantId!, savedCampaignId, "Rejected from backoffice", authToken),
       "rejected",
       "Campaign rejected."
     );
   }
 
+  async function handleShowChangeHistory() {
+    setHistoryOpen(true);
+    if (tenantId && savedCampaignId) {
+      await refreshHistory(savedCampaignId);
+    }
+  }
+
   return (
-    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low">
+    <div className="-m-6 flex min-h-[calc(100dvh-6rem)] flex-col bg-surface-container-low relative">
+      {loadingDetail && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-surface/60 backdrop-blur-sm">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      )}
       <div className="flex shrink-0 flex-col gap-4 border-b border-outline-variant/15 bg-surface px-6 py-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <button
@@ -406,7 +602,7 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
             Back to campaigns
           </button>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-bold tracking-tight text-on-surface">{isAdd ? "New campaign" : "Edit campaign"}</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-on-surface">{savedCampaignId ? "Edit campaign" : "New campaign"}</h2>
             <span
               className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${WORKFLOW_BADGE[workflow]}`}
               title="Approval / lifecycle (US-7)"
@@ -427,7 +623,7 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
           onSaveAndArchive={handleSaveAndArchive}
           onDeactivate={handleDeactivate}
           onReject={handleReject}
-          onShowChangeHistory={() => setHistoryOpen(true)}
+          onShowChangeHistory={handleShowChangeHistory}
         />
       </div>
 
@@ -487,6 +683,22 @@ export function EditCampaignPage({ mode, campaign, onBack, tenantId, authToken }
               }}
               hint="Shown to customers on the storefront where this campaign applies."
             />
+            <div>
+              <label className={labelBase}>Channel</label>
+              <select className={inputBase} value={channel} onChange={(e) => setChannel(e.target.value as CampaignChannel)}>
+                {CAMPAIGN_CHANNELS.map((ch) => (
+                  <option key={ch} value={ch}>{ch}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelBase}>Audience</label>
+              <input type="text" className={inputBase} placeholder="e.g. VIP subscribers" value={audience} onChange={(e) => setAudience(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelBase}>Budget</label>
+              <input type="text" className={inputBase} placeholder="e.g. $10,000" value={budget} onChange={(e) => setBudget(e.target.value)} />
+            </div>
             <div>
               <label className={labelBase}>
                 Start date <span className="text-error">*</span>

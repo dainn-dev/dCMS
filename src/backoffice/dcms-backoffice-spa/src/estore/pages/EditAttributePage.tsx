@@ -14,7 +14,19 @@ import {
 import type { AttributeListRow } from "../attributes-columns";
 import { MultiLangInput } from "../components/MultiLangField";
 import { exportSingleAttributeValuesXlsx } from "../exportAttributeTemplates";
-import { createAttribute, updateAttribute } from "../api/attributesApi";
+import { fetchBrands } from "../api/brandsApi";
+import { fetchCategories } from "../api/categoriesApi";
+import type { CatNode } from "./CategoriesPage";
+import {
+  createAttribute,
+  createAttributeValue,
+  deleteAttributeValue,
+  fetchAttribute,
+  fetchAttributeValues,
+  updateAttribute,
+  updateAttributeValue,
+  type AttributeValueRow,
+} from "../api/attributesApi";
 
 const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
 
@@ -30,19 +42,51 @@ const tabBase =
 const tabActive = "border-primary text-primary";
 const tabInactive = "border-transparent text-on-surface-variant hover:text-on-surface";
 
+const CODE_RE = /^[a-z][a-z0-9_]*$/;
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+type GeneralFieldErrors = {
+  name?: string;
+  code?: string;
+  values?: string;
+};
+
+type AdvancedFieldErrors = {
+  searchFilter?: string;
+};
+
+type FieldErrors = {
+  general: GeneralFieldErrors;
+  advanced: AdvancedFieldErrors;
+};
+
+const EMPTY_FIELD_ERRORS: FieldErrors = { general: {}, advanced: {} };
+
+function inputErrorClass(hasError: boolean) {
+  return hasError ? "border-error/60 focus:ring-error/40" : "";
+}
+
+function validateValueEntry(v: AttrValue, vt: ValueType): string | null {
+  if (!v.name.trim()) return "Value name is required.";
+  const val = v.value.trim();
+  if (vt === "Color") {
+    if (!val) return "Color hex is required.";
+    if (!HEX_RE.test(val)) return "Enter a valid hex color (e.g. #1565c0).";
+  } else if (vt === "Image") {
+    if (!val) return "Image URL or file is required.";
+  } else if (!val) {
+    return "Value is required.";
+  }
+  return null;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type ValueType = "Text" | "Color" | "Image";
 type AttrValue = { id: string; name: string; value: string };
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
-const MOCK_CATEGORIES = [
-  "Electronics", "Furniture", "Timepieces > Luxury", "Audio > Wireless",
-  "Footwear > Athletics", "Cameras > Instant", "Anniversary", "CGCategory",
-];
-
-const MOCK_BRANDS = [
-  "Cronos Ltd.", "SoundWave Co.", "Apex Footwear", "NovaCam", "FurniCraft",
-];
+function slugify(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
 
 /** Prefer `en`, then first non-empty locale (slug / export / toast). */
 function primaryLocaleName(values: Record<string, string>) {
@@ -55,36 +99,57 @@ function primaryLocaleName(values: Record<string, string>) {
   return "";
 }
 
-function buildInitialValues(row?: AttributeListRow): AttrValue[] {
-  if (!row) return [];
-  if (row.type === "COLOR") {
-    return [
-      { id: "v1", name: "Midnight Black", value: "#1a1a1a" },
-      { id: "v2", name: "Ocean Blue",     value: "#1565c0" },
-      { id: "v3", name: "Forest Green",   value: "#2e7d32" },
-    ];
-  }
-  if (row.type === "IMAGE") {
-    return [
-      { id: "v1", name: "Lifestyle Shot",  value: "lifestyle.jpg" },
-      { id: "v2", name: "Detail Close-up", value: "detail.jpg" },
-    ];
-  }
-  return [
-    { id: "v1", name: "Option A", value: "option_a" },
-    { id: "v2", name: "Option B", value: "option_b" },
-  ];
+function apiTypeToValueType(type?: AttributeListRow["type"]): ValueType {
+  if (type === "COLOR") return "Color";
+  if (type === "IMAGE") return "Image";
+  return "Text";
 }
 
-// ── Inline SearchablePicker (categories or brands) ────────────────────────────
+function isPersistedValueId(id: string): boolean {
+  return /^\d+$/.test(id);
+}
+
+function valueRowToAttrValue(row: AttributeValueRow, vt: ValueType): AttrValue {
+  let value = row.code;
+  if (vt === "Color") value = row.colorHex || row.code;
+  else if (vt === "Image") value = row.imageUrl || row.code;
+  return { id: String(row.id), name: row.name, value };
+}
+
+function attrValueToPayload(v: AttrValue, vt: ValueType, sortOrder: number) {
+  const code = vt === "Text" ? slugify(v.value) || slugify(v.name) : slugify(v.name);
+  if (vt === "Color") {
+    return { name: v.name.trim(), code, colorHex: v.value.trim(), sortOrder };
+  }
+  if (vt === "Image") {
+    return { name: v.name.trim(), code, imageUrl: v.value.trim(), sortOrder };
+  }
+  return { name: v.name.trim(), code, sortOrder };
+}
+
+// ── Mock data (Advanced tab only) ───────────────────────────────────────────
+type PickerOption = { key: string; label: string };
+
+function flattenCategoryNodes(nodes: CatNode[], prefix = ""): PickerOption[] {
+  const out: PickerOption[] = [];
+  for (const n of nodes) {
+    const label = prefix ? `${prefix} > ${n.name}` : n.name;
+    out.push({ key: String(n.id), label });
+    if (n.children?.length) out.push(...flattenCategoryNodes(n.children, label));
+  }
+  return out;
+}
+
 function SearchablePicker({
   label,
+  inputId,
   options,
   selected,
   onChange,
 }: {
   label: string;
-  options: string[];
+  inputId: string;
+  options: PickerOption[];
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
@@ -101,23 +166,27 @@ function SearchablePicker({
   }, []);
 
   const filtered = options.filter((o) =>
-    o.toLowerCase().includes(search.toLowerCase())
+    o.label.toLowerCase().includes(search.toLowerCase())
   );
 
-  function toggle(opt: string) {
+  function toggle(opt: PickerOption) {
     onChange(
-      selected.includes(opt)
-        ? selected.filter((s) => s !== opt)
-        : [...selected, opt]
+      selected.includes(opt.key)
+        ? selected.filter((s) => s !== opt.key)
+        : [...selected, opt.key]
     );
   }
+
+  const selectedLabels = selected
+    .map((key) => options.find((o) => o.key === key)?.label ?? key)
+    .filter(Boolean);
 
   return (
     <div ref={ref} className="relative space-y-1.5">
       <p className={labelBase}>{label}</p>
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {selected.map((s) => (
+          {selectedLabels.map((s) => (
             <span
               key={s}
               className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary"
@@ -125,7 +194,10 @@ function SearchablePicker({
               {s}
               <button
                 type="button"
-                onClick={() => toggle(s)}
+                onClick={() => {
+                  const opt = options.find((o) => o.label === s);
+                  if (opt) toggle(opt);
+                }}
                 className="rounded p-0.5 hover:bg-primary/20 transition-colors"
               >
                 <IconClose className="h-2.5 w-2.5" />
@@ -151,6 +223,8 @@ function SearchablePicker({
         <div className="absolute left-0 top-full z-30 mt-1 w-full overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
           <div className="border-b border-outline-variant/10 p-2">
             <input
+              id={`${inputId}-search`}
+              name={`${inputId}-search`}
               autoFocus
               type="text"
               placeholder="Search…"
@@ -165,16 +239,16 @@ function SearchablePicker({
             ) : (
               filtered.map((opt) => (
                 <label
-                  key={opt}
+                  key={opt.key}
                   className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-surface-container transition-colors select-none"
                 >
                   <input
                     type="checkbox"
                     className="h-3.5 w-3.5 accent-primary"
-                    checked={selected.includes(opt)}
+                    checked={selected.includes(opt.key)}
                     onChange={() => toggle(opt)}
                   />
-                  <span className="text-xs text-on-surface">{opt}</span>
+                  <span className="text-xs text-on-surface">{opt.label}</span>
                 </label>
               ))
             )}
@@ -204,10 +278,10 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
   }));
   const [code, setCode] = useState(attribute?.code ?? "");
   const [searchFilterOnly, setSearchFilterOnly] = useState(attribute?.required ?? false);
-  const [valueType, setValueType] = useState<ValueType>(
-    attribute?.type === "COLOR" ? "Color" : attribute?.type === "IMAGE" ? "Image" : "Text"
-  );
-  const [values, setValues] = useState<AttrValue[]>(buildInitialValues(attribute));
+  const [valueType, setValueType] = useState<ValueType>(() => apiTypeToValueType(attribute?.type));
+  const [values, setValues] = useState<AttrValue[]>([]);
+  const [valuesLoading, setValuesLoading] = useState(false);
+  const [valueSaving, setValueSaving] = useState(false);
 
   // Add-value inline form
   const [addingValue, setAddingValue] = useState(false);
@@ -217,8 +291,11 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
 
   // ── Advanced state ────────────────────────────────────────────────────────
   const [useAsSearchFilter, setUseAsSearchFilter] = useState(false);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [selectedBrandCodes, setSelectedBrandCodes] = useState<string[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<PickerOption[]>([]);
+  const [brandOptions, setBrandOptions] = useState<PickerOption[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // ── Generate Forms dropdown ───────────────────────────────────────────────
   const [genFormsOpen, setGenFormsOpen] = useState(false);
@@ -245,11 +322,85 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
 
   // ── Toast ─────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>(EMPTY_FIELD_ERRORS);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Load category / brand pickers for Advanced tab
+  useEffect(() => {
+    if (!tenantId) return;
+    let cancelled = false;
+    Promise.all([fetchCategories(tenantId, authToken), fetchBrands(tenantId, { pageSize: 200 }, authToken)])
+      .then(([cats, brandsResult]) => {
+        if (cancelled) return;
+        setCategoryOptions(flattenCategoryNodes(cats));
+        setBrandOptions(brandsResult.rows.map((b) => ({ key: b.code, label: b.name })));
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("[EditAttributePage] load pickers failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, authToken]);
+
+  // Load full attribute (advanced settings) when editing via API
+  useEffect(() => {
+    if (!tenantId || !attribute?.id || isAdd) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    fetchAttribute(tenantId, attribute.id, authToken)
+      .then((detail) => {
+        if (cancelled) return;
+        setUseAsSearchFilter(Boolean(detail.useAsSearchFilter));
+        setSelectedCategoryIds((detail.searchFilterCategoryIds ?? []).map(String));
+        setSelectedBrandCodes(detail.searchFilterBrandCodes ?? []);
+        if (detail.required !== undefined) setSearchFilterOnly(detail.required);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("[EditAttributePage] fetch attribute failed", err);
+          setToast("Could not load attribute settings.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, attribute?.id, authToken, isAdd]);
+
+  // Load persisted values when editing via API
+  useEffect(() => {
+    if (!tenantId || !attribute?.id || isAdd) {
+      setValues([]);
+      return;
+    }
+    let cancelled = false;
+    setValuesLoading(true);
+    fetchAttributeValues(tenantId, attribute.id, authToken)
+      .then((rows) => {
+        if (!cancelled) {
+          setValues(rows.map((r) => valueRowToAttrValue(r, apiTypeToValueType(attribute.type))));
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("[EditAttributePage] fetch values failed", err);
+          setToast("Could not load attribute values.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setValuesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, attribute?.id, attribute?.type, authToken, isAdd]);
 
   // ── Auto-slug code from name ──────────────────────────────────────────────
   function handleNameBlur(values: Record<string, string>) {
@@ -269,23 +420,128 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
     );
   }
 
+  function validateAll(): { errors: FieldErrors; firstErrorTab: "general" | "advanced" | null } {
+    const general: GeneralFieldErrors = {};
+    const advanced: AdvancedFieldErrors = {};
+
+    const labelName = primaryLocaleName(nameLocales);
+    if (!labelName) general.name = "Name is required.";
+
+    const normalizedCode = (code.trim() || (labelName ? slugify(labelName) : "")).trim().toLowerCase();
+    if (!normalizedCode) general.code = "Code is required.";
+    else if (normalizedCode.length > 100) general.code = "Code must be 100 characters or fewer.";
+    else if (!CODE_RE.test(normalizedCode)) {
+      general.code = "Use snake_case starting with a letter (e.g. color_primary).";
+    }
+
+    if (addingValue && (draftValueName.trim() || draftValue.trim())) {
+      general.values = 'Finish adding the value or click "Cancel" before saving.';
+    } else {
+      for (const v of values) {
+        const valueErr = validateValueEntry(v, valueType);
+        if (valueErr) {
+          general.values = `"${v.name || "Value"}": ${valueErr}`;
+          break;
+        }
+      }
+      if (!general.values) {
+        const seenCodes = new Set<string>();
+        for (const v of values) {
+          const key = valueType === "Text" ? slugify(v.value) || slugify(v.name) : slugify(v.name);
+          if (seenCodes.has(key)) {
+            general.values = `Duplicate value code "${key}". Each value must be unique.`;
+            break;
+          }
+          seenCodes.add(key);
+        }
+      }
+    }
+
+    if (useAsSearchFilter && selectedCategoryIds.length === 0 && selectedBrandCodes.length === 0) {
+      advanced.searchFilter =
+        "Select at least one category or brand when using this attribute as a search filter.";
+    }
+
+    const errors: FieldErrors = { general, advanced };
+    const firstErrorTab = Object.keys(general).length > 0
+      ? "general"
+      : Object.keys(advanced).length > 0
+        ? "advanced"
+        : null;
+    return { errors, firstErrorTab };
+  }
+
+  function clearGeneralError(key: keyof GeneralFieldErrors) {
+    setFieldErrors((prev) => {
+      if (!prev.general[key]) return prev;
+      const nextGeneral = { ...prev.general };
+      delete nextGeneral[key];
+      return { ...prev, general: nextGeneral };
+    });
+  }
+
+  function clearAdvancedError(key: keyof AdvancedFieldErrors) {
+    setFieldErrors((prev) => {
+      if (!prev.advanced[key]) return prev;
+      const nextAdvanced = { ...prev.advanced };
+      delete nextAdvanced[key];
+      return { ...prev, advanced: nextAdvanced };
+    });
+  }
+
+  async function persistPendingValues(attributeId: number) {
+    if (!tenantId || values.length === 0) return;
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (isPersistedValueId(v.id)) continue;
+      await createAttributeValue(
+        tenantId,
+        attributeId,
+        attrValueToPayload(v, valueType, i),
+        authToken
+      );
+    }
+  }
+
   // ── Save ──────────────────────────────────────────────────────────────────
   async function handleSave() {
     setActionsOpen(false);
-    const labelName = primaryLocaleName(nameLocales) || "Attribute";
+
+    const { errors, firstErrorTab } = validateAll();
+    if (firstErrorTab) {
+      setFieldErrors(errors);
+      setTab(firstErrorTab);
+      setToast("Please fix the highlighted fields before saving.");
+      return;
+    }
+    setFieldErrors(EMPTY_FIELD_ERRORS);
+
+    const labelName = primaryLocaleName(nameLocales);
+    if (!labelName) {
+      setFieldErrors({ general: { name: "Name is required." }, advanced: {} });
+      setTab("general");
+      setToast("Please fix the highlighted fields before saving.");
+      return;
+    }
+
+    const normalizedCode = (code.trim() || slugify(labelName)).trim().toLowerCase();
     const apiType = valueType === "Color" ? "COLOR" : valueType === "Image" ? "IMAGE" : "TEXT";
     const payload = {
       name: labelName,
-      code: code || labelName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+      code: normalizedCode,
       type: apiType as "TEXT" | "COLOR" | "IMAGE" | "SELECT" | "BOOLEAN",
       required: searchFilterOnly,
       sortOrder: 0,
+      useAsSearchFilter,
+      searchFilterCategoryIds: selectedCategoryIds.map((id) => Number(id)).filter((id) => id > 0),
+      searchFilterBrandCodes: selectedBrandCodes,
     };
 
     if (tenantId) {
       try {
         if (isAdd) {
-          await createAttribute(tenantId, payload, authToken);
+          const created = await createAttribute(tenantId, payload, authToken);
+          if (created.id) await persistPendingValues(created.id);
         } else if (attribute?.id) {
           await updateAttribute(tenantId, attribute.id, payload, authToken);
         }
@@ -317,26 +573,81 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
   function cancelValueForm() {
     setAddingValue(false);
     setEditingValueId(null);
+    clearGeneralError("values");
   }
 
-  function saveValue() {
+  async function saveValue() {
     if (!draftValueName.trim()) return;
-    if (valueType === "Image" && !draftValue.trim()) {
-      setToast("Add an image (upload) or paste a URL / filename for the value.");
+    const draft: AttrValue = {
+      id: editingValueId ?? `temp-${Date.now()}`,
+      name: draftValueName.trim(),
+      value: draftValue,
+    };
+    const valueErr = validateValueEntry(draft, valueType);
+    if (valueErr) {
+      setToast(valueErr);
       return;
     }
+    clearGeneralError("values");
+    const sortOrder = editingValueId
+      ? values.findIndex((v) => v.id === editingValueId)
+      : values.length;
+
+    if (tenantId && attribute?.id && !isAdd) {
+      setValueSaving(true);
+      try {
+        const payload = attrValueToPayload(draft, valueType, Math.max(0, sortOrder));
+        if (editingValueId && isPersistedValueId(editingValueId)) {
+          const updated = await updateAttributeValue(
+            tenantId,
+            attribute.id,
+            Number(editingValueId),
+            payload,
+            authToken
+          );
+          setValues((prev) =>
+            prev.map((v) =>
+              v.id === editingValueId ? valueRowToAttrValue(updated, valueType) : v
+            )
+          );
+        } else {
+          const created = await createAttributeValue(tenantId, attribute.id, payload, authToken);
+          setValues((prev) => [...prev, valueRowToAttrValue(created, valueType)]);
+        }
+        setAddingValue(false);
+        setEditingValueId(null);
+      } catch (err) {
+        setToast(`Save value failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      } finally {
+        setValueSaving(false);
+      }
+      return;
+    }
+
     if (editingValueId) {
       setValues((prev) =>
-        prev.map((v) => v.id === editingValueId ? { ...v, name: draftValueName, value: draftValue } : v)
+        prev.map((v) => (v.id === editingValueId ? { ...v, name: draft.name, value: draft.value } : v))
       );
     } else {
-      setValues((prev) => [...prev, { id: `v${Date.now()}`, name: draftValueName, value: draftValue }]);
+      setValues((prev) => [...prev, draft]);
     }
     setAddingValue(false);
     setEditingValueId(null);
   }
 
-  function deleteValue(id: string) {
+  async function deleteValue(id: string) {
+    if (tenantId && attribute?.id && !isAdd && isPersistedValueId(id)) {
+      setValueSaving(true);
+      try {
+        await deleteAttributeValue(tenantId, attribute.id, Number(id), authToken);
+        setValues((prev) => prev.filter((v) => v.id !== id));
+      } catch (err) {
+        setToast(`Delete value failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      } finally {
+        setValueSaving(false);
+      }
+      return;
+    }
     setValues((prev) => prev.filter((v) => v.id !== id));
   }
 
@@ -521,7 +832,10 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
               <IconChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${actionsOpen ? "rotate-180" : ""}`} />
             </button>
             {actionsOpen && (
-              <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl">
+              <div
+                className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-outline-variant/20 bg-surface-container-lowest shadow-xl"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-xs font-medium text-on-surface hover:bg-surface-container transition-colors"
@@ -538,16 +852,25 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
 
       {/* ── Tabs ────────────────────────────────────────────────────────── */}
       <div className="flex shrink-0 gap-0 border-b border-outline-variant/15 bg-surface px-6">
-        {(["general", "advanced"] as const).map((t) => (
+        {(["general", "advanced"] as const).map((t) => {
+          const hasErrors =
+            t === "general"
+              ? Object.keys(fieldErrors.general).length > 0
+              : Object.keys(fieldErrors.advanced).length > 0;
+          return (
           <button
             key={t}
             type="button"
-            className={`${tabBase} ${tab === t ? tabActive : tabInactive}`}
+            className={`${tabBase} ${tab === t ? tabActive : tabInactive} flex items-center gap-1.5`}
             onClick={() => setTab(t)}
           >
             {t === "general" ? "General" : "Advanced"}
+            {hasErrors && (
+              <span className="h-1.5 w-1.5 rounded-full bg-error" aria-label="Has validation errors" />
+            )}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {/* ── Body ────────────────────────────────────────────────────────── */}
@@ -561,40 +884,61 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
               <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-on-surface">Attribute Information</h3>
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 {/* Name */}
-                <MultiLangInput
-                  label="Name"
-                  requiredMark
-                  defaultValues={nameLocales}
-                  onValuesChange={setNameLocales}
-                  onBlur={handleNameBlur}
-                  placeholders={{
-                    en: "e.g. Primary Color",
-                    vn: "vd. Màu chính",
-                    zh: "例如：主色",
-                    ja: "例：プライマリカラー",
-                  }}
-                  hint="Displayed in the eStore."
-                />
+                <div>
+                  <MultiLangInput
+                    label="Name"
+                    requiredMark
+                    inputId="attribute-name"
+                    defaultValues={nameLocales}
+                    onValuesChange={(next) => {
+                      setNameLocales(next);
+                      clearGeneralError("name");
+                    }}
+                    onBlur={handleNameBlur}
+                    placeholders={{
+                      en: "e.g. Primary Color",
+                      vn: "vd. Màu chính",
+                      zh: "例如：主色",
+                      ja: "例：プライマリカラー",
+                    }}
+                    hint="Displayed in the eStore."
+                    inputClassName={inputErrorClass(!!fieldErrors.general.name)}
+                  />
+                  {fieldErrors.general.name && (
+                    <p className="mt-1 text-[10px] text-error">{fieldErrors.general.name}</p>
+                  )}
+                </div>
 
                 {/* Code */}
                 <div>
-                  <label className={labelBase}>Code <span className="text-error">*</span></label>
+                  <label className={labelBase} htmlFor="attribute-code">Code <span className="text-error">*</span></label>
                   <input
+                    id="attribute-code"
+                    name="attribute-code"
                     type="text"
-                    className={inputBase}
+                    className={`${inputBase} ${inputErrorClass(!!fieldErrors.general.code)}`}
                     placeholder="e.g. color_primary"
                     value={code}
-                    onChange={(e) => setCode(e.target.value)}
+                    onChange={(e) => {
+                      setCode(e.target.value);
+                      clearGeneralError("code");
+                    }}
                   />
-                  <p className="mt-1 text-[10px] text-on-surface-variant">
-                    Auto-generated from Name; must be unique.
-                  </p>
+                  {fieldErrors.general.code ? (
+                    <p className="mt-1 text-[10px] text-error">{fieldErrors.general.code}</p>
+                  ) : (
+                    <p className="mt-1 text-[10px] text-on-surface-variant">
+                      Auto-generated from Name; must be unique.
+                    </p>
+                  )}
                 </div>
 
                 {/* Search Filter Only */}
                 <div className="md:col-span-2">
                   <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/20 bg-surface-container-low p-4 hover:border-primary/30 transition-colors select-none">
                     <input
+                      id="attribute-search-filter-only"
+                      name="attribute-search-filter-only"
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 accent-primary shrink-0"
                       checked={searchFilterOnly}
@@ -612,7 +956,17 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
             </section>
 
             {/* Attribute Values */}
-            <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
+            <section className={`relative rounded-xl border bg-surface-container-lowest shadow-sm ${fieldErrors.general.values ? "border-error/40" : "border-outline-variant/10"}`}>
+              {valuesLoading && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-surface/60 backdrop-blur-sm">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                </div>
+              )}
+              {fieldErrors.general.values && (
+                <div className="border-b border-error/20 bg-error-container/30 px-6 py-2.5 text-xs text-error">
+                  {fieldErrors.general.values}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-4 border-b border-outline-variant/10 px-6 py-4">
                 <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface">Attribute Values</h3>
 
@@ -620,6 +974,8 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
                 <div className="ml-auto flex items-center gap-2">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Value Type:</label>
                   <select
+                    id="attribute-value-type"
+                    name="attribute-value-type"
                     className={`${selectBase} text-xs`}
                     value={valueType}
                     onChange={(e) => setValueType(e.target.value as ValueType)}
@@ -651,7 +1007,8 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
                             <button
                               type="button"
                               title="Edit"
-                              className="rounded p-1.5 text-on-surface-variant hover:bg-primary/10 hover:text-primary transition-colors"
+                              className="rounded p-1.5 text-on-surface-variant hover:bg-primary/10 hover:text-primary transition-colors disabled:opacity-40"
+                              disabled={valueSaving}
                               onClick={() => openEditValue(v)}
                             >
                               <IconEdit className="h-3.5 w-3.5" />
@@ -659,8 +1016,9 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
                             <button
                               type="button"
                               title="Delete"
-                              className="rounded p-1.5 text-on-surface-variant hover:bg-error/10 hover:text-error transition-colors"
-                              onClick={() => deleteValue(v.id)}
+                              className="rounded p-1.5 text-on-surface-variant hover:bg-error/10 hover:text-error transition-colors disabled:opacity-40"
+                              disabled={valueSaving}
+                              onClick={() => void deleteValue(v.id)}
                             >
                               <IconDelete className="h-3.5 w-3.5" />
                             </button>
@@ -704,8 +1062,8 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
                             <button
                               type="button"
                               className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-[10px] font-bold uppercase text-on-primary hover:opacity-90 transition-opacity disabled:opacity-40"
-                              disabled={!draftValueName.trim()}
-                              onClick={saveValue}
+                              disabled={!draftValueName.trim() || valueSaving}
+                              onClick={() => void saveValue()}
                             >
                               <IconCheckCircle className="h-3 w-3 shrink-0" />
                               Save Changes
@@ -723,7 +1081,8 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
                 <div className="border-t border-outline-variant/10 px-6 py-4">
                   <button
                     type="button"
-                    className="flex items-center gap-2 rounded-md border border-primary/30 px-4 py-2 text-xs font-bold text-primary transition-colors hover:bg-primary/5"
+                    className="flex items-center gap-2 rounded-md border border-primary/30 px-4 py-2 text-xs font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-40"
+                    disabled={valuesLoading || valueSaving}
                     onClick={openAddValue}
                   >
                     <IconAddCircle className="h-4 w-4 shrink-0" />
@@ -737,40 +1096,58 @@ export function EditAttributePage({ mode, attribute, onBack, tenantId, authToken
 
         {/* ══ ADVANCED TAB ═════════════════════════════════════════════════ */}
         {tab === "advanced" && (
-          <section className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-sm">
+          <section className={`relative rounded-xl border bg-surface-container-lowest p-6 shadow-sm ${fieldErrors.advanced.searchFilter ? "border-error/40" : "border-outline-variant/10"}`}>
+            {detailLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-surface/60 backdrop-blur-sm">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              </div>
+            )}
             <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-on-surface">Product Listing Search</h3>
 
             <div className="space-y-6">
-              {/* Use as Search Filter */}
-              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/20 bg-surface-container-low p-4 hover:border-primary/30 transition-colors select-none">
+              <label className={`flex cursor-pointer items-start gap-3 rounded-lg border bg-surface-container-low p-4 hover:border-primary/30 transition-colors select-none ${fieldErrors.advanced.searchFilter ? "border-error/40" : "border-outline-variant/20"}`}>
                 <input
+                  id="attribute-use-as-search-filter"
+                  name="attribute-use-as-search-filter"
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 accent-primary shrink-0"
                   checked={useAsSearchFilter}
-                  onChange={(e) => setUseAsSearchFilter(e.target.checked)}
+                  onChange={(e) => {
+                    setUseAsSearchFilter(e.target.checked);
+                    clearAdvancedError("searchFilter");
+                  }}
                 />
                 <div>
                   <p className="text-xs font-bold text-on-surface">Use as Search Filter</p>
                   <p className="mt-0.5 text-[10px] text-on-surface-variant leading-relaxed">
                     Use this attribute as a search filter for the selected categories and brands.
                   </p>
+                  {fieldErrors.advanced.searchFilter && (
+                    <p className="mt-2 text-[10px] text-error">{fieldErrors.advanced.searchFilter}</p>
+                  )}
                 </div>
               </label>
 
-              {/* Selected Categories */}
               <SearchablePicker
                 label="Selected Categories"
-                options={MOCK_CATEGORIES}
-                selected={selectedCategories}
-                onChange={setSelectedCategories}
+                inputId="attribute-categories"
+                options={categoryOptions}
+                selected={selectedCategoryIds}
+                onChange={(next) => {
+                  setSelectedCategoryIds(next);
+                  clearAdvancedError("searchFilter");
+                }}
               />
 
-              {/* Selected Brands */}
               <SearchablePicker
                 label="Selected Brands"
-                options={MOCK_BRANDS}
-                selected={selectedBrands}
-                onChange={setSelectedBrands}
+                inputId="attribute-brands"
+                options={brandOptions}
+                selected={selectedBrandCodes}
+                onChange={(next) => {
+                  setSelectedBrandCodes(next);
+                  clearAdvancedError("searchFilter");
+                }}
               />
             </div>
           </section>

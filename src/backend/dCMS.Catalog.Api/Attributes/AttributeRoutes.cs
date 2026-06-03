@@ -33,6 +33,7 @@ public static class AttributeRoutes
         Auth(g.MapPost("{id:int}/values",                    CreateValue),  auth, write: true);
         Auth(g.MapPut("{id:int}/values/{valueId:int}",       UpdateValue),  auth, write: true);
         Auth(g.MapDelete("{id:int}/values/{valueId:int}",    DeleteValue),  auth, write: true);
+        Auth(g.MapPost("import-values",                      ImportValues), auth, write: true);
     }
 
     private static RouteHandlerBuilder Auth(RouteHandlerBuilder b, bool authEnabled, bool write) =>
@@ -53,6 +54,9 @@ public static class AttributeRoutes
         int    SortOrder,
         DateTimeOffset CreatedAt,
         DateTimeOffset UpdatedAt,
+        bool   UseAsSearchFilter,
+        IReadOnlyList<int> SearchFilterCategoryIds,
+        IReadOnlyList<string> SearchFilterBrandCodes,
         IReadOnlyList<AttributeValueDto>? Values = null);
 
     private sealed record AttributeValueDto(
@@ -71,7 +75,17 @@ public static class AttributeRoutes
         string  Type        = "TEXT",
         bool    Required    = false,
         string? Description = null,
-        int     SortOrder   = 0);
+        int     SortOrder   = 0,
+        bool    UseAsSearchFilter = false,
+        int[]?  SearchFilterCategoryIds = null,
+        string[]? SearchFilterBrandCodes = null);
+
+    private sealed record ImportValuesRequest(ImportValuesRow[]? Rows);
+
+    private sealed record ImportValuesRow(
+        string   AttributeCode,
+        string[] Values,
+        string   Action = "Merge");
 
     private sealed record ValueWriteRequest(
         string  Name,
@@ -82,7 +96,53 @@ public static class AttributeRoutes
 
     private static AttributeDto ToDto(CatalogAttributeRow a, IReadOnlyList<CatalogAttributeValueRow>? values = null) =>
         new(a.Id, a.TenantId, a.Name, a.Code, a.Type, a.Required, a.Description, a.SortOrder, a.CreatedAt, a.UpdatedAt,
+            a.UseAsSearchFilter, a.CategoryFilterIds.ToList(), a.BrandFilterCodes.ToList(),
             values?.Select(ToValueDto).ToList());
+
+    private static CatalogAttributeRow ApplyWriteRequest(CatalogAttributeRow? existing, string tenantId,
+        AttributeWriteRequest body)
+    {
+        var normalizedCode = body.Code.Trim().ToLowerInvariant();
+        var categoryIds = (body.SearchFilterCategoryIds ?? []).Where(i => i > 0).Distinct().ToList();
+        var brandCodes = (body.SearchFilterBrandCodes ?? [])
+            .Select(c => c.Trim())
+            .Where(c => c.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var now = DateTimeOffset.UtcNow;
+
+        if (existing is null)
+        {
+            return new CatalogAttributeRow(0, tenantId, body.Name.Trim(), normalizedCode,
+                body.Type.ToUpperInvariant(), body.Required, body.Description ?? "", body.SortOrder,
+                now, now, body.UseAsSearchFilter, categoryIds, brandCodes);
+        }
+
+        return existing with
+        {
+            Name = body.Name.Trim(),
+            Code = normalizedCode,
+            Type = body.Type.ToUpperInvariant(),
+            Required = body.Required,
+            Description = body.Description ?? existing.Description,
+            SortOrder = body.SortOrder,
+            UpdatedAt = now,
+            UseAsSearchFilter = body.UseAsSearchFilter,
+            SearchFilterCategoryIds = categoryIds,
+            SearchFilterBrandCodes = brandCodes,
+        };
+    }
+
+    private static IResult? ValidateSearchFilter(AttributeWriteRequest body)
+    {
+        if (!body.UseAsSearchFilter) return null;
+        var hasCategories = body.SearchFilterCategoryIds is { Length: > 0 };
+        var hasBrands = body.SearchFilterBrandCodes is { Length: > 0 };
+        if (hasCategories || hasBrands) return null;
+        return ApiEnvelope.Error("validation_error",
+            "Select at least one category or brand when using this attribute as a search filter.",
+            StatusCodes.Status400BadRequest);
+    }
 
     private static AttributeValueDto ToValueDto(CatalogAttributeValueRow v) =>
         new(v.Id, v.AttributeId, v.Name, v.Code, v.ColorHex, v.ImageUrl, v.SortOrder, v.CreatedAt);
@@ -132,9 +192,10 @@ public static class AttributeRoutes
         if (await catalog.AttributeCodeExistsAsync(tenantId, normalizedCode, null, cancellationToken).ConfigureAwait(false))
             return ApiEnvelope.Error("conflict", $"Attribute code '{normalizedCode}' already exists.", StatusCodes.Status409Conflict);
 
-        var now = DateTimeOffset.UtcNow;
-        var row = new CatalogAttributeRow(0, tenantId, body.Name.Trim(), normalizedCode,
-            body.Type.ToUpperInvariant(), body.Required, body.Description ?? "", body.SortOrder, now, now);
+        var filterError = ValidateSearchFilter(body);
+        if (filterError is not null) return filterError;
+
+        var row = ApplyWriteRequest(null, tenantId, body);
 
         var newId = await catalog.CreateAttributeAsync(row, cancellationToken).ConfigureAwait(false);
         var created = await catalog.GetAttributeByIdAsync(newId, tenantId, cancellationToken).ConfigureAwait(false);
@@ -168,13 +229,10 @@ public static class AttributeRoutes
             await catalog.AttributeCodeExistsAsync(tenantId, normalizedCode, id, cancellationToken).ConfigureAwait(false))
             return ApiEnvelope.Error("conflict", $"Code '{normalizedCode}' already exists.", StatusCodes.Status409Conflict);
 
-        var updated = existing with
-        {
-            Name = body.Name.Trim(), Code = normalizedCode,
-            Type = body.Type.ToUpperInvariant(), Required = body.Required,
-            Description = body.Description ?? existing.Description, SortOrder = body.SortOrder,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
+        var filterError = ValidateSearchFilter(body);
+        if (filterError is not null) return filterError;
+
+        var updated = ApplyWriteRequest(existing, tenantId, body);
         await catalog.UpdateAttributeAsync(updated, cancellationToken).ConfigureAwait(false);
         return ApiEnvelope.Ok(ToDto(updated));
     }
@@ -249,5 +307,28 @@ public static class AttributeRoutes
         return deleted
             ? Results.NoContent()
             : ApiEnvelope.Error("not_found", $"Value {valueId} not found.", StatusCodes.Status404NotFound);
+    }
+
+    private static async Task<IResult> ImportValues(
+        string tenantId,
+        [FromBody] ImportValuesRequest body,
+        ICatalogPersistence catalog,
+        CancellationToken cancellationToken = default)
+    {
+        var rows = body.Rows ?? [];
+        if (rows.Length == 0)
+            return ApiEnvelope.Error("validation_error", "At least one import row is required.", StatusCodes.Status400BadRequest);
+
+        if (rows.Length > 500)
+            return ApiEnvelope.Error("validation_error", "Maximum 500 rows per import.", StatusCodes.Status400BadRequest);
+
+        var inputs = rows.Select(r => new AttributeImportRowInput(
+            (r.AttributeCode ?? string.Empty).Trim().ToLowerInvariant(),
+            r.Values ?? [],
+            string.IsNullOrWhiteSpace(r.Action) ? "Merge" : r.Action.Trim())).ToList();
+
+        var result = await catalog.ImportAttributeValuesAsync(tenantId, inputs, cancellationToken)
+            .ConfigureAwait(false);
+        return ApiEnvelope.Ok(result, new { total = rows.Length });
     }
 }
