@@ -3,8 +3,10 @@ import { deleteTemplate, listTemplates, previewTemplate, putTemplate, type Templ
 import { useLanguages } from "../LanguageContext";
 import {
   buildEffectiveCatalog,
+  deleteCatalogEntry,
   fetchTemplateCatalog,
   TEMPLATE_CATALOG,
+  upsertCatalogEntry,
   type TemplateCatalogEntry,
   type TemplateVar,
 } from "../templateCatalog";
@@ -196,6 +198,15 @@ export function TemplatesPage({ tenantId, storeId, authToken }: Props) {
 
   const subjectRef = useRef<HTMLInputElement>(null);
 
+  // ── Message-type management (settings) state ──
+  const [mode, setMode] = useState<"content" | "settings">("content");
+  const [creating, setCreating] = useState(false);
+  const [defName, setDefName] = useState("");
+  const [defDescription, setDefDescription] = useState("");
+  const [defKey, setDefKey] = useState("");
+  const [defChannel, setDefChannel] = useState<TemplateRow["channel"]>("email");
+  const [defVars, setDefVars] = useState<TemplateVar[]>([]);
+
   const rowFor = useCallback(
     (e: TemplateCatalogEntry, iso: string) =>
       rows.find((r) => r.key === e.key && r.locale === iso && r.channel === e.channel && r.tenantId === (tenantId ?? null)),
@@ -215,6 +226,115 @@ export function TemplatesPage({ tenantId, storeId, authToken }: Props) {
     if (!tenantId) return;
     const data = await listTemplates(tenantId, storeId, authToken);
     setRows(data);
+  }
+
+  async function refreshCatalog(): Promise<TemplateCatalogEntry[]> {
+    if (!tenantId) return catalogBase;
+    const entries = await fetchTemplateCatalog(tenantId, storeId, authToken);
+    if (entries.length) setCatalogBase(entries);
+    return entries;
+  }
+
+  // ── Settings (message-type) actions ──
+  function openSettings() {
+    if (!entry) return;
+    setCreating(false);
+    setDefName(entry.name);
+    setDefDescription(entry.description);
+    setDefKey(entry.key);
+    setDefChannel(entry.channel);
+    setDefVars(entry.variables.map((v) => ({ ...v })));
+    setError(null);
+    setNotice(null);
+    setMode("settings");
+  }
+
+  function newMessage() {
+    setCreating(true);
+    setDefName("");
+    setDefDescription("");
+    setDefKey("");
+    setDefChannel("email");
+    setDefVars([{ path: "", label: "", sample: "" }]);
+    setError(null);
+    setNotice(null);
+    setMode("settings");
+  }
+
+  function patchVar(i: number, patch: Partial<TemplateVar>) {
+    setDefVars((prev) => prev.map((v, idx) => (idx === i ? { ...v, ...patch } : v)));
+  }
+  function addVar() {
+    setDefVars((prev) => [...prev, { path: "", label: "", sample: "" }]);
+  }
+  function removeVar(i: number) {
+    setDefVars((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  async function handleSaveSettings() {
+    if (!tenantId) return;
+    const name = defName.trim();
+    const key = defKey.trim();
+    if (!name) {
+      setError("Message name is required.");
+      return;
+    }
+    if (!key) {
+      setError("Message key is required (e.g. order.confirmation).");
+      return;
+    }
+    const cleanVars = defVars
+      .map((v) => ({ path: v.path.trim(), label: (v.label || v.path).trim(), sample: v.sample }))
+      .filter((v) => v.path);
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await upsertCatalogEntry(
+        tenantId,
+        storeId,
+        {
+          name,
+          description: defDescription.trim(),
+          key,
+          channel: defChannel,
+          variables: cleanVars,
+          defaultSubject: creating ? undefined : entry?.defaultSubject,
+          defaultBody: creating ? undefined : entry?.defaultBody,
+        },
+        authToken,
+      );
+      await refreshCatalog();
+      setSelectedId(`${key}|${defChannel}`);
+      setActiveIso("");
+      setMode("content");
+      setNotice(creating ? "Message created." : "Message settings saved.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save message settings");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteMessage() {
+    if (!tenantId || !entry || creating) return;
+    if (!window.confirm(`Delete the “${entry.name}” message type and all of its saved content? This cannot be undone.`)) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await deleteCatalogEntry(tenantId, storeId, { key: entry.key, channel: entry.channel }, authToken);
+      const entries = await refreshCatalog();
+      await refresh();
+      setSelectedId(entries[0]?.id ?? "");
+      setActiveIso("");
+      setMode("content");
+      setNotice("Message deleted.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete message");
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Initial load
@@ -394,29 +514,190 @@ export function TemplatesPage({ tenantId, storeId, authToken }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40"
-            disabled={!tenantId || loading || busy || !existing}
-            onClick={handleDelete}
-            title={existing ? "Delete your customised version (revert to system default)" : "No customised version to reset"}
-          >
-            Reset to default
-          </button>
-          <button
-            type="button"
-            className="rounded-md bg-primary px-4 py-2 text-xs font-semibold text-on-primary hover:bg-primary/90 disabled:opacity-50"
-            disabled={!tenantId || loading || busy}
-            onClick={handleSave}
-          >
-            {busy ? "Saving…" : "Save"}
-          </button>
+          {mode === "content" ? (
+            <>
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 bg-white px-3 py-2 text-xs font-semibold text-on-surface hover:bg-stone-50 disabled:opacity-40"
+                disabled={!tenantId || loading || busy}
+                onClick={newMessage}
+              >
+                + New message
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40"
+                disabled={!tenantId || loading || busy || !existing}
+                onClick={handleDelete}
+                title={existing ? "Delete your customised version (revert to system default)" : "No customised version to reset"}
+              >
+                Reset to default
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-4 py-2 text-xs font-semibold text-on-primary hover:bg-primary/90 disabled:opacity-50"
+                disabled={!tenantId || loading || busy}
+                onClick={handleSave}
+              >
+                {busy ? "Saving…" : "Save"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="rounded-md border border-outline-variant/30 bg-white px-3 py-2 text-xs font-semibold text-on-surface hover:bg-stone-50 disabled:opacity-40"
+                disabled={busy}
+                onClick={() => {
+                  setMode("content");
+                  setError(null);
+                }}
+              >
+                Cancel
+              </button>
+              {!creating ? (
+                <button
+                  type="button"
+                  className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40"
+                  disabled={busy}
+                  onClick={handleDeleteMessage}
+                >
+                  Delete message
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="rounded-md bg-primary px-4 py-2 text-xs font-semibold text-on-primary hover:bg-primary/90 disabled:opacity-50"
+                disabled={busy}
+                onClick={handleSaveSettings}
+              >
+                {busy ? "Saving…" : creating ? "Create message" : "Save settings"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div> : null}
       {notice ? <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">{notice}</div> : null}
 
+      {mode === "settings" ? (
+        <div className="mx-auto max-w-3xl space-y-4 rounded-xl border border-outline-variant/30 bg-surface p-5">
+          <div>
+            <h2 className="text-sm font-bold text-on-surface">{creating ? "New message" : `Settings — ${entry?.name}`}</h2>
+            <p className="text-[11px] text-on-surface-variant">
+              Define the message and the personalisation variables operators can insert.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Name</label>
+              <input
+                className="w-full rounded-md border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-primary"
+                value={defName}
+                onChange={(e) => setDefName(e.target.value)}
+                placeholder="e.g. Order Confirmation"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Channel</label>
+              <select
+                className="w-full rounded-md border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
+                value={defChannel}
+                disabled={!creating}
+                onChange={(e) => setDefChannel(e.target.value as TemplateRow["channel"])}
+              >
+                {(["email", "sms", "print", "admin"] as TemplateRow["channel"][]).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Description</label>
+              <input
+                className="w-full rounded-md border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-primary"
+                value={defDescription}
+                onChange={(e) => setDefDescription(e.target.value)}
+                placeholder="When is this message sent?"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                Key {creating ? <span className="text-green-600">(technical id — cannot change later)</span> : <span className="text-on-surface-variant/60">(fixed)</span>}
+              </label>
+              <input
+                className="w-full rounded-md border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs font-mono outline-none focus:ring-1 focus:ring-primary disabled:opacity-60"
+                value={defKey}
+                disabled={!creating}
+                onChange={(e) => setDefKey(e.target.value)}
+                placeholder="order.confirmation"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Variables</label>
+              <button
+                type="button"
+                className="rounded border border-outline-variant/30 bg-surface px-2 py-1 text-[11px] font-semibold text-on-surface-variant hover:bg-surface-container-high"
+                onClick={addVar}
+              >
+                + Add variable
+              </button>
+            </div>
+            <div className="overflow-hidden rounded-md border border-outline-variant/20">
+              <div className="grid grid-cols-12 gap-2 border-b border-outline-variant/20 bg-surface-container-low px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider text-on-surface-variant">
+                <div className="col-span-4">Label (shown in menu)</div>
+                <div className="col-span-4">Key (model.path)</div>
+                <div className="col-span-3">Sample (preview)</div>
+                <div className="col-span-1" />
+              </div>
+              {defVars.length === 0 ? (
+                <div className="px-2 py-3 text-center text-[11px] text-on-surface-variant">No variables. Click “Add variable”.</div>
+              ) : (
+                defVars.map((v, i) => (
+                  <div key={i} className="grid grid-cols-12 items-center gap-2 border-b border-outline-variant/10 px-2 py-1.5 last:border-b-0">
+                    <input
+                      className="col-span-4 rounded border border-outline-variant/20 bg-surface-container-lowest px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+                      value={v.label}
+                      onChange={(e) => patchVar(i, { label: e.target.value })}
+                      placeholder="Order number"
+                    />
+                    <input
+                      className="col-span-4 rounded border border-outline-variant/20 bg-surface-container-lowest px-2 py-1 font-mono text-[11px] outline-none focus:ring-1 focus:ring-primary"
+                      value={v.path}
+                      onChange={(e) => patchVar(i, { path: e.target.value })}
+                      placeholder="orderId"
+                    />
+                    <input
+                      className="col-span-3 rounded border border-outline-variant/20 bg-surface-container-lowest px-2 py-1 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+                      value={String(v.sample ?? "")}
+                      onChange={(e) => patchVar(i, { sample: e.target.value })}
+                      placeholder="SO-100428"
+                    />
+                    <button
+                      type="button"
+                      className="col-span-1 justify-self-center rounded p-1 text-red-600 hover:bg-red-50"
+                      title="Remove variable"
+                      onClick={() => removeVar(i)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <p className="mt-1 text-[10px] text-on-surface-variant">
+              “Key” is the Scriban path — a variable with key <span className="font-mono">orderId</span> is inserted as{" "}
+              <span className="font-mono">{"{{ model.orderId }}"}</span>.
+            </p>
+          </div>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         {/* ── Template catalog ── */}
         <aside className="lg:col-span-3">
@@ -456,7 +737,20 @@ export function TemplatesPage({ tenantId, storeId, authToken }: Props) {
         <div className="space-y-3 lg:col-span-5">
           <div>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-bold text-on-surface">{entry?.name}</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-sm font-bold text-on-surface">{entry?.name}</h2>
+                <button
+                  type="button"
+                  className="rounded p-1 text-on-surface-variant hover:bg-surface-container-high"
+                  title="Edit message settings (name, description, variables)"
+                  onClick={openSettings}
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                </button>
+              </div>
               {/* Language tabs */}
               <div className="flex items-center gap-1">
                 {tabLanguages.map((l) => {
@@ -538,6 +832,7 @@ export function TemplatesPage({ tenantId, storeId, authToken }: Props) {
           </div>
         </div>
       </div>
+      )}
     </section>
   );
 }

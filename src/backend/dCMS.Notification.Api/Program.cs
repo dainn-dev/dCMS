@@ -42,8 +42,9 @@ builder.Services.AddSingleton<TemplateRepository>();
 builder.Services.AddSingleton<ITemplateRenderer, ScribanTemplateRenderer>();
 builder.Services.AddSingleton<NotificationEventsRepository>();
 
-// DAI-687: config-driven catalog of editable template types (no frontend rebuild to change).
+// DAI-687: admin-managed catalog of template types (DB-backed, seeded from config defaults).
 builder.Services.Configure<TemplateCatalogOptions>(builder.Configuration.GetSection("TemplateCatalog"));
+builder.Services.AddSingleton<TemplateDefinitionRepository>();
 
 var app = builder.Build();
 

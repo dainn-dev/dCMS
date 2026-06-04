@@ -5,11 +5,10 @@ using Microsoft.Extensions.Options;
 
 namespace dCMS.Notification.Api.Routes;
 
-// ── Config-bound catalog of editable notification templates ──────────────────
-// Ops can add/remove template types and their variables by editing the
-// "TemplateCatalog" config section (appsettings / env / mounted file) and
-// restarting the service — no frontend rebuild required. When the section is
-// empty the built-in defaults below are served.
+// ── Admin-managed catalog of message template types (tenant-scoped, DB-backed) ──
+// Operators add/edit/remove message types and their variables from the UI.
+// On first access per tenant the catalog is seeded from the "TemplateCatalog"
+// config section (or built-in defaults) so there is always a starting point.
 
 public sealed class TemplateCatalogOptions
 {
@@ -34,32 +33,154 @@ public sealed class TemplateCatalogVarConfig
     public string? Sample { get; set; }
 }
 
+public sealed class TemplateVarDto
+{
+    public string Path { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string? Sample { get; set; }
+}
+
+public sealed class TemplateDefinitionUpsertRequest
+{
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    public string Key { get; set; } = "";
+    public string Channel { get; set; } = "email";
+    public List<TemplateVarDto> Variables { get; set; } = new();
+    public string? DefaultSubject { get; set; }
+    public string? DefaultBody { get; set; }
+}
+
 public static class TemplateCatalogRoutes
 {
     private static readonly JsonSerializerOptions JsonCamel = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly string[] Channels = { "email", "sms", "print", "admin" };
 
     public static void MapTemplateCatalogRoutes(this WebApplication app)
     {
         app.MapGet("/api/v1/templates/catalog", GetCatalog)
             .WithTags("templates")
-            .RequireAuthorization(DcmsPolicies.CatalogWrite);
+            .RequireAuthorization(DcmsPolicies.CatalogWrite)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        app.MapPut("/api/v1/templates/catalog", UpsertDefinition)
+            .WithTags("templates")
+            .RequireAuthorization(DcmsPolicies.CatalogWrite)
+            .WithTenantStoreHeaderAccess(app.Configuration);
+
+        app.MapDelete("/api/v1/templates/catalog", DeleteDefinition)
+            .WithTags("templates")
+            .RequireAuthorization(DcmsPolicies.CatalogWrite)
+            .WithTenantStoreHeaderAccess(app.Configuration);
     }
 
-    private static IResult GetCatalog([FromServices] IOptions<TemplateCatalogOptions> options)
+    private static IResult Ok(object data) => Results.Json(new { data, meta = (object?)null, error = (object?)null }, JsonCamel);
+
+    private static IResult Err(int status, string code, string message) =>
+        Results.Json(new { data = (object?)null, meta = (object?)null, error = new { code, message } }, JsonCamel, statusCode: status);
+
+    private static string? Tenant(HttpContext http) =>
+        http.Request.Headers["X-Tenant-Id"].FirstOrDefault()?.Trim() is { Length: > 0 } t ? t : null;
+
+    private static async Task<IResult> GetCatalog(
+        HttpContext http,
+        [FromServices] TemplateDefinitionRepository repo,
+        [FromServices] IOptions<TemplateCatalogOptions> options,
+        CancellationToken ct)
     {
-        var src = options.Value.Entries.Count > 0 ? options.Value.Entries : TemplateCatalogDefaults.Entries;
-        var data = src.Select(e => new
+        if (Tenant(http) is not { } tenantId)
+            return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+
+        var defs = await repo.ListAsync(tenantId, ct).ConfigureAwait(false);
+        if (defs.Count == 0)
         {
-            id = $"{e.Key}|{e.Channel}",
-            name = e.Name,
-            description = e.Description,
-            key = e.Key,
-            channel = e.Channel,
-            variables = e.Variables.Select(v => new { path = v.Path, label = v.Label, sample = v.Sample ?? "" }),
-            defaultSubject = e.DefaultSubject,
-            defaultBody = e.DefaultBody,
+            await repo.SeedAsync(tenantId, SeedSource(options.Value), ct).ConfigureAwait(false);
+            defs = await repo.ListAsync(tenantId, ct).ConfigureAwait(false);
+        }
+
+        var data = defs.Select(d => new
+        {
+            id = $"{d.Key}|{d.Channel}",
+            name = d.Name,
+            description = d.Description,
+            key = d.Key,
+            channel = d.Channel,
+            variables = ParseVars(d.Variables),
+            defaultSubject = d.DefaultSubject,
+            defaultBody = d.DefaultBody,
         });
-        return Results.Json(new { data, meta = (object?)null, error = (object?)null }, JsonCamel);
+        return Ok(data);
+    }
+
+    private static async Task<IResult> UpsertDefinition(
+        HttpContext http,
+        [FromServices] TemplateDefinitionRepository repo,
+        [FromBody] TemplateDefinitionUpsertRequest body,
+        CancellationToken ct)
+    {
+        if (Tenant(http) is not { } tenantId)
+            return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+
+        var key = body.Key?.Trim() ?? "";
+        var channel = body.Channel?.Trim().ToLowerInvariant() ?? "";
+        var name = body.Name?.Trim() ?? "";
+        if (key.Length == 0 || name.Length == 0)
+            return Err(400, "INVALID_BODY", "key and name are required.");
+        if (!Channels.Contains(channel))
+            return Err(400, "INVALID_CHANNEL", "channel must be one of email, sms, print, admin.");
+
+        var vars = (body.Variables ?? new()).Where(v => !string.IsNullOrWhiteSpace(v.Path)).Select(v => new TemplateVarDto
+        {
+            Path = v.Path.Trim(),
+            Label = string.IsNullOrWhiteSpace(v.Label) ? v.Path.Trim() : v.Label.Trim(),
+            Sample = v.Sample,
+        }).ToList();
+
+        var actor = TemplateRepository.ActorUserId(http);
+        await repo.UpsertAsync(
+            tenantId, key, channel, name, body.Description?.Trim() ?? "",
+            JsonSerializer.Serialize(vars, JsonCamel), body.DefaultSubject, body.DefaultBody, actor, ct).ConfigureAwait(false);
+
+        return Ok(new { ok = true });
+    }
+
+    private static async Task<IResult> DeleteDefinition(
+        HttpContext http,
+        [FromServices] TemplateDefinitionRepository repo,
+        [FromQuery] string? key,
+        [FromQuery] string? channel,
+        CancellationToken ct)
+    {
+        if (Tenant(http) is not { } tenantId)
+            return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(channel))
+            return Err(400, "INVALID_QUERY", "key and channel are required.");
+
+        var deleted = await repo.DeleteAsync(tenantId, key.Trim(), channel.Trim(), ct).ConfigureAwait(false);
+        return Ok(new { deleted });
+    }
+
+    private static List<TemplateVarDto> ParseVars(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try
+        {
+            return JsonSerializer.Deserialize<List<TemplateVarDto>>(json, JsonCamel) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
+    private static IReadOnlyList<(string Key, string Channel, string Name, string Description, string VariablesJson, string? DefaultSubject, string? DefaultBody)> SeedSource(TemplateCatalogOptions options)
+    {
+        var src = options.Entries.Count > 0 ? options.Entries : TemplateCatalogDefaults.Entries;
+        return src.Select(e =>
+        {
+            var vars = e.Variables.Select(v => new TemplateVarDto { Path = v.Path, Label = v.Label, Sample = v.Sample }).ToList();
+            return (e.Key, e.Channel, e.Name, e.Description, JsonSerializer.Serialize(vars, JsonCamel), e.DefaultSubject, e.DefaultBody);
+        }).ToList();
     }
 }
 

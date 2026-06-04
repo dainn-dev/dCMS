@@ -163,8 +163,19 @@ export function buildEffectiveCatalog(
   return [...base, ...extras];
 }
 
+function catalogHeaders(tenantId: string, storeId?: string, token?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-Tenant-Id": tenantId,
+  };
+  if (storeId) headers["X-Store-Id"] = storeId;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 /**
- * DAI-687: fetch the config-driven template catalog from notification-api.
+ * DAI-687: fetch the admin-managed template catalog from notification-api.
  * Falls back to the built-in {@link TEMPLATE_CATALOG} on any error so the page
  * keeps working offline / when the service is unavailable.
  */
@@ -173,9 +184,7 @@ export async function fetchTemplateCatalog(
   storeId?: string,
   token?: string,
 ): Promise<TemplateCatalogEntry[]> {
-  const headers: Record<string, string> = { Accept: "application/json", "X-Tenant-Id": tenantId };
-  if (storeId) headers["X-Store-Id"] = storeId;
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const headers = catalogHeaders(tenantId, storeId, token);
 
   const res = await fetch(`${GATEWAY.notifications}/templates/catalog`, { credentials: "same-origin", headers });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -204,4 +213,55 @@ export async function fetchTemplateCatalog(
       defaultBody: e.defaultBody ? String(e.defaultBody) : undefined,
     };
   });
+}
+
+export type CatalogUpsertInput = {
+  name: string;
+  description: string;
+  key: string;
+  channel: TemplateRow["channel"];
+  variables: TemplateVar[];
+  defaultSubject?: string;
+  defaultBody?: string;
+};
+
+/** DAI-687: create or update a message type definition. */
+export async function upsertCatalogEntry(
+  tenantId: string,
+  storeId: string | undefined,
+  input: CatalogUpsertInput,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(`${GATEWAY.notifications}/templates/catalog`, {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: catalogHeaders(tenantId, storeId, token),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const b = await res.json();
+      if (b?.error?.message) msg = b.error.message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+}
+
+/** DAI-687: delete a message type (and its saved content for that key/channel). */
+export async function deleteCatalogEntry(
+  tenantId: string,
+  storeId: string | undefined,
+  input: { key: string; channel: TemplateRow["channel"] },
+  token?: string,
+): Promise<void> {
+  const q = new URLSearchParams({ key: input.key, channel: input.channel });
+  const res = await fetch(`${GATEWAY.notifications}/templates/catalog?${q.toString()}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: catalogHeaders(tenantId, storeId, token),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
