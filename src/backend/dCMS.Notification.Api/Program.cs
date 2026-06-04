@@ -42,6 +42,9 @@ builder.Services.AddSingleton<TemplateRepository>();
 builder.Services.AddSingleton<ITemplateRenderer, ScribanTemplateRenderer>();
 builder.Services.AddSingleton<NotificationEventsRepository>();
 
+// DAI-687: config-driven catalog of editable template types (no frontend rebuild to change).
+builder.Services.Configure<TemplateCatalogOptions>(builder.Configuration.GetSection("TemplateCatalog"));
+
 var app = builder.Build();
 
 app.UseSwagger();
@@ -58,6 +61,7 @@ app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();
 
 app.MapTemplateRoutes();
+app.MapTemplateCatalogRoutes();
 app.MapNotificationFeedRoutes();
 
 app.MapGet("/", () => Results.Text("dCMS.Notification.Api\n", "text/plain"));
