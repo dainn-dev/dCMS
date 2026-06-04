@@ -9,9 +9,10 @@ import {
 import type { RefundCase, RefundStatus } from "./types";
 
 const STATUS_STYLES: Record<RefundStatus, string> = {
-  "Pending Refund": "bg-amber-100 text-amber-800",
+  Pending: "bg-amber-100 text-amber-800",
+  Processing: "bg-blue-100 text-blue-800",
   Success: "bg-green-100 text-green-800",
-  Failed: "bg-red-100 text-red-800",
+  Rejected: "bg-red-100 text-red-800",
 };
 
 const REMARK_PREVIEW = 52;
@@ -19,7 +20,7 @@ const REMARK_PREVIEW = 52;
 export function canRefundCaseBeEdited(c: RefundCase, hasUpdatePermission: boolean): boolean {
   if (!hasUpdatePermission) return false;
   if (c.isPaymentGatewayCase) {
-    return c.status === "Pending Refund" || c.status === "Failed";
+    return c.status === "Pending" || c.status === "Rejected";
   }
   return true;
 }
@@ -260,7 +261,7 @@ export function createRefundCaseColumns({
                   editable
                     ? "Update refund status"
                     : c.isPaymentGatewayCase
-                      ? "Gateway refund: only Pending Refund or Failed can be edited"
+                      ? "Gateway refund: only Pending or Rejected can be edited"
                       : "Cannot edit"
                 }
                 onClick={() => editable && onEdit(c.refundNo)}

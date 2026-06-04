@@ -6,7 +6,7 @@ import { exportRowsByColumns, type ExportColumn } from "../shared/exportReportRo
 import { ReportFilterField, ReportFilterPanel, inputClass } from "../shared/ReportFilterPanel";
 import { useReportExportState } from "../shared/useReportExport";
 import {
-  fetchTransactionDetails,
+  fetchAllTransactionDetails,
   fetchTransactionsOverview,
   type TransactionDetailRow as ApiDetailRow,
   type TransactionsOverviewRow,
@@ -282,7 +282,7 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
     };
     try {
       const [details, ov] = await Promise.all([
-        fetchTransactionDetails(tenantId, filters, { limit: 100 }, authToken),
+        fetchAllTransactionDetails(tenantId, filters, authToken),
         fetchTransactionsOverview(tenantId, filters, authToken),
       ]);
       setRows(details.rows.map(mapApiDetail));
@@ -461,7 +461,14 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
             />
           </ReportFilterField>
           <ReportFilterField label="Payment method" htmlFor="tx-pay">
-            <select id="tx-pay" className={inputClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+            <select
+              id="tx-pay"
+              className={`${inputClass} cursor-not-allowed opacity-50`}
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+              disabled
+              title="Payment method lives in the Payment DB projection (upcoming). Use Payment type for now."
+            >
               {PAYMENT_METHOD_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}

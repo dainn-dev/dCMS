@@ -10,6 +10,9 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Bind timestamptz columns to DateTimeOffset (incl. positional records). See DapperTypeHandlers.
+dCMS.Infrastructure.Persistence.DapperTypeHandlers.Register();
+
 var connectionString = builder.Configuration.GetConnectionString("Loyalty");
 if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("Configure ConnectionStrings:Loyalty.");

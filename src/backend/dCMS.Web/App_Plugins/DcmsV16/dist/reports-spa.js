@@ -29094,14 +29094,24 @@ async function Zw(j, at, s, E) {
   const d = await b.json();
   return { rows: d.data ?? [], nextCursor: d.meta?.nextCursor ?? null };
 }
-async function Qw(j, at, s) {
+async function Qw(j, at, s, E = 5e3) {
+  const A = [];
+  let b;
+  for (let d = 0; d < 200; d++) {
+    const { rows: f, nextCursor: l } = await Zw(j, at, { cursor: b, limit: 100 }, s);
+    if (A.push(...f), !l || f.length === 0 || A.length >= E) break;
+    b = l;
+  }
+  return { rows: A };
+}
+async function Kw(j, at, s) {
   const E = yy(at), A = await fetch(`${Q4}/orders/reports/transactions/overview?${E}`, {
     credentials: "same-origin",
     headers: Fg(j, at.storeId, s)
   });
   return await qg(A), (await A.json()).data ?? null;
 }
-async function Kw(j, at, s, E) {
+async function Jw(j, at, s, E) {
   const A = yy(at);
   A.set("groupBy", s);
   const b = await fetch(`${l2}/sales?${A}`, {
@@ -29110,14 +29120,14 @@ async function Kw(j, at, s, E) {
   });
   return await qg(b), (await b.json()).data ?? [];
 }
-async function Jw(j, at, s) {
+async function Ww(j, at, s) {
   const E = yy(at), A = await fetch(`${l2}/abandon-cart?${E}`, {
     credentials: "same-origin",
     headers: Fg(j, at.storeId, s)
   });
   return await qg(A), (await A.json()).data ?? [];
 }
-async function Ww(j, at, s) {
+async function t5(j, at, s) {
   const E = new URLSearchParams();
   at.storeId && at.storeId !== "all" && E.set("storeId", at.storeId);
   const A = await fetch(`${l2}/restock-subscriptions?${E}`, {
@@ -29140,10 +29150,10 @@ function _s(j, at) {
 function vy(j) {
   return j instanceof Function;
 }
-function t5(j) {
+function e5(j) {
   return Array.isArray(j) && j.every((at) => typeof at == "number");
 }
-function e5(j, at) {
+function n5(j, at) {
   const s = [], E = (A) => {
     A.forEach((b) => {
       s.push(b);
@@ -29187,7 +29197,7 @@ function Je(j, at, s, E) {
     onChange: E
   };
 }
-function n5(j, at, s, E) {
+function r5(j, at, s, E) {
   const A = () => {
     var d;
     return (d = b.getValue()) != null ? d : j.options.renderFallbackValue;
@@ -29210,7 +29220,7 @@ function n5(j, at, s, E) {
     d.createCell == null || d.createCell(b, s, at, j);
   }, {}), b;
 }
-function r5(j, at, s, E) {
+function a5(j, at, s, E) {
   var A, b;
   const f = {
     ...j._getDefaultColumnDef(),
@@ -29280,7 +29290,7 @@ function H4(j, at, s) {
     d.createHeader == null || d.createHeader(b, j);
   }), b;
 }
-const a5 = {
+const i5 = {
   createTable: (j) => {
     j.getHeaderGroups = Ke(() => [j.getAllColumns(), j.getVisibleLeafColumns(), j.getState().columnPinning.left, j.getState().columnPinning.right], (at, s, E, A) => {
       var b, d;
@@ -29393,7 +29403,7 @@ const u2 = (j, at, s, E, A, b, d) => {
       return (a = f.getValue(l)) != null ? a : j.options.renderFallbackValue;
     },
     subRows: [],
-    getLeafRows: () => e5(f.subRows, (l) => l.subRows),
+    getLeafRows: () => n5(f.subRows, (l) => l.subRows),
     getParentRow: () => f.parentId ? j.getRow(f.parentId, !0) : void 0,
     getParentRows: () => {
       let l = [], a = f;
@@ -29404,7 +29414,7 @@ const u2 = (j, at, s, E, A, b, d) => {
       }
       return l.reverse();
     },
-    getAllCells: Ke(() => [j.getAllLeafColumns()], (l) => l.map((a) => n5(j, f, a, a.id)), Je(j.options, "debugRows", "getAllCells")),
+    getAllCells: Ke(() => [j.getAllLeafColumns()], (l) => l.map((a) => r5(j, f, a, a.id)), Je(j.options, "debugRows", "getAllCells")),
     _getAllCellsByColumnId: Ke(() => [f.getAllCells()], (l) => l.reduce((a, c) => (a[c.column.id] = c, a), {}), Je(j.options, "debugRows", "getAllCellsByColumnId"))
   };
   for (let l = 0; l < j._features.length; l++) {
@@ -29412,7 +29422,7 @@ const u2 = (j, at, s, E, A, b, d) => {
     a == null || a.createRow == null || a.createRow(f, j);
   }
   return f;
-}, i5 = {
+}, s5 = {
   createColumn: (j, at) => {
     j._getFacetedRowModel = at.options.getFacetedRowModel && at.options.getFacetedRowModel(at, j.id), j.getFacetedRowModel = () => j._getFacetedRowModel ? j._getFacetedRowModel() : at.getPreFilteredRowModel(), j._getFacetedUniqueValues = at.options.getFacetedUniqueValues && at.options.getFacetedUniqueValues(at, j.id), j.getFacetedUniqueValues = () => j._getFacetedUniqueValues ? j._getFacetedUniqueValues() : /* @__PURE__ */ new Map(), j._getFacetedMinMaxValues = at.options.getFacetedMinMaxValues && at.options.getFacetedMinMaxValues(at, j.id), j.getFacetedMinMaxValues = () => {
       if (j._getFacetedMinMaxValues)
@@ -29482,7 +29492,7 @@ const Du = {
 function Vo(j) {
   return j == null || j === "";
 }
-const s5 = {
+const o5 = {
   getDefaultColumnDef: () => ({
     filterFn: "auto"
   }),
@@ -29560,54 +29570,54 @@ const s5 = {
 function I4(j, at, s) {
   return (j && j.autoRemove ? j.autoRemove(at, s) : !1) || typeof at > "u" || typeof at == "string" && !at;
 }
-const o5 = (j, at, s) => s.reduce((E, A) => {
+const l5 = (j, at, s) => s.reduce((E, A) => {
   const b = A.getValue(j);
   return E + (typeof b == "number" ? b : 0);
-}, 0), l5 = (j, at, s) => {
+}, 0), u5 = (j, at, s) => {
   let E;
   return s.forEach((A) => {
     const b = A.getValue(j);
     b != null && (E > b || E === void 0 && b >= b) && (E = b);
   }), E;
-}, u5 = (j, at, s) => {
+}, c5 = (j, at, s) => {
   let E;
   return s.forEach((A) => {
     const b = A.getValue(j);
     b != null && (E < b || E === void 0 && b >= b) && (E = b);
   }), E;
-}, c5 = (j, at, s) => {
+}, f5 = (j, at, s) => {
   let E, A;
   return s.forEach((b) => {
     const d = b.getValue(j);
     d != null && (E === void 0 ? d >= d && (E = A = d) : (E > d && (E = d), A < d && (A = d)));
   }), [E, A];
-}, f5 = (j, at) => {
+}, d5 = (j, at) => {
   let s = 0, E = 0;
   if (at.forEach((A) => {
     let b = A.getValue(j);
     b != null && (b = +b) >= b && (++s, E += b);
   }), s) return E / s;
-}, d5 = (j, at) => {
+}, h5 = (j, at) => {
   if (!at.length)
     return;
   const s = at.map((b) => b.getValue(j));
-  if (!t5(s))
+  if (!e5(s))
     return;
   if (s.length === 1)
     return s[0];
   const E = Math.floor(s.length / 2), A = s.sort((b, d) => b - d);
   return s.length % 2 !== 0 ? A[E] : (A[E - 1] + A[E]) / 2;
-}, h5 = (j, at) => Array.from(new Set(at.map((s) => s.getValue(j))).values()), p5 = (j, at) => new Set(at.map((s) => s.getValue(j))).size, m5 = (j, at) => at.length, Yv = {
-  sum: o5,
-  min: l5,
-  max: u5,
-  extent: c5,
-  mean: f5,
-  median: d5,
-  unique: h5,
-  uniqueCount: p5,
-  count: m5
-}, g5 = {
+}, p5 = (j, at) => Array.from(new Set(at.map((s) => s.getValue(j))).values()), m5 = (j, at) => new Set(at.map((s) => s.getValue(j))).size, g5 = (j, at) => at.length, Yv = {
+  sum: l5,
+  min: u5,
+  max: c5,
+  extent: f5,
+  mean: d5,
+  median: h5,
+  unique: p5,
+  uniqueCount: m5,
+  count: g5
+}, b5 = {
   getDefaultColumnDef: () => ({
     aggregatedCell: (j) => {
       var at, s;
@@ -29674,13 +29684,13 @@ const o5 = (j, at, s) => s.reduce((E, A) => {
     };
   }
 };
-function b5(j, at, s) {
+function y5(j, at, s) {
   if (!(at != null && at.length) || !s)
     return j;
   const E = j.filter((b) => !at.includes(b.id));
   return s === "remove" ? E : [...at.map((b) => j.find((d) => d.id === b)).filter(Boolean), ...E];
 }
-const y5 = {
+const v5 = {
   getInitialState: (j) => ({
     columnOrder: [],
     ...j
@@ -29714,13 +29724,13 @@ const y5 = {
         }
         b = [...b, ...f];
       }
-      return b5(b, s, E);
+      return y5(b, s, E);
     }, Je(j.options, "debugTable", "_getOrderColumnsFn"));
   }
 }, Pv = () => ({
   left: [],
   right: []
-}), v5 = {
+}), w5 = {
   getInitialState: (j) => ({
     columnPinning: Pv(),
     ...j
@@ -29797,7 +29807,7 @@ const y5 = {
     }, Je(j.options, "debugColumns", "getCenterLeafColumns"));
   }
 };
-function w5(j) {
+function _5(j) {
   return j || (typeof document < "u" ? document : null);
 }
 const hy = {
@@ -29811,7 +29821,7 @@ const hy = {
   deltaPercentage: null,
   isResizingColumn: !1,
   columnSizingStart: []
-}), _5 = {
+}), S5 = {
   getDefaultColumnDef: () => hy,
   getInitialState: (j) => ({
     columnSizing: {},
@@ -29891,7 +29901,7 @@ const hy = {
             deltaPercentage: null,
             columnSizingStart: []
           }));
-        }, u = w5(s), y = {
+        }, u = _5(s), y = {
           moveHandler: (S) => h(S.clientX),
           upHandler: (S) => {
             u?.removeEventListener("mousemove", y.moveHandler), u?.removeEventListener("mouseup", y.upHandler), o(S.clientX);
@@ -29902,7 +29912,7 @@ const hy = {
             var _;
             u?.removeEventListener("touchmove", v.moveHandler), u?.removeEventListener("touchend", v.upHandler), S.cancelable && (S.preventDefault(), S.stopPropagation()), o((_ = S.touches[0]) == null ? void 0 : _.clientX);
           }
-        }, p = S5() ? {
+        }, p = x5() ? {
           passive: !1
         } : !1;
         $v(b) ? (u?.addEventListener("touchmove", v.moveHandler, p), u?.addEventListener("touchend", v.upHandler, p)) : (u?.addEventListener("mousemove", y.moveHandler, p), u?.addEventListener("mouseup", y.upHandler, p)), at.setColumnSizingInfo((S) => ({
@@ -29940,7 +29950,7 @@ const hy = {
   }
 };
 let py = null;
-function S5() {
+function x5() {
   if (typeof py == "boolean") return py;
   let j = !1;
   try {
@@ -29959,7 +29969,7 @@ function S5() {
 function $v(j) {
   return j.type === "touchstart";
 }
-const x5 = {
+const E5 = {
   getInitialState: (j) => ({
     columnVisibility: {},
     ...j
@@ -30007,14 +30017,14 @@ const x5 = {
 function Vg(j, at) {
   return at ? at === "center" ? j.getCenterVisibleLeafColumns() : at === "left" ? j.getLeftVisibleLeafColumns() : j.getRightVisibleLeafColumns() : j.getVisibleLeafColumns();
 }
-const E5 = {
+const T5 = {
   createTable: (j) => {
     j._getGlobalFacetedRowModel = j.options.getFacetedRowModel && j.options.getFacetedRowModel(j, "__global__"), j.getGlobalFacetedRowModel = () => j.options.manualFiltering || !j._getGlobalFacetedRowModel ? j.getPreFilteredRowModel() : j._getGlobalFacetedRowModel(), j._getGlobalFacetedUniqueValues = j.options.getFacetedUniqueValues && j.options.getFacetedUniqueValues(j, "__global__"), j.getGlobalFacetedUniqueValues = () => j._getGlobalFacetedUniqueValues ? j._getGlobalFacetedUniqueValues() : /* @__PURE__ */ new Map(), j._getGlobalFacetedMinMaxValues = j.options.getFacetedMinMaxValues && j.options.getFacetedMinMaxValues(j, "__global__"), j.getGlobalFacetedMinMaxValues = () => {
       if (j._getGlobalFacetedMinMaxValues)
         return j._getGlobalFacetedMinMaxValues();
     };
   }
-}, T5 = {
+}, C5 = {
   getInitialState: (j) => ({
     globalFilter: void 0,
     ...j
@@ -30047,7 +30057,7 @@ const E5 = {
       j.setGlobalFilter(at ? void 0 : j.initialState.globalFilter);
     };
   }
-}, C5 = {
+}, A5 = {
   getInitialState: (j) => ({
     expanded: {},
     ...j
@@ -30137,7 +30147,7 @@ const E5 = {
 }, r2 = 0, a2 = 10, Zv = () => ({
   pageIndex: r2,
   pageSize: a2
-}), A5 = {
+}), M5 = {
   getInitialState: (j) => ({
     ...j,
     pagination: {
@@ -30220,7 +30230,7 @@ const E5 = {
 }, Qv = () => ({
   top: [],
   bottom: []
-}), M5 = {
+}), R5 = {
   getInitialState: (j) => ({
     rowPinning: Qv(),
     ...j
@@ -30321,7 +30331,7 @@ const E5 = {
       return at.filter((b) => !A.has(b.id));
     }, Je(j.options, "debugRows", "getCenterRows"));
   }
-}, R5 = {
+}, O5 = {
   getInitialState: (j) => ({
     rowSelection: {},
     ...j
@@ -30477,10 +30487,10 @@ function s2(j, at, s) {
     }
   }), A ? "all" : b ? "some" : !1;
 }
-const o2 = /([0-9]+)/gm, O5 = (j, at, s) => i6(sf(j.getValue(s)).toLowerCase(), sf(at.getValue(s)).toLowerCase()), k5 = (j, at, s) => i6(sf(j.getValue(s)), sf(at.getValue(s))), D5 = (j, at, s) => d2(sf(j.getValue(s)).toLowerCase(), sf(at.getValue(s)).toLowerCase()), j5 = (j, at, s) => d2(sf(j.getValue(s)), sf(at.getValue(s))), N5 = (j, at, s) => {
+const o2 = /([0-9]+)/gm, k5 = (j, at, s) => i6(sf(j.getValue(s)).toLowerCase(), sf(at.getValue(s)).toLowerCase()), D5 = (j, at, s) => i6(sf(j.getValue(s)), sf(at.getValue(s))), j5 = (j, at, s) => d2(sf(j.getValue(s)).toLowerCase(), sf(at.getValue(s)).toLowerCase()), N5 = (j, at, s) => d2(sf(j.getValue(s)), sf(at.getValue(s))), z5 = (j, at, s) => {
   const E = j.getValue(s), A = at.getValue(s);
   return E > A ? 1 : E < A ? -1 : 0;
-}, z5 = (j, at, s) => d2(j.getValue(s), at.getValue(s));
+}, B5 = (j, at, s) => d2(j.getValue(s), at.getValue(s));
 function d2(j, at) {
   return j === at ? 0 : j > at ? 1 : -1;
 }
@@ -30508,13 +30518,13 @@ function i6(j, at) {
   return s.length - E.length;
 }
 const Hg = {
-  alphanumeric: O5,
-  alphanumericCaseSensitive: k5,
-  text: D5,
-  textCaseSensitive: j5,
-  datetime: N5,
-  basic: z5
-}, B5 = {
+  alphanumeric: k5,
+  alphanumericCaseSensitive: D5,
+  text: j5,
+  textCaseSensitive: N5,
+  datetime: z5,
+  basic: B5
+}, U5 = {
   getInitialState: (j) => ({
     sorting: [],
     ...j
@@ -30603,30 +30613,30 @@ const Hg = {
       j.setSorting(at ? [] : (s = (E = j.initialState) == null ? void 0 : E.sorting) != null ? s : []);
     }, j.getPreSortedRowModel = () => j.getGroupedRowModel(), j.getSortedRowModel = () => (!j._getSortedRowModel && j.options.getSortedRowModel && (j._getSortedRowModel = j.options.getSortedRowModel(j)), j.options.manualSorting || !j._getSortedRowModel ? j.getPreSortedRowModel() : j._getSortedRowModel());
   }
-}, U5 = [
-  a5,
-  x5,
-  y5,
-  v5,
+}, L5 = [
   i5,
-  s5,
   E5,
-  //depends on ColumnFaceting
+  v5,
+  w5,
+  s5,
+  o5,
   T5,
-  //depends on ColumnFiltering
-  B5,
-  g5,
-  //depends on RowSorting
+  //depends on ColumnFaceting
   C5,
+  //depends on ColumnFiltering
+  U5,
+  b5,
+  //depends on RowSorting
   A5,
   M5,
   R5,
-  _5
+  O5,
+  S5
 ];
-function L5(j) {
+function H5(j) {
   var at, s;
   process.env.NODE_ENV !== "production" && (j.debugAll || j.debugTable) && console.info("Creating Table Instance...");
-  const E = [...U5, ...(at = j._features) != null ? at : []];
+  const E = [...L5, ...(at = j._features) != null ? at : []];
   let A = {
     _features: E
   };
@@ -30706,7 +30716,7 @@ function L5(j) {
     getAllColumns: Ke(() => [A._getColumnDefs()], (o) => {
       const u = function(y, v, p) {
         return p === void 0 && (p = 0), y.map((S) => {
-          const _ = r5(A, S, p, v), O = S;
+          const _ = a5(A, S, p, v), O = S;
           return _.columns = O.columns ? u(O.columns, _, p + 1) : [], _;
         });
       };
@@ -30730,7 +30740,7 @@ function L5(j) {
   }
   return A;
 }
-function H5() {
+function I5() {
   return (j) => Ke(() => [j.options.data], (at) => {
     const s = {
       rows: [],
@@ -30751,7 +30761,7 @@ function H5() {
     return s.rows = E(at), s;
   }, Je(j.options, "debugTable", "getRowModel", () => j._autoResetPageIndex()));
 }
-function I5(j) {
+function V5(j) {
   const at = [], s = (E) => {
     var A;
     at.push(E), (A = E.subRows) != null && A.length && E.getIsExpanded() && E.subRows.forEach(s);
@@ -30762,10 +30772,10 @@ function I5(j) {
     rowsById: j.rowsById
   };
 }
-function V5(j, at, s) {
-  return s.options.filterFromLeafRows ? F5(j, at, s) : q5(j, at, s);
-}
 function F5(j, at, s) {
+  return s.options.filterFromLeafRows ? q5(j, at, s) : G5(j, at, s);
+}
+function q5(j, at, s) {
   var E;
   const A = [], b = {}, d = (E = s.options.maxLeafRowFilterDepth) != null ? E : 100, f = function(l, a) {
     a === void 0 && (a = 0);
@@ -30794,7 +30804,7 @@ function F5(j, at, s) {
     rowsById: b
   };
 }
-function q5(j, at, s) {
+function G5(j, at, s) {
   var E;
   const A = [], b = {}, d = (E = s.options.maxLeafRowFilterDepth) != null ? E : 100, f = function(l, a) {
     a === void 0 && (a = 0);
@@ -30818,7 +30828,7 @@ function q5(j, at, s) {
     rowsById: b
   };
 }
-function G5() {
+function Y5() {
   return (j) => Ke(() => [j.getPreFilteredRowModel(), j.getState().columnFilters, j.getState().globalFilter], (at, s, E) => {
     if (!at.rows.length || !(s != null && s.length) && !E) {
       for (let o = 0; o < at.flatRows.length; o++)
@@ -30882,10 +30892,10 @@ function G5() {
           return !1;
       return !0;
     };
-    return V5(at.rows, h, j);
+    return F5(at.rows, h, j);
   }, Je(j.options, "debugTable", "getFilteredRowModel", () => j._autoResetPageIndex()));
 }
-function Y5(j) {
+function P5(j) {
   return (at) => Ke(() => [at.getState().pagination, at.getPrePaginationRowModel(), at.options.paginateExpandedRows ? void 0 : at.getState().expanded], (s, E) => {
     if (!E.rows.length)
       return E;
@@ -30905,7 +30915,7 @@ function Y5(j) {
       rows: d,
       flatRows: f,
       rowsById: l
-    } : h = I5({
+    } : h = V5({
       rows: d,
       flatRows: f,
       rowsById: l
@@ -30916,7 +30926,7 @@ function Y5(j) {
     return h.rows.forEach(o), h;
   }, Je(at.options, "debugTable", "getPaginationRowModel"));
 }
-function P5() {
+function X5() {
   return (j) => Ke(() => [j.getState().sorting, j.getPreSortedRowModel()], (at, s) => {
     if (!s.rows.length || !(at != null && at.length))
       return s;
@@ -30966,21 +30976,21 @@ function P5() {
   }, Je(j.options, "debugTable", "getSortedRowModel", () => j._autoResetPageIndex()));
 }
 function V4(j, at) {
-  return j ? X5(j) ? /* @__PURE__ */ qe.createElement(j, at) : j : null;
-}
-function X5(j) {
-  return $5(j) || typeof j == "function" || Z5(j);
+  return j ? $5(j) ? /* @__PURE__ */ qe.createElement(j, at) : j : null;
 }
 function $5(j) {
+  return Z5(j) || typeof j == "function" || Q5(j);
+}
+function Z5(j) {
   return typeof j == "function" && (() => {
     const at = Object.getPrototypeOf(j);
     return at.prototype && at.prototype.isReactComponent;
   })();
 }
-function Z5(j) {
+function Q5(j) {
   return typeof j == "object" && typeof j.$$typeof == "symbol" && ["react.memo", "react.forward_ref"].includes(j.$$typeof.description);
 }
-function Q5(j) {
+function K5(j) {
   const at = {
     state: {},
     // Dummy state
@@ -30990,7 +31000,7 @@ function Q5(j) {
     renderFallbackValue: null,
     ...j
   }, [s] = qe.useState(() => ({
-    current: L5(at)
+    current: H5(at)
   })), [E, A] = qe.useState(() => s.current.initialState);
   return s.current.setOptions((b) => ({
     ...b,
@@ -31006,43 +31016,43 @@ function Q5(j) {
     }
   })), s.current;
 }
-function K5({ className: j = "h-5 w-5" }) {
+function J5({ className: j = "h-5 w-5" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z" }) });
 }
 function s6({ className: j = "h-4 w-4" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" }) });
 }
-function J5({ className: j = "text-sm" }) {
+function W5({ className: j = "text-sm" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", width: "18", height: "18", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M18.41 16.59L13.82 12l4.59-4.59L17 6l-6 6 6 6 1.41-1.41zM6 6h2v12H6V6z" }) });
 }
-function W5({ className: j = "text-sm" }) {
+function t8({ className: j = "text-sm" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", width: "18", height: "18", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M5.59 7.41L10.18 12l-4.59 4.59L7 18l6-6-6-6-1.41 1.41zM16 6h2v12h-2V6z" }) });
 }
-function t8({ className: j = "text-sm" }) {
+function e8({ className: j = "text-sm" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", width: "18", height: "18", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" }) });
 }
-function e8({ className: j = "text-sm" }) {
+function n8({ className: j = "text-sm" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", width: "18", height: "18", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" }) });
 }
-function n8({ className: j = "h-4 w-4" }) {
+function r8({ className: j = "h-4 w-4" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" }) });
 }
-function r8({ className: j = "h-4 w-4" }) {
+function a8({ className: j = "h-4 w-4" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 21.49 21.49 20 15.5 14zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" }) });
 }
 function Jv({ className: j = "h-5 w-5" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" }) });
 }
-function a8({ className: j = "h-4 w-4" }) {
+function i8({ className: j = "h-4 w-4" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z" }) });
 }
-function i8({ className: j = "h-4 w-4" }) {
+function s8({ className: j = "h-4 w-4" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z" }) });
 }
-function s8({ className: j = "h-4 w-4" }) {
+function o8({ className: j = "h-4 w-4" }) {
   return /* @__PURE__ */ At.jsx("svg", { className: j, fill: "currentColor", viewBox: "0 0 24 24", "aria-hidden": !0, children: /* @__PURE__ */ At.jsx("path", { d: "M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z" }) });
 }
-const o8 = [10, 25, 50, 100];
+const l8 = [10, 25, 50, 100];
 function o6({
   columns: j,
   data: at,
@@ -31060,7 +31070,7 @@ function o6({
 }) {
   const [u, y] = qe.useState([]), [v, p] = qe.useState([]), [S, _] = qe.useState(""), [O, N] = qe.useState(
     Object.fromEntries(s.map((C) => [C, !1]))
-  ), [F, $] = qe.useState({}), [J, Y] = qe.useState(!1), Z = d !== void 0 && f !== void 0, Q = Q5({
+  ), [F, $] = qe.useState({}), [J, Y] = qe.useState(!1), Z = d !== void 0 && f !== void 0, Q = K5({
     data: at,
     columns: j,
     state: { sorting: u, columnFilters: v, globalFilter: S, columnVisibility: O, rowSelection: Z ? d : F },
@@ -31070,16 +31080,16 @@ function o6({
     onColumnVisibilityChange: N,
     onRowSelectionChange: Z ? f : $,
     getRowId: b ? (C) => b(C) : void 0,
-    getCoreRowModel: H5(),
-    getSortedRowModel: P5(),
-    getFilteredRowModel: G5(),
-    getPaginationRowModel: Y5(),
+    getCoreRowModel: I5(),
+    getSortedRowModel: X5(),
+    getFilteredRowModel: Y5(),
+    getPaginationRowModel: P5(),
     initialState: { pagination: { pageSize: 10 } }
   }), B = Q.getFilteredSelectedRowModel().rows.length, I = Q.getFilteredRowModel().rows.length, { pageIndex: k, pageSize: w } = Q.getState().pagination, x = k * w + 1, T = Math.min((k + 1) * w, I);
   return /* @__PURE__ */ At.jsxs("div", { className: "bg-surface-container-lowest rounded-xl shadow-sm border border-outline-variant/20 overflow-hidden flex flex-col", children: [
     /* @__PURE__ */ At.jsxs("div", { className: "px-5 py-3 flex flex-wrap items-center gap-3 border-b border-outline-variant/10 bg-surface-container-low/30", children: [
       /* @__PURE__ */ At.jsxs("div", { className: "relative flex-1 min-w-[200px] max-w-sm", children: [
-        /* @__PURE__ */ At.jsx(r8, { className: "absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-on-surface-variant pointer-events-none" }),
+        /* @__PURE__ */ At.jsx(a8, { className: "absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-on-surface-variant pointer-events-none" }),
         /* @__PURE__ */ At.jsx(
           "input",
           {
@@ -31107,7 +31117,7 @@ function o6({
               onClick: () => Y((C) => !C),
               children: [
                 "Columns",
-                /* @__PURE__ */ At.jsx(n8, { className: "h-3 w-3" })
+                /* @__PURE__ */ At.jsx(r8, { className: "h-3 w-3" })
               ]
             }
           ),
@@ -31151,7 +31161,7 @@ function o6({
               className: "text-xs bg-transparent border border-outline-variant/20 rounded px-2 py-1 focus:ring-0 cursor-pointer font-bold text-on-surface",
               value: w,
               onChange: (C) => Q.setPageSize(Number(C.target.value)),
-              children: o8.map((C) => /* @__PURE__ */ At.jsx("option", { value: C, children: C }, C))
+              children: l8.map((C) => /* @__PURE__ */ At.jsx("option", { value: C, children: C }, C))
             }
           )
         ] })
@@ -31218,7 +31228,7 @@ function o6({
             onClick: () => Q.setPageIndex(0),
             disabled: l || !Q.getCanPreviousPage(),
             "aria-label": "First page",
-            children: /* @__PURE__ */ At.jsx(J5, {})
+            children: /* @__PURE__ */ At.jsx(W5, {})
           }
         ),
         /* @__PURE__ */ At.jsx(
@@ -31227,10 +31237,10 @@ function o6({
             onClick: () => Q.previousPage(),
             disabled: l || !Q.getCanPreviousPage(),
             "aria-label": "Previous page",
-            children: /* @__PURE__ */ At.jsx(t8, {})
+            children: /* @__PURE__ */ At.jsx(e8, {})
           }
         ),
-        l8(Q.getPageCount(), k).map(
+        u8(Q.getPageCount(), k).map(
           (C, z) => C === "…" ? /* @__PURE__ */ At.jsx("span", { className: "px-2 text-outline text-xs", children: "…" }, `ellipsis-${z}`) : /* @__PURE__ */ At.jsx(
             "button",
             {
@@ -31249,7 +31259,7 @@ function o6({
             onClick: () => Q.nextPage(),
             disabled: l || !Q.getCanNextPage(),
             "aria-label": "Next page",
-            children: /* @__PURE__ */ At.jsx(e8, {})
+            children: /* @__PURE__ */ At.jsx(n8, {})
           }
         ),
         /* @__PURE__ */ At.jsx(
@@ -31258,7 +31268,7 @@ function o6({
             onClick: () => Q.setPageIndex(Q.getPageCount() - 1),
             disabled: l || !Q.getCanNextPage(),
             "aria-label": "Last page",
-            children: /* @__PURE__ */ At.jsx(W5, {})
+            children: /* @__PURE__ */ At.jsx(t8, {})
           }
         )
       ] })
@@ -31283,7 +31293,7 @@ function my({
     }
   );
 }
-function l8(j, at) {
+function u8(j, at) {
   if (j <= 7) return Array.from({ length: j }, (A, b) => b);
   const s = [], E = (A) => {
     s.includes(A) || s.push(A);
@@ -31297,7 +31307,7 @@ function gy(j) {
 }
 var Wv = { exports: {} };
 var F4;
-function u8() {
+function c8() {
   return F4 || (F4 = 1, (function(j, at) {
     (function(s) {
       j.exports = s();
@@ -53860,25 +53870,25 @@ use chrome, FireFox or Internet Explorer 11`);
     }));
   })(Wv)), Wv.exports;
 }
-var c8 = u8();
-const f8 = /* @__PURE__ */ P4(c8);
-async function d8(j, at) {
+var f8 = c8();
+const d8 = /* @__PURE__ */ P4(f8);
+async function h8(j, at) {
   const s = new Blob([j], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   }), E = URL.createObjectURL(s), A = document.createElement("a");
   A.href = E, A.download = at, document.body.appendChild(A), A.click(), document.body.removeChild(A), URL.revokeObjectURL(E);
 }
 async function l6(j, at, s, E) {
-  const A = new f8.Workbook(), b = A.addWorksheet(j.slice(0, 31) || "Report", {
+  const A = new d8.Workbook(), b = A.addWorksheet(j.slice(0, 31) || "Report", {
     views: [{ state: "frozen", ySplit: 1 }]
   });
   b.addRow(s), b.getRow(1).font = { bold: !0 }, E.forEach((f) => b.addRow(f)), s.forEach((f, l) => {
     b.getColumn(l + 1).width = Math.min(Math.max(String(f).length + 2, 10), 36);
   });
   const d = await A.xlsx.writeBuffer();
-  await d8(d, at.endsWith(".xlsx") ? at : `${at}.xlsx`);
+  await h8(d, at.endsWith(".xlsx") ? at : `${at}.xlsx`);
 }
-async function h8(j, at, s, E) {
+async function p8(j, at, s, E) {
   const A = s.map((d) => d.header), b = E.map((d) => s.map((f) => {
     const l = f.value(d);
     return l == null ? "" : String(l);
@@ -53894,7 +53904,7 @@ function u6({ children: j, onSearch: at, onReset: s, searchDisabled: E }) {
       "aria-label": "Report filters",
       children: [
         /* @__PURE__ */ At.jsxs("div", { className: "mb-4 flex items-center gap-2 border-b border-outline-variant/10 pb-3", children: [
-          /* @__PURE__ */ At.jsx(a8, { className: "h-4 w-4 text-primary", "aria-hidden": !0 }),
+          /* @__PURE__ */ At.jsx(i8, { className: "h-4 w-4 text-primary", "aria-hidden": !0 }),
           /* @__PURE__ */ At.jsx("h2", { className: "text-xs font-bold uppercase tracking-wider text-on-surface", children: "Filters" })
         ] }),
         /* @__PURE__ */ At.jsx("div", { className: "flex flex-wrap items-end gap-4", children: j }),
@@ -53941,7 +53951,7 @@ function c6(j, at) {
     [j, at]
   );
 }
-const p8 = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), m8 = () => new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10), g8 = [
+const m8 = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), g8 = () => new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10), b8 = [
   { value: "all", label: "All stores" },
   { value: "sg-flagship", label: "SG — Flagship" },
   { value: "my-central", label: "MY — Central" }
@@ -53963,8 +53973,8 @@ function h2({
   onReset: u,
   autoLoad: y = !0,
   emptyMessage: v = "No rows match the current filters. Adjust filters and click Search.",
-  initialDateFrom: p = m8(),
-  initialDateTo: S = p8()
+  initialDateFrom: p = g8(),
+  initialDateTo: S = m8()
 }) {
   const [_, O] = qe.useState(p), [N, F] = qe.useState(S), [$, J] = qe.useState("all"), [Y, Z] = qe.useState([]), [K, rt] = qe.useState(!1), [Q, B] = qe.useState(!1), { exportDisabled: I } = c6(K, Y.length), k = qe.useMemo(
     () => ({ dateFrom: _, dateTo: N, storeScope: $ }),
@@ -54055,7 +54065,7 @@ function h2({
             className: Ai,
             value: $,
             onChange: (z) => J(z.target.value),
-            children: g8.map((z) => /* @__PURE__ */ At.jsx("option", { value: z.value, children: z.label }, z.value))
+            children: b8.map((z) => /* @__PURE__ */ At.jsx("option", { value: z.value, children: z.label }, z.value))
           }
         ) }),
         h
@@ -54082,7 +54092,7 @@ function h2({
     ] })
   ] });
 }
-function b8({ tenantId: j, storeId: at, authToken: s }) {
+function y8({ tenantId: j, storeId: at, authToken: s }) {
   const E = qe.useMemo(
     () => [
       {
@@ -54098,7 +54108,7 @@ function b8({ tenantId: j, storeId: at, authToken: s }) {
     ],
     []
   ), A = qe.useCallback(
-    async (b) => j ? (await Jw(
+    async (b) => j ? (await Ww(
       j,
       {
         dateFrom: b.dateFrom,
@@ -54128,7 +54138,7 @@ function b8({ tenantId: j, storeId: at, authToken: s }) {
     }
   );
 }
-function y8(j) {
+function v8(j) {
   return /* @__PURE__ */ At.jsxs(
     "div",
     {
@@ -54153,7 +54163,7 @@ function y8(j) {
     }
   );
 }
-function v8({ tenantId: j, storeId: at, authToken: s }) {
+function w8({ tenantId: j, storeId: at, authToken: s }) {
   const E = qe.useMemo(
     () => [
       {
@@ -54174,7 +54184,7 @@ function v8({ tenantId: j, storeId: at, authToken: s }) {
     ],
     []
   ), A = qe.useCallback(
-    async (b) => j ? (await Ww(
+    async (b) => j ? (await t5(
       j,
       { storeId: b.storeScope !== "all" ? b.storeScope : at ?? "all" },
       s
@@ -54202,10 +54212,10 @@ const q4 = [
   { value: "product", label: "Product" },
   { value: "category", label: "Category" }
 ];
-function w8(j) {
+function _8(j) {
   return j.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function _8({ tenantId: j, storeId: at, authToken: s }) {
+function S8({ tenantId: j, storeId: at, authToken: s }) {
   const [E, A] = qe.useState("store"), b = qe.useMemo(
     () => [
       {
@@ -54226,7 +54236,7 @@ function _8({ tenantId: j, storeId: at, authToken: s }) {
     ],
     [E]
   ), d = qe.useCallback(
-    async (l) => j ? (await Kw(
+    async (l) => j ? (await Jw(
       j,
       {
         dateFrom: l.dateFrom,
@@ -54239,7 +54249,7 @@ function _8({ tenantId: j, storeId: at, authToken: s }) {
       id: `${c.key}-${h}`,
       key: c.key,
       orders: c.orders ?? null,
-      gross: w8(c.gross)
+      gross: _8(c.gross)
     })) : [],
     [j, at, s, E]
   ), f = /* @__PURE__ */ At.jsx(
@@ -54271,28 +54281,28 @@ function _8({ tenantId: j, storeId: at, authToken: s }) {
     }
   );
 }
-const S8 = [
+const x8 = [
   { value: "all", label: "All stores" },
   { value: "sg-flagship", label: "SG — Flagship" },
   { value: "my-central", label: "MY — Central" }
-], x8 = [
+], E8 = [
   { value: "all", label: "All brands" },
   { value: "CAS-7721", label: "Luxe Heritage" },
   { value: "VEL-4490", label: "Velocity Tech" },
   { value: "AUR-5501", label: "Aura Essentials" }
-], E8 = [
+], T8 = [
   { value: "all", label: "All methods" },
   { value: "Visa", label: "Visa" },
   { value: "Mastercard", label: "Mastercard" },
   { value: "PayNow", label: "PayNow" },
   { value: "PayPal", label: "PayPal" }
-], T8 = [
+], C8 = [
   { value: "all", label: "All types" },
   { value: "Gateway", label: "Gateway" },
   { value: "Voucher", label: "Voucher" },
   { value: "GiftCard", label: "Gift card" },
   { value: "LoyaltyPoints", label: "Loyalty points" }
-], C8 = [
+], A8 = [
   { value: "all", label: "All countries" },
   { value: "SG", label: "Singapore" },
   { value: "MY", label: "Malaysia" },
@@ -54303,7 +54313,7 @@ const S8 = [
 function t2(j) {
   return j.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function A8(j) {
+function M8(j) {
   return {
     id: j.orderId,
     receiptNumber: j.receiptNumber ?? Rr,
@@ -54341,10 +54351,10 @@ function A8(j) {
     application: Rr
   };
 }
-const M8 = (j) => ({ row: at }) => {
+const R8 = (j) => ({ row: at }) => {
   const s = at.getValue(j);
   return /* @__PURE__ */ At.jsx("span", { className: "whitespace-nowrap text-xs text-on-surface-variant", children: String(s ?? "") });
-}, R8 = (j) => ({ row: at }) => /* @__PURE__ */ At.jsx("span", { className: "tabular-nums whitespace-nowrap text-xs", children: String(at.getValue(j) ?? "") }), O8 = /* @__PURE__ */ new Set([
+}, O8 = (j) => ({ row: at }) => /* @__PURE__ */ At.jsx("span", { className: "tabular-nums whitespace-nowrap text-xs", children: String(at.getValue(j) ?? "") }), k8 = /* @__PURE__ */ new Set([
   "source",
   "transactionType",
   "brandCode",
@@ -54367,8 +54377,8 @@ function tr(j, at, s = "text") {
   return {
     accessorKey: j,
     header: at,
-    cell: s === "num" ? R8(j) : M8(j),
-    meta: O8.has(j) ? { dataPending: !0 } : void 0
+    cell: s === "num" ? O8(j) : R8(j),
+    meta: k8.has(j) ? { dataPending: !0 } : void 0
   };
 }
 const f6 = [
@@ -54407,11 +54417,11 @@ const f6 = [
   tr("browser", "Browser"),
   tr("os", "OS"),
   tr("application", "App")
-], k8 = f6.filter((j) => typeof j.accessorKey == "string" && typeof j.header == "string").map((j) => ({
+], D8 = f6.filter((j) => typeof j.accessorKey == "string" && typeof j.header == "string").map((j) => ({
   header: j.header,
   value: (at) => at[j.accessorKey]
 })), G4 = "2026-04-01", Y4 = "2026-04-29";
-function D8({ tenantId: j, storeId: at, authToken: s }) {
+function j8({ tenantId: j, storeId: at, authToken: s }) {
   const [E, A] = qe.useState(G4), [b, d] = qe.useState(Y4), [f, l] = qe.useState("all"), [a, c] = qe.useState("all"), [h, o] = qe.useState(""), [u, y] = qe.useState(""), [v, p] = qe.useState(""), [S, _] = qe.useState("all"), [O, N] = qe.useState("all"), [F, $] = qe.useState("all"), [J, Y] = qe.useState(""), [Z, K] = qe.useState([]), [rt, Q] = qe.useState(null), [B, I] = qe.useState(!1), [k, w] = qe.useState(!1), [x, T] = qe.useState(null), { exportDisabled: C } = c6(B, Z.length), z = qe.useCallback(async () => {
     if (!j) {
       T("Missing tenant context. Please reload the backoffice."), K([]), Q(null), w(!0);
@@ -54436,10 +54446,10 @@ function D8({ tenantId: j, storeId: at, authToken: s }) {
     };
     try {
       const [G, it] = await Promise.all([
-        Zw(j, ot, { limit: 100 }, s),
-        Qw(j, ot, s)
+        Qw(j, ot, s),
+        Kw(j, ot, s)
       ]);
-      K(G.rows.map(A8)), Q(it);
+      K(G.rows.map(M8)), Q(it);
     } catch (G) {
       T(G instanceof Error ? G.message : "Failed to load report data"), K([]), Q(null);
     }
@@ -54461,7 +54471,7 @@ function D8({ tenantId: j, storeId: at, authToken: s }) {
   ]), U = qe.useCallback(() => {
     A(G4), d(Y4), l("all"), c("all"), o(""), y(""), p(""), _("all"), N("all"), $("all"), Y(""), K([]), Q(null), w(!1);
   }, []), H = qe.useCallback(async () => {
-    Z.length !== 0 && await h8("Transactions", `transactions-${E}_${b}.xlsx`, k8, Z);
+    Z.length !== 0 && await p8("Transactions", `transactions-${E}_${b}.xlsx`, D8, Z);
   }, [Z, E, b]), W = qe.useMemo(() => {
     if (!rt) return [];
     const ot = (it) => it.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), G = (it) => it.toLocaleString("en-US");
@@ -54532,8 +54542,8 @@ function D8({ tenantId: j, storeId: at, authToken: s }) {
       }, onReset: U, searchDisabled: B, children: [
         /* @__PURE__ */ At.jsx(Yi, { label: "From", htmlFor: "tx-from", children: /* @__PURE__ */ At.jsx("input", { id: "tx-from", type: "date", className: Ai, value: E, onChange: (ot) => A(ot.target.value) }) }),
         /* @__PURE__ */ At.jsx(Yi, { label: "To", htmlFor: "tx-to", children: /* @__PURE__ */ At.jsx("input", { id: "tx-to", type: "date", className: Ai, value: b, onChange: (ot) => d(ot.target.value) }) }),
-        /* @__PURE__ */ At.jsx(Yi, { label: "Store", htmlFor: "tx-store", children: /* @__PURE__ */ At.jsx("select", { id: "tx-store", className: Ai, value: f, onChange: (ot) => l(ot.target.value), children: S8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
-        /* @__PURE__ */ At.jsx(Yi, { label: "Brand", htmlFor: "tx-brand", children: /* @__PURE__ */ At.jsx("select", { id: "tx-brand", className: Ai, value: a, onChange: (ot) => c(ot.target.value), children: x8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
+        /* @__PURE__ */ At.jsx(Yi, { label: "Store", htmlFor: "tx-store", children: /* @__PURE__ */ At.jsx("select", { id: "tx-store", className: Ai, value: f, onChange: (ot) => l(ot.target.value), children: x8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
+        /* @__PURE__ */ At.jsx(Yi, { label: "Brand", htmlFor: "tx-brand", children: /* @__PURE__ */ At.jsx("select", { id: "tx-brand", className: Ai, value: a, onChange: (ot) => c(ot.target.value), children: E8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
         /* @__PURE__ */ At.jsx(Yi, { label: "Member contains", htmlFor: "tx-member", children: /* @__PURE__ */ At.jsx(
           "input",
           {
@@ -54567,9 +54577,20 @@ function D8({ tenantId: j, storeId: at, authToken: s }) {
             onChange: (ot) => p(ot.target.value)
           }
         ) }),
-        /* @__PURE__ */ At.jsx(Yi, { label: "Payment method", htmlFor: "tx-pay", children: /* @__PURE__ */ At.jsx("select", { id: "tx-pay", className: Ai, value: S, onChange: (ot) => _(ot.target.value), children: E8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
-        /* @__PURE__ */ At.jsx(Yi, { label: "Payment type", htmlFor: "tx-paytype", children: /* @__PURE__ */ At.jsx("select", { id: "tx-paytype", className: Ai, value: O, onChange: (ot) => N(ot.target.value), children: T8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
-        /* @__PURE__ */ At.jsx(Yi, { label: "Country", htmlFor: "tx-country", children: /* @__PURE__ */ At.jsx("select", { id: "tx-country", className: Ai, value: F, onChange: (ot) => $(ot.target.value), children: C8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
+        /* @__PURE__ */ At.jsx(Yi, { label: "Payment method", htmlFor: "tx-pay", children: /* @__PURE__ */ At.jsx(
+          "select",
+          {
+            id: "tx-pay",
+            className: `${Ai} cursor-not-allowed opacity-50`,
+            value: S,
+            onChange: (ot) => _(ot.target.value),
+            disabled: !0,
+            title: "Payment method lives in the Payment DB projection (upcoming). Use Payment type for now.",
+            children: T8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value))
+          }
+        ) }),
+        /* @__PURE__ */ At.jsx(Yi, { label: "Payment type", htmlFor: "tx-paytype", children: /* @__PURE__ */ At.jsx("select", { id: "tx-paytype", className: Ai, value: O, onChange: (ot) => N(ot.target.value), children: C8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
+        /* @__PURE__ */ At.jsx(Yi, { label: "Country", htmlFor: "tx-country", children: /* @__PURE__ */ At.jsx("select", { id: "tx-country", className: Ai, value: F, onChange: (ot) => $(ot.target.value), children: A8.map((ot) => /* @__PURE__ */ At.jsx("option", { value: ot.value, children: ot.label }, ot.value)) }) }),
         /* @__PURE__ */ At.jsx(Yi, { label: "Receipt #", htmlFor: "tx-receipt", children: /* @__PURE__ */ At.jsx(
           "input",
           {
@@ -54628,7 +54649,7 @@ function D8({ tenantId: j, storeId: at, authToken: s }) {
     ] })
   ] });
 }
-function j8(j) {
+function N8(j) {
   const at = window.location.hash;
   let s = "";
   if (at.startsWith("#dcmsEstore"))
@@ -54641,17 +54662,17 @@ function j8(j) {
   const E = s.split("/").filter(Boolean), A = E[E.length - 1] ?? "";
   return j.has(A) ? A : null;
 }
-function N8(j) {
+function z8(j) {
   return `#${j}`;
 }
 const d6 = [
-  { id: "transaction", label: "Transaction", Icon: s8 },
-  { id: "sales", label: "Sales", Icon: i8 },
+  { id: "transaction", label: "Transaction", Icon: o8 },
+  { id: "sales", label: "Sales", Icon: s8 },
   { id: "abandon-cart", label: "Abandon cart", Icon: Jv },
   { id: "restock-subscriptions", label: "Restock", Icon: Jv },
   { id: "delivery-slots", label: "Delivery slots", Icon: Jv }
-], z8 = d6.map((j) => j.id);
-function B8({ page: j, onPageChange: at, children: s }) {
+], B8 = d6.map((j) => j.id);
+function U8({ page: j, onPageChange: at, children: s }) {
   return /* @__PURE__ */ At.jsxs(
     "div",
     {
@@ -54690,7 +54711,7 @@ function B8({ page: j, onPageChange: at, children: s }) {
                   onClick: () => {
                   },
                   children: [
-                    /* @__PURE__ */ At.jsx(K5, { className: "mr-3 h-5 w-5 shrink-0" }),
+                    /* @__PURE__ */ At.jsx(J5, { className: "mr-3 h-5 w-5 shrink-0" }),
                     /* @__PURE__ */ At.jsx("span", { children: "Help Center" })
                   ]
                 }
@@ -54703,14 +54724,14 @@ function B8({ page: j, onPageChange: at, children: s }) {
     }
   );
 }
-const U8 = new Set(z8);
+const L8 = new Set(B8);
 function e2() {
-  return j8(U8);
+  return N8(L8);
 }
 function n2(j) {
-  return N8(j);
+  return z8(j);
 }
-function L8({ tenantId: j, storeId: at, authToken: s }) {
+function H8({ tenantId: j, storeId: at, authToken: s }) {
   const [E, A] = qe.useState(() => e2() ?? "transaction"), [b, d] = qe.useState({});
   qe.useEffect(() => {
     if (j && at && s) return;
@@ -54750,21 +54771,21 @@ function L8({ tenantId: j, storeId: at, authToken: s }) {
     }
     const o = n2(h);
     window.location.hash !== o && (window.location.hash = o);
-  }, []), /* @__PURE__ */ At.jsxs(B8, { page: E, onPageChange: c, children: [
-    E === "transaction" && /* @__PURE__ */ At.jsx(D8, { tenantId: f, storeId: l, authToken: a }),
-    E === "sales" && /* @__PURE__ */ At.jsx(_8, { tenantId: f, storeId: l, authToken: a }),
-    E === "abandon-cart" && /* @__PURE__ */ At.jsx(b8, { tenantId: f, storeId: l, authToken: a }),
-    E === "restock-subscriptions" && /* @__PURE__ */ At.jsx(v8, { tenantId: f, storeId: l, authToken: a }),
-    E === "delivery-slots" && /* @__PURE__ */ At.jsx(y8, { tenantId: f, storeId: l, authToken: a })
+  }, []), /* @__PURE__ */ At.jsxs(U8, { page: E, onPageChange: c, children: [
+    E === "transaction" && /* @__PURE__ */ At.jsx(j8, { tenantId: f, storeId: l, authToken: a }),
+    E === "sales" && /* @__PURE__ */ At.jsx(S8, { tenantId: f, storeId: l, authToken: a }),
+    E === "abandon-cart" && /* @__PURE__ */ At.jsx(y8, { tenantId: f, storeId: l, authToken: a }),
+    E === "restock-subscriptions" && /* @__PURE__ */ At.jsx(w8, { tenantId: f, storeId: l, authToken: a }),
+    E === "delivery-slots" && /* @__PURE__ */ At.jsx(v8, { tenantId: f, storeId: l, authToken: a })
   ] });
 }
 const by = /* @__PURE__ */ new WeakMap();
-function H8(j, at) {
+function I8(j, at) {
   if (by.has(j)) return;
   const s = Xw.createRoot(j);
   by.set(j, s), s.render(
     /* @__PURE__ */ At.jsx($w.StrictMode, { children: /* @__PURE__ */ At.jsx(
-      L8,
+      H8,
       {
         tenantId: at?.tenantId,
         storeId: at?.storeId,
@@ -54773,12 +54794,12 @@ function H8(j, at) {
     ) })
   );
 }
-function I8(j) {
+function V8(j) {
   const at = by.get(j);
   at && (at.unmount(), by.delete(j));
 }
 export {
-  H8 as mount,
-  I8 as unmount
+  I8 as mount,
+  V8 as unmount
 };
 //# sourceMappingURL=reports-spa.js.map

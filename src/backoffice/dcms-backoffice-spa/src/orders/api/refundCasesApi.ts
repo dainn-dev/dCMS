@@ -7,7 +7,7 @@
 
 import { GATEWAY } from "../../estore/api/gatewayConfig";
 import type { RefundCase, RefundStatus } from "../types";
-import { orderHeaders } from "./ordersApi";
+import { orderHeaders, mutationHeaders } from "./ordersApi";
 
 const BASE = GATEWAY.orders;
 
@@ -57,7 +57,7 @@ function refundCaseFromDto(dto: RefundCaseListItemDto): RefundCase {
     paymentReferenceNo: String(dto.paymentReferenceNo ?? ""),
     requestDate: String(dto.requestDate ?? ""),
     refundDate: dto.refundDate ? String(dto.refundDate) : null,
-    status: (dto.status ?? "Pending Refund") as RefundStatus,
+    status: (dto.status ?? "Pending") as RefundStatus,
     remark: String(dto.remark ?? ""),
     paymentGatewayMessage: "",
     isPaymentGatewayCase: true,
@@ -134,7 +134,7 @@ export async function updateRefundCaseStatus(
   const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/refund-case`, {
     method: "PUT",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify({ status: payload.status, remark: payload.remark }),
   });
   await throwIfApiError(res);

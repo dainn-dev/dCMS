@@ -2,7 +2,7 @@ import type { RowSelectionState } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
 import { IconBolt, IconCheckCircle } from "../../orders/icons";
-import { approveCampaign, fetchPendingCampaigns, rejectCampaign } from "../api/approvalApi";
+import { approveCampaign, fetchAllPendingCampaigns, rejectCampaign } from "../api/approvalApi";
 import { ApprovalOkConfirmModal } from "../components/ApprovalOkConfirmModal";
 import { RejectionReasonModal } from "../components/RejectionReasonModal";
 import {
@@ -36,7 +36,7 @@ export function CampaignApprovalPage({ tenantId, authToken, onPendingCountChange
     setLoading(true);
     setLoadError(null);
     try {
-      const { items, total } = await fetchPendingCampaigns(tenantId, { page: 1, pageSize: 100 }, authToken);
+      const { items, total } = await fetchAllPendingCampaigns(tenantId, authToken);
       setRows(items);
       onPendingCountChange?.(total);
     } catch (e: unknown) {

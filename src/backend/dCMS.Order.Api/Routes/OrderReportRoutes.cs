@@ -151,6 +151,10 @@ public static class OrderReportRoutes
             return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "membershipType filter is available after PR3 (Loyalty Membership domain rollout).");
         if (!string.IsNullOrWhiteSpace(membershipTier))
             return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "membershipTier filter is available after PR3 (Loyalty Membership domain rollout).");
+        // paymentMethod lives in the Payment DB (PaymentTransactions) which the details query does not join;
+        // reject explicitly instead of silently returning all rows. Use paymentType for the in-Order composition.
+        if (!string.IsNullOrWhiteSpace(paymentMethod))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "paymentMethod filter is not yet available; use paymentType instead.");
 
         var filter = new TransactionDetailFilter(
             MemberQuery: memberQuery,

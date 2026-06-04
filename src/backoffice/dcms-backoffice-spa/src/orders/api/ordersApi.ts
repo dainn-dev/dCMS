@@ -32,6 +32,24 @@ export function orderHeaders(tenantId: string, storeId: string, token?: string):
   return h;
 }
 
+/** A unique key for the `Idempotency-Key` header the Order API requires on every mutating request. */
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    // fall through to the timestamp-based fallback
+  }
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** Headers for mutating requests (POST/PATCH/PUT) — `orderHeaders` plus a fresh `Idempotency-Key`. */
+export function mutationHeaders(tenantId: string, storeId: string, token?: string): Record<string, string> {
+  return {
+    ...(orderHeaders(tenantId, storeId, token) as Record<string, string>),
+    "Idempotency-Key": newIdempotencyKey(),
+  };
+}
+
 function fmtMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat(undefined, {
@@ -51,44 +69,43 @@ function fmtDate(iso: string): string {
 }
 
 export function mapApiStatusToUiLabel(status: string): Order["status"] {
-  switch ((status ?? "").trim()) {
-    case "Created":
+  // Backend (OrderHttpRoutes.ToApiStatus) emits snake_case for every order status.
+  // Normalise to lower-case so we tolerate any legacy PascalCase too.
+  switch ((status ?? "").trim().toLowerCase()) {
+    case "payment_pending":
+    case "confirmed":
+    case "created": // legacy alias
       return "Open Order";
-    case "Processing":
+    case "processing":
       return "Processing";
-    case "ReadyForDelivery":
+    case "ready_for_delivery":
       return "Ready for Delivery";
-    case "ReadyForPickup":
+    case "ready_for_pickup":
       return "Ready for Pickup";
-    case "Shipped":
+    case "shipped":
       return "Out for Delivery";
-    case "Delivered":
+    case "picked_up":
+      return "Picked Up";
+    case "delivered":
       return "Delivered";
-    case "Returned":
+    case "returned":
       return "Returned";
-    case "AdminCancelled":
+    case "cancelled":
+      // Backend collapses all cancellations to a single "cancelled" status.
       return "Admin Cancelled";
-    case "PendingCancellation":
-      return "Pending Cancellation";
-    case "UserCancelled":
-      return "User Cancelled";
-    case "PartiallyFulfilled":
+    case "partial_fulfilled":
+    case "partiallyfulfilled":
       return "Partially Fulfilled";
-    // DAI-637 failure states (snake_case from backend ToApiStatus)
+    // DAI-637 failure states
     case "payment_failed":
-    case "PaymentFailed":
       return "Payment Failed";
     case "auth_failed":
-    case "AuthFailed":
       return "Auth Failed";
     case "address_error":
-    case "AddressError":
       return "Address Error";
     case "stock_error":
-    case "StockError":
       return "Stock Error";
     case "system_error":
-    case "SystemError":
       return "System Error";
     default:
       return "Processing";
@@ -148,6 +165,8 @@ export function isFailureStatus(s: string): s is FailureStatus {
 export type OrderListItemDto = {
   orderId: string;
   customerId: string;
+  customerName: string | null;
+  customerEmail: string | null;
   status: string;
   totalAmount: number;
   currency: string;
@@ -161,8 +180,9 @@ export function orderListItemFromDto(dto: OrderListItemDto): Order {
     orderId: String(dto.orderId ?? ""),
     orderDate: fmtDate(String(dto.createdAt ?? "")),
     type: "Online",
-    customerName: "",
-    customerEmail: "",
+    // List DTO carries the customer snapshot; fall back to the customer id when absent.
+    customerName: dto.customerName ?? "",
+    customerEmail: dto.customerEmail ?? (dto.customerName ? "" : String(dto.customerId ?? "")),
     customerContactNo: null,
     status: mapApiStatusToUiLabel(String(dto.status ?? "")),
     fulfilledDate: null,
@@ -373,7 +393,7 @@ export async function cancelOrder(
   const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/cancel`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify(reason ? { reason } : {}),
   });
   await throwIfApiError(res);
@@ -389,7 +409,7 @@ export async function shipOrder(
   const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/ship`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify(payload),
   });
   await throwIfApiError(res);
@@ -399,7 +419,7 @@ export async function deliverOrder(tenantId: string, storeId: string, orderId: s
   const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/deliver`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
   });
   await throwIfApiError(res);
 }
@@ -417,7 +437,7 @@ export async function retryFailedOrder(
   const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/retry-failure`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
   });
   await throwIfApiError(res);
 }
@@ -435,7 +455,7 @@ export async function resolveFailedOrder(
   const res = await fetch(`${BASE}/orders/${encodeURIComponent(orderId)}/resolve-failure`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify(note ? { note } : {}),
   });
   await throwIfApiError(res);
@@ -457,7 +477,7 @@ export async function updateItemFulfillmentStatus(
     {
       method: "PATCH",
       credentials: "same-origin",
-      headers: orderHeaders(tenantId, storeId, token),
+      headers: mutationHeaders(tenantId, storeId, token),
       body: JSON.stringify({ status }),
     },
   );
@@ -477,7 +497,7 @@ export async function issuePickupPin(
     {
       method: "POST",
       credentials: "same-origin",
-      headers: orderHeaders(tenantId, storeId, token),
+      headers: mutationHeaders(tenantId, storeId, token),
     },
   );
   await throwIfApiError(res);
@@ -500,7 +520,7 @@ export async function confirmPickup(
     {
       method: "POST",
       credentials: "same-origin",
-      headers: orderHeaders(tenantId, storeId, token),
+      headers: mutationHeaders(tenantId, storeId, token),
       body: JSON.stringify({ pin, pickedUpBy }),
     },
   );
@@ -619,7 +639,7 @@ export async function approveReturn(
   const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}/approve`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify(approvedBy ? { approvedBy } : {}),
   });
   await throwIfApiError(res);
@@ -635,7 +655,7 @@ export async function rejectReturn(
   const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}/reject`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify(approvedBy ? { approvedBy } : {}),
   });
   await throwIfApiError(res);
@@ -651,7 +671,7 @@ export async function completeReturn(
   const res = await fetch(`${RETURNS_BASE}/${encodeURIComponent(returnId)}/complete`, {
     method: "POST",
     credentials: "same-origin",
-    headers: orderHeaders(tenantId, storeId, token),
+    headers: mutationHeaders(tenantId, storeId, token),
     body: JSON.stringify(refundCaseId ? { refundCaseId } : {}),
   });
   await throwIfApiError(res);

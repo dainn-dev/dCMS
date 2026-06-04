@@ -18,6 +18,14 @@ public static class ProductSearchCacheKey
             ["q"] = query.Keyword?.ToLowerInvariant().Trim() ?? "",
             ["instock"] = query.InStockOnly?.ToString() ?? "",
             ["cat"] = query.CategoryAncestorId?.ToString(CultureInfo.InvariantCulture) ?? "",
+            ["cats"] = query.CategoryAncestorIds is { Count: > 0 }
+                ? string.Join(",", query.CategoryAncestorIds.Where(static c => c > 0).Distinct()
+                    .OrderBy(static c => c).Select(static c => c.ToString(CultureInfo.InvariantCulture)))
+                : "",
+            ["oos"] = query.OutOfStockOnly ? "1" : "",
+            ["lowstock"] = query.LowStockOnly
+                ? query.LowStockThreshold.ToString(CultureInfo.InvariantCulture)
+                : "",
             ["min"] = query.MinPriceAmount?.ToString(CultureInfo.InvariantCulture) ?? "",
             ["max"] = query.MaxPriceAmount?.ToString(CultureInfo.InvariantCulture) ?? "",
             ["sort"] = query.Sort.ToString(),

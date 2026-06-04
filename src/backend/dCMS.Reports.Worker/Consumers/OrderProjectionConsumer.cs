@@ -69,7 +69,10 @@ public sealed class OrderProjectionConsumer : IConsumer<OrderPlacedV1>
             if (inserted == 0)
                 return; // idempotent re-delivery
 
-            var d = DateOnly.FromDateTime(at.UtcDateTime);
+            // Dapper (this version) can't bind DateOnly as a parameter — use midnight-UTC DateTime,
+            // which Npgsql maps to the `date` columns. Passing DateOnly throws NotSupportedException
+            // and faults every projection.
+            var d = at.UtcDateTime.Date;
 
             await analytics.ExecuteAsync(new CommandDefinition(
                 """

@@ -16,6 +16,12 @@ builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "reports-worker
 
 builder.Services.AddHostedService<AnalyticsDbMigrationHostedService>();
 
+// AddDcmsConsumerEndpointDefaults wires the shared MessageIdempotencyConsumeFilter onto every
+// consumer endpoint, which needs IIdempotencyService — register it (backed by the analytics
+// "ProcessedMessages" table) or every consume faults with "Unable to resolve IIdempotencyService".
+builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Analytics");
+builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Analytics");
+
 builder.Services.Configure<CatalogClientOptions>(builder.Configuration.GetSection(CatalogClientOptions.SectionName));
 builder.Services.AddHttpClient(CatalogClientOptions.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
 

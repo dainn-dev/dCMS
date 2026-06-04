@@ -24,7 +24,15 @@ public sealed record ProductSearchQuery(
     /// <summary>Optional brand code to restrict results to a single brand.</summary>
     string? BrandId = null,
     /// <summary>Product custom-field properties (by snake_case key) to aggregate when <see cref="IncludeFacets"/> is true.</summary>
-    IReadOnlyList<string>? CustomFieldFacetProperties = null);
+    IReadOnlyList<string>? CustomFieldFacetProperties = null,
+    /// <summary>Multi-category filter (matches products whose ancestors contain ANY of these ids). Unions with <see cref="CategoryAncestorId"/>.</summary>
+    IReadOnlyList<int>? CategoryAncestorIds = null,
+    /// <summary>Quick-access "0 Quantity" filter — matches products whose total available quantity is exactly 0.</summary>
+    bool OutOfStockOnly = false,
+    /// <summary>Quick-access "Re-stock needed" filter — matches products with low stock (0 &lt; total qty ≤ <see cref="LowStockThreshold"/>).</summary>
+    bool LowStockOnly = false,
+    /// <summary>Inclusive upper bound for the "Re-stock needed" low-stock band. Defaults to 5 when not configured.</summary>
+    int LowStockThreshold = 5);
 
 public sealed record ProductSearchItem(
     string Id,

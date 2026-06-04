@@ -129,6 +129,28 @@ export async function fetchTransactionDetails(
   return { rows: body.data ?? [], nextCursor: body.meta?.nextCursor ?? null };
 }
 
+/**
+ * Pages through ALL transaction detail rows via the keyset cursor so the report
+ * isn't silently truncated at the first window (the view paginates client-side).
+ * Safety-capped to avoid runaway loops on very large date ranges.
+ */
+export async function fetchAllTransactionDetails(
+  tenantId: string,
+  filters: ReportFilters,
+  token?: string,
+  maxRows = 5000,
+): Promise<{ rows: TransactionDetailRow[] }> {
+  const all: TransactionDetailRow[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < 200; i++) {
+    const { rows, nextCursor } = await fetchTransactionDetails(tenantId, filters, { cursor, limit: 100 }, token);
+    all.push(...rows);
+    if (!nextCursor || rows.length === 0 || all.length >= maxRows) break;
+    cursor = nextCursor;
+  }
+  return { rows: all };
+}
+
 export type TransactionsOverviewRow = {
   totalTransactions: number;
   totalAmount: number;

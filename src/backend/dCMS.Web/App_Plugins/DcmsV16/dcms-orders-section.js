@@ -1,7 +1,8 @@
 import { UmbElementMixin } from "@umbraco-cms/backoffice/element-api";
 
-const SPA_JS = "/App_Plugins/DcmsV16/dist/orders-spa.js";
-const SPA_CSS = "/App_Plugins/DcmsV16/dist/orders-spa.css";
+const _v = typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : Date.now();
+const SPA_JS = `/App_Plugins/DcmsV16/dist/orders-spa.js?v=${_v}`;
+const SPA_CSS = `/App_Plugins/DcmsV16/dist/orders-spa.css?v=${_v}`;
 
 function resolveUrl(path) {
   try {

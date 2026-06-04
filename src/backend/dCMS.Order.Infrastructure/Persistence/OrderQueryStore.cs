@@ -302,6 +302,8 @@ public sealed class OrderQueryStore
                 "TenantId" AS TenantId,
                 "StoreId" AS StoreId,
                 "CustomerId" AS CustomerId,
+                "CustomerName" AS CustomerName,
+                "CustomerEmail" AS CustomerEmail,
                 "PaymentIntentId" AS PaymentIntentId,
                 "Total" AS Total,
                 "Currency" AS Currency,
@@ -377,6 +379,8 @@ public sealed class OrderQueryStore
                 "TenantId" AS TenantId,
                 "StoreId" AS StoreId,
                 "CustomerId" AS CustomerId,
+                "CustomerName" AS CustomerName,
+                "CustomerEmail" AS CustomerEmail,
                 "PaymentIntentId" AS PaymentIntentId,
                 "Total" AS Total,
                 "Currency" AS Currency,
@@ -591,6 +595,8 @@ public sealed class OrderQueryStore
         public string TenantId { get; set; } = "";
         public string StoreId { get; set; } = "";
         public string CustomerId { get; set; } = "";
+        public string? CustomerName { get; set; }
+        public string? CustomerEmail { get; set; }
         public string? PaymentIntentId { get; set; }
         public decimal Total { get; set; }
         public string Currency { get; set; } = "";

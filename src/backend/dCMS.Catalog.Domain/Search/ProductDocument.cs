@@ -51,6 +51,10 @@ public sealed class ProductDocument
     [JsonPropertyName("hasInStockVariant")]
     public bool HasInStockVariant { get; init; }
 
+    /// <summary>Sum of available quantity across all variants. 0 = out of stock; low values drive the "re-stock needed" filter.</summary>
+    [JsonPropertyName("totalAvailableQty")]
+    public int TotalAvailableQty { get; init; }
+
     [JsonPropertyName("minBasePrice")]
     public required MoneyAmount MinBasePrice { get; init; }
 

@@ -319,6 +319,8 @@ public sealed class OrderService : IOrderService
             TenantId: o.TenantId,
             StoreId: o.StoreId,
             CustomerId: o.CustomerId,
+            CustomerName: o.CustomerName ?? "",
+            CustomerEmail: o.CustomerEmail ?? "",
             Amount: pt.Amount,
             Currency: string.IsNullOrWhiteSpace(pt.Currency) ? o.Currency : pt.Currency,
             PaymentMethod: string.IsNullOrWhiteSpace(pt.PaymentMethod) ? "unknown" : pt.PaymentMethod,

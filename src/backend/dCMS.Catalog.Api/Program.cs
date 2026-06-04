@@ -38,6 +38,9 @@ using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Bind timestamptz columns to DateTimeOffset (incl. positional records). See DapperTypeHandlers.
+dCMS.Infrastructure.Persistence.DapperTypeHandlers.Register();
+
 var catalogCs = builder.Configuration.GetConnectionString("Catalog");
 if (string.IsNullOrWhiteSpace(catalogCs))
     throw new InvalidOperationException("Configure ConnectionStrings:Catalog (PostgreSQL catalog database).");

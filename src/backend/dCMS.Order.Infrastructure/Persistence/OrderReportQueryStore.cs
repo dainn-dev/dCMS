@@ -100,7 +100,7 @@ public sealed class OrderReportQueryStore
                 o."OrderDiscount"                                 AS OrderDiscount,
                 o."Currency"                                      AS Currency,
                 o."PromoCode"                                     AS OrderPromoCode,
-                o."ShippingAddress"->>'CountryCode'               AS BillingCountry,
+                o."ShippingAddress"->>'countryCode'               AS BillingCountry,
                 COALESCE(
                     (SELECT array_agg(DISTINCT op."Name")
                      FROM "OrderPromotions" op
@@ -137,7 +137,7 @@ public sealed class OrderReportQueryStore
                          AND op3."TenantId" = o."TenantId"
                          AND op3."EditorKind" = 'item'
                          AND op3."PromoCode" = @ItemPromoCode))
-              AND (@BillingCountry IS NULL OR o."ShippingAddress"->>'CountryCode' = @BillingCountry)
+              AND (@BillingCountry IS NULL OR o."ShippingAddress"->>'countryCode' = @BillingCountry)
               AND (@PaymentType    IS NULL OR EXISTS (
                        SELECT 1 FROM "OrderPayments" op4
                        INNER JOIN "PaymentComponents" pc2 ON pc2."OrderPaymentId" = op4."Id"

@@ -404,6 +404,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
       ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
+      # Product-search stock enrichment (SqlProductSearchRepository) reads the Inventory DB; without
+      # this the live-stock join is silently skipped.
+      ConnectionStrings__Inventory: "Host=postgres;Port=5432;Database=dcms_inventory;Username=dcms;Password=Your_password123"
       ConnectionStrings__Redis: "redis:6379"
       Elasticsearch__Url: "http://elasticsearch:9200"
       InternalCatalog__ApiKey: "dcms-local-internal-catalog-key-min-32-characters!!!"
@@ -459,6 +462,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Order: "Host=postgres;Port=5432;Database=dcms_order;Username=dcms;Password=Your_password123"
       ConnectionStrings__Catalog: "Host=postgres;Port=5432;Database=dcms_catalog;Username=dcms;Password=Your_password123"
+      # Refund-cases read the Payment DB (PaymentTransactionQueryStore). Without this the service
+      # falls back to appsettings' Host=127.0.0.1 and 500s inside the container.
+      ConnectionStrings__Payment: "Host=postgres;Port=5432;Database=dcms_payment;Username=dcms;Password=Your_password123"
+      # Order detail cache (OrderDetailCache) — without Redis every detail hit goes to Postgres (2000-CCU perf).
+      ConnectionStrings__Redis: "redis:6379"
       RabbitMq__Host: "rabbitmq"
       RabbitMq__User: "guest"
       RabbitMq__Pass: "guest"

@@ -2,7 +2,7 @@ import type { RowSelectionState } from "@tanstack/react-table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DataTable } from "../../orders/components/DataTable";
 import { IconCheckCircle, IconLocalOffer } from "../../orders/icons";
-import { approvePromoCode, fetchPendingPromoCodes, rejectPromoCode } from "../api/approvalApi";
+import { approvePromoCode, fetchAllPendingPromoCodes, rejectPromoCode } from "../api/approvalApi";
 import { ApprovalOkConfirmModal } from "../components/ApprovalOkConfirmModal";
 import { RejectionReasonModal } from "../components/RejectionReasonModal";
 import {
@@ -36,7 +36,7 @@ export function PromoCodeApprovalPage({ tenantId, authToken, onPendingCountChang
     setLoading(true);
     setLoadError(null);
     try {
-      const { items, total } = await fetchPendingPromoCodes(tenantId, { page: 1, pageSize: 100 }, authToken);
+      const { items, total } = await fetchAllPendingPromoCodes(tenantId, authToken);
       setRows(items);
       onPendingCountChange?.(total);
     } catch (e: unknown) {

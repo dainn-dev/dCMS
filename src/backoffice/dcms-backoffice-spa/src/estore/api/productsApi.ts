@@ -55,6 +55,8 @@
    priceMax?: number;
    brand?: string;
    category?: string;
+   /** Multi-category filter — category ids (CSV-serialized to the API). */
+   categories?: string[];
    qtyMin?: number;
    qtyMax?: number;
    estoreStatus?: "live" | "draft" | "inactive";
@@ -253,6 +255,13 @@ export function productToPayload(row: ProductWriteRow): ProductWritePayload {
      const catId = Number(filters.category);
      if (Number.isInteger(catId) && catId > 0) params.set("category", String(catId));
    }
+   if (filters?.categories?.length) {
+     const ids = filters.categories
+       .map((c) => Number(c))
+       .filter((n) => Number.isInteger(n) && n > 0);
+     if (ids.length) params.set("categories", ids.join(","));
+   }
+   if (filters?.quickAccess?.length) params.set("quickAccess", filters.quickAccess.join(","));
    if (filters?.brand && filters.brand !== "all") params.set("brand", filters.brand);
    if (paging?.pageSize) params.set("pageSize", String(paging.pageSize));
    const cursor = buildCursor(paging?.page, paging?.pageSize);
