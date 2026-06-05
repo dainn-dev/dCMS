@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AbandonCartReportPage } from "./pages/AbandonCartReportPage";
 import { DeliverySlotReportPage } from "./pages/DeliverySlotReportPage";
+import { EcommercePaymentsReportPage } from "./pages/EcommercePaymentsReportPage";
 import { RestockSubscriptionsReportPage } from "./pages/RestockSubscriptionsReportPage";
 import { SalesReportPage } from "./pages/SalesReportPage";
 import { TransactionReportPage } from "./pages/TransactionReportPage";
@@ -85,6 +86,9 @@ export function ReportsApp({ tenantId, storeId, authToken }: ReportsAppProps) {
     <ReportsLayout page={page} onPageChange={handlePageChange}>
       {page === "transaction" && <TransactionReportPage tenantId={effTenantId} storeId={effStoreId} authToken={effAuthToken} />}
       {page === "sales" && <SalesReportPage tenantId={effTenantId} storeId={effStoreId} authToken={effAuthToken} />}
+      {page === "ecommerce-payments" && (
+        <EcommercePaymentsReportPage tenantId={effTenantId} storeId={effStoreId} authToken={effAuthToken} />
+      )}
       {page === "abandon-cart" && <AbandonCartReportPage tenantId={effTenantId} storeId={effStoreId} authToken={effAuthToken} />}
       {page === "restock-subscriptions" && (
         <RestockSubscriptionsReportPage tenantId={effTenantId} storeId={effStoreId} authToken={effAuthToken} />

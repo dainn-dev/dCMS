@@ -176,9 +176,13 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       Auth__Enabled: "false"
       ConnectionStrings__Analytics: "Host=postgres-analytics;Port=5432;Database=dcms_analytics;Username=dcms;Password=Your_password123"
+      # DAI-711: delivery-slots report reads the Fulfillment read-model directly (cross-DB).
+      ConnectionStrings__Fulfillment: "Host=postgres;Port=5432;Database=dcms_fulfillment;Username=dcms;Password=Your_password123"
       Cors__AllowedOrigins__0: "http://localhost:3000"
     depends_on:
       postgres-analytics:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   notification-api:

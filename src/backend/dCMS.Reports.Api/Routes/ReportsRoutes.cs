@@ -65,16 +65,22 @@ public static class ReportsRoutes
         [FromQuery] string? dateTo,
         CancellationToken ct)
     {
+        // BRD: Receipt Date is mandatory (Common BR01); the three report dimensions are
+        // category | brand | product (default category — the first BRD report).
         if (!TryTenantStore(http, out var tenantId, out var storeId))
             return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
         if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
             return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
-        var gb = (groupBy ?? "store").Trim().ToLowerInvariant();
+        var gb = (groupBy ?? "category").Trim().ToLowerInvariant();
 
         try
         {
             var rows = await store.GetSalesAsync(tenantId, storeId, df, dt, gb, ct).ConfigureAwait(false);
-            return Ok(rows);
+            // BRD §3: the Sales by Product report carries an Overview summary in meta.
+            object? meta = gb == "product"
+                ? new { overview = await store.GetSalesProductOverviewAsync(tenantId, storeId, df, dt, ct).ConfigureAwait(false) }
+                : null;
+            return Ok(rows, meta);
         }
         catch (ArgumentOutOfRangeException ex)
         {
@@ -101,27 +107,46 @@ public static class ReportsRoutes
     private static async Task<IResult> GetRestockSubscriptions(
         HttpContext http,
         [FromServices] AnalyticsReportQueryStore store,
+        [FromQuery] string? dateFrom,
+        [FromQuery] string? dateTo,
+        [FromQuery] string? upc,
+        [FromQuery] string? sku,
+        [FromQuery] string? productName,
+        [FromQuery] string? email,
         CancellationToken ct)
     {
+        // BRD §3 / BR03: per-subscription detail. BR01: subscription-date range required.
         if (!TryTenantStore(http, out var tenantId, out var storeId))
             return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
+            return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
 
-        var rows = await store.GetRestockSubscriptionsAsync(tenantId, storeId, ct).ConfigureAwait(false);
+        var rows = await store.GetRestockSubscriptionDetailsAsync(
+            tenantId, storeId, df, dt, upc, sku, productName, email, ct).ConfigureAwait(false);
         return Ok(rows);
     }
 
-    private static Task<IResult> GetDeliverySlots(
+    private static async Task<IResult> GetDeliverySlots(
         HttpContext http,
+        [FromServices] FulfillmentReportQueryStore store,
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
+        [FromQuery] string? deliveryMode,
         CancellationToken ct)
     {
-        // DAI-711: Will be backed by analytics/projection of fulfillment slots + bookings.
-        if (!TryTenantStore(http, out _, out _))
-            return Task.FromResult<IResult>(Err(400, "MISSING_TENANT", "X-Tenant-Id header is required."));
-        if (!TryDateRange(dateFrom, dateTo, out _, out _))
-            return Task.FromResult<IResult>(Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd)."));
-        return Task.FromResult<IResult>(Ok(Array.Empty<object>()));
+        // DAI-711: backed by the Fulfillment read-model (slot config). No of Deliveries is 0 until an
+        // order→slot booking projection exists. BR02: deliveryMode optional ('all'/empty = every mode).
+        if (!TryTenantStore(http, out var tenantId, out _))
+            return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
+            return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
+
+        var mode = (deliveryMode ?? string.Empty).Trim();
+        if (string.Equals(mode, "all", StringComparison.OrdinalIgnoreCase))
+            mode = string.Empty;
+
+        var rows = await store.GetDeliverySlotsAsync(tenantId, df, dt, mode, ct).ConfigureAwait(false);
+        return Ok(rows);
     }
 }
 

@@ -50,6 +50,13 @@ export type ReportFilters = {
   billingCountry?: string;
   membershipType?: string;
   membershipTier?: string;
+  // Ecommerce Payments BRD §2 search criteria.
+  orderNumber?: string;
+  referenceNumber?: string;
+  gatewayName?: string;
+  paymentStatus?: string;
+  amountMin?: number | string;
+  amountMax?: number | string;
 };
 
 function dateParams(filters: ReportFilters): URLSearchParams {
@@ -88,11 +95,13 @@ export type TransactionDetailRow = {
   orderId: string;
   receiptNumber: string | null;
   date: string;
+  transactionType: string;
   member: string;
   customerName: string | null;
   customerEmail: string | null;
   store: string;
   status: string;
+  subTotal: number;
   amount: number;
   taxAmount: number;
   orderDiscount: number;
@@ -182,13 +191,18 @@ export async function fetchTransactionsOverview(
   return body.data ?? null;
 }
 
+// Ecommerce Payments BRD §3 — one row per payment transaction event.
 export type EcommercePaymentRow = {
   orderId: string;
+  referenceNumber: string;
+  gatewayName: string;
   paymentMethod: string;
+  paymentStatus: string;
+  gatewayMessage: string | null;
+  paymentDatetime: string;
+  cardNo: string | null;
   amount: number;
   currency: string;
-  transactionRef: string;
-  date: string;
 };
 
 export async function fetchEcommercePayments(
@@ -197,7 +211,14 @@ export async function fetchEcommercePayments(
   token?: string,
 ): Promise<EcommercePaymentRow[]> {
   const params = dateParams(filters);
+  // BRD §2 search criteria (all optional; Card No has no backing column so it isn't sent).
+  if (filters.orderNumber) params.set("orderNumber", filters.orderNumber);
+  if (filters.referenceNumber) params.set("referenceNumber", filters.referenceNumber);
+  if (filters.gatewayName) params.set("gatewayName", filters.gatewayName);
   if (filters.paymentMethod && filters.paymentMethod !== "all") params.set("paymentMethod", filters.paymentMethod);
+  if (filters.paymentStatus && filters.paymentStatus !== "all") params.set("paymentStatus", filters.paymentStatus);
+  if (filters.amountMin != null && filters.amountMin !== "") params.set("amountMin", String(filters.amountMin));
+  if (filters.amountMax != null && filters.amountMax !== "") params.set("amountMax", String(filters.amountMax));
   const res = await fetch(`${ORDERS_BASE}/orders/reports/transactions/ecommerce?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
@@ -284,32 +305,62 @@ export async function fetchSalesByTenant(
 
 // ── Analytics Reports API (DAI-685) ─────────────────────────────────────────
 
-export type SalesGroupBy = "store" | "product" | "category";
+// Sales Reports BRD §1–§3 — three dimensions: Category / Brand / Product.
+export type SalesDimension = "category" | "brand" | "product";
 
-export type SalesGroupRow = {
+// BRD-shaped row. Fields the analytics projection doesn't carry yet are null and render as "—":
+// `name` (display name vs. the id in `key`), `upc`/`sku` (product report), `productsCount`
+// (Current No. of Products) and `transactions` (Total Transactions).
+export type SalesReportRow = {
   key: string;
-  orders: number | null;
+  name: string | null;
+  upc: string | null;
+  sku: string | null;
+  productsCount: number | null;
+  transactions: number | null;
+  unitsSold: number;
   gross: number;
+  currency: string;
 };
 
-export async function fetchSalesGrouped(
+// BRD §3 Overview Section — summary metrics for the Sales by Product report.
+export type SalesOverview = {
+  totalProducts: number;
+  totalSales: number;
+  totalSalesTransactions: number;
+  totalProductsSold: number;
+  currency: string;
+};
+
+export async function fetchSalesReport(
   tenantId: string,
   filters: ReportFilters,
-  groupBy: SalesGroupBy,
+  dimension: SalesDimension,
   token?: string,
-): Promise<SalesGroupRow[]> {
+): Promise<{ rows: SalesReportRow[]; overview: SalesOverview | null }> {
   const params = dateParams(filters);
-  params.set("groupBy", groupBy);
+  params.set("groupBy", dimension);
   const res = await fetch(`${REPORTS_BASE}/sales?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
   await checkOk(res);
-  const body: ApiEnvelope<SalesGroupRow[]> = await res.json();
-  return body.data ?? [];
+  const body: ApiEnvelope<SalesReportRow[], { overview: SalesOverview | null }> = await res.json();
+  return { rows: body.data ?? [], overview: body.meta?.overview ?? null };
 }
 
-export type AbandonCartRow = { cartId: string; createdAt: string };
+// Abandon Cart BRD §4 — one row per abandoned cart.
+export type AbandonCartRow = {
+  cartId: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  cartValue: number;
+  currency: string;
+  productCount: number;
+  emailSentCount: number;
+  lastEmailSentAt: string | null;
+  createdAt: string;
+};
 
 export async function fetchAbandonCart(
   tenantId: string,
@@ -326,20 +377,73 @@ export async function fetchAbandonCart(
   return body.data ?? [];
 }
 
-export type RestockSubscriptionAggRow = { productId: string; subscriptions: number; fulfilled: number };
+// Restock Notifications Subscriptions BRD §3 — one row per subscription.
+export type RestockSubscriptionRow = {
+  productId: string;
+  upc: string | null;
+  sku: string | null;
+  productName: string | null;
+  email: string | null;
+  subscriptionDate: string;
+  restockNotificationSentOn: string | null;
+};
+
+// BR02 optional substring filters on top of the required subscription-date range (BR01).
+export type RestockSubscriptionFilters = {
+  upc?: string;
+  sku?: string;
+  productName?: string;
+  email?: string;
+};
 
 export async function fetchRestockSubscriptions(
   tenantId: string,
-  filters: Pick<ReportFilters, "storeId">,
+  filters: Pick<ReportFilters, "dateFrom" | "dateTo" | "storeId">,
+  extra: RestockSubscriptionFilters,
   token?: string,
-): Promise<RestockSubscriptionAggRow[]> {
+): Promise<RestockSubscriptionRow[]> {
   const params = new URLSearchParams();
+  params.set("dateFrom", filters.dateFrom);
+  params.set("dateTo", filters.dateTo);
   if (filters.storeId && filters.storeId !== "all") params.set("storeId", filters.storeId);
+  if (extra.upc?.trim()) params.set("upc", extra.upc.trim());
+  if (extra.sku?.trim()) params.set("sku", extra.sku.trim());
+  if (extra.productName?.trim()) params.set("productName", extra.productName.trim());
+  if (extra.email?.trim()) params.set("email", extra.email.trim());
   const res = await fetch(`${REPORTS_BASE}/restock-subscriptions?${params}`, {
     credentials: "same-origin",
     headers: headers(tenantId, filters.storeId, token),
   });
   await checkOk(res);
-  const body: ApiEnvelope<RestockSubscriptionAggRow[]> = await res.json();
+  const body: ApiEnvelope<RestockSubscriptionRow[]> = await res.json();
+  return body.data ?? [];
+}
+
+// DAI-711 — Delivery slot utilization (BRD §3). Grouped by slot name + first-day-of-week + delivery mode.
+export type DeliverySlotRow = {
+  slotName: string;
+  firstDayOfWeek: string;
+  noOfSlots: number;
+  noOfDeliveries: number;
+  deliveryMode: string;
+};
+
+export async function fetchDeliverySlots(
+  tenantId: string,
+  filters: Pick<ReportFilters, "dateFrom" | "dateTo">,
+  deliveryMode: string | undefined,
+  token?: string,
+): Promise<DeliverySlotRow[]> {
+  const params = new URLSearchParams();
+  params.set("dateFrom", filters.dateFrom);
+  params.set("dateTo", filters.dateTo);
+  // BR02: delivery mode is optional; omitted = all modes.
+  if (deliveryMode && deliveryMode !== "all") params.set("deliveryMode", deliveryMode);
+  const res = await fetch(`${REPORTS_BASE}/delivery-slots?${params}`, {
+    credentials: "same-origin",
+    headers: headers(tenantId, undefined, token),
+  });
+  await checkOk(res);
+  const body: ApiEnvelope<DeliverySlotRow[]> = await res.json();
   return body.data ?? [];
 }

@@ -32,6 +32,8 @@ type Props<T extends { id: string }> = {
   extraFilters?: ReactNode;
   /** Extra controls rendered next to the Export button (e.g. "Group by" select). */
   headerExtras?: ReactNode;
+  /** Optional summary content rendered above the results table once rows are loaded (e.g. overview metric cards). */
+  overviewContent?: ReactNode;
   /** Reset hook called when user clicks Reset (clear extra filter state in caller). */
   onReset?: () => void;
   /** Auto-load on mount. Default true. */
@@ -61,6 +63,7 @@ export function ReportView<T extends { id: string }>({
   showStoreFilter = true,
   extraFilters,
   headerExtras,
+  overviewContent,
   onReset,
   autoLoad = true,
   emptyMessage = "No rows match the current filters. Adjust filters and click Search.",
@@ -208,6 +211,8 @@ export function ReportView<T extends { id: string }>({
             <p className="mt-2 max-w-md text-xs text-on-surface-variant">{emptyMessage}</p>
           </div>
         )}
+
+        {!loading && rows.length > 0 && overviewContent}
 
         {!loading && rows.length > 0 && (
           <DataTable columns={columns} data={rows} getRowId={(row) => row.id} globalFilterPlaceholder="Search in results…" emptyMessage="No matching records." itemNoun="records" />

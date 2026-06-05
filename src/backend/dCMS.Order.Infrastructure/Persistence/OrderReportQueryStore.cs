@@ -31,7 +31,7 @@ public sealed class OrderReportQueryStore
             WHERE o."TenantId" = @TenantId
               AND (@StoreId = '' OR o."StoreId" = @StoreId)
               AND o."CreatedAt" >= @DateFrom AND o."CreatedAt" < @DateTo
-              AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed')
+              AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed', 'Cancelled', 'AdminCancelled', 'UserCancelled')
             """;
 
         await using var conn = new NpgsqlConnection(_connectionString);
@@ -90,12 +90,17 @@ public sealed class OrderReportQueryStore
                 o."Id"                                            AS OrderId,
                 NULL::text                                        AS ReceiptNumber, -- PR2 migration 023 will materialize this column
                 o."CreatedAt"                                     AS Date,
+                -- Transaction Type (BRD Details): derive from order state. Exchange isn't modelled yet.
+                CASE WHEN o."Status" = 'Returned'
+                       OR (o."RefundStatus" IS NOT NULL AND o."RefundStatus" NOT IN ('', 'None'))
+                     THEN 'Return' ELSE 'Sale' END                AS TransactionType,
                 o."CustomerId"                                    AS Member,
                 o."CustomerName"                                  AS CustomerName,
                 o."CustomerEmail"                                 AS CustomerEmail,
                 o."StoreId"                                       AS Store,
                 o."Status"                                        AS Status,
-                o."Total"                                         AS Amount,
+                o."SubTotal"                                      AS SubTotal,   -- gross "Total Amount" (pre-discount)
+                o."Total"                                         AS Amount,     -- net payable (BR03 Net Amount)
                 o."TaxTotal"                                      AS TaxAmount,
                 o."OrderDiscount"                                 AS OrderDiscount,
                 o."Currency"                                      AS Currency,
@@ -122,7 +127,7 @@ public sealed class OrderReportQueryStore
             WHERE o."TenantId" = @TenantId
               AND (@StoreId = '' OR o."StoreId" = @StoreId)
               AND o."CreatedAt" >= @DateFrom AND o."CreatedAt" < @DateTo
-              AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed')
+              AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed', 'Cancelled', 'AdminCancelled', 'UserCancelled')
               AND (@MemberQuery   IS NULL OR o."CustomerId" ILIKE '%' || @MemberQuery || '%'
                                           OR o."CustomerName" ILIKE '%' || @MemberQuery || '%'
                                           OR o."CustomerEmail" ILIKE '%' || @MemberQuery || '%')
@@ -171,11 +176,13 @@ public sealed class OrderReportQueryStore
             r.OrderId,
             r.ReceiptNumber,
             r.Date,
+            r.TransactionType,
             r.Member,
             r.CustomerName,
             r.CustomerEmail,
             r.Store,
             r.Status,
+            r.SubTotal,
             r.Amount,
             r.TaxAmount,
             r.OrderDiscount,
@@ -194,10 +201,13 @@ public sealed class OrderReportQueryStore
 
     public async Task<IReadOnlyList<EcommercePaymentRow>> GetEcommercePaymentsAsync(
         string tenantId, string storeId, DateOnly dateFrom, DateOnly dateTo,
-        string? paymentMethod,
+        EcommercePaymentFilter filter,
         CancellationToken ct = default)
     {
-        // DAI-XXX: Same cross-DB split — read orders, batch-load payments, in-process join + filter.
+        // Ecommerce Payments BRD: one row per payment transaction event (BR01), every status incl.
+        // cancelled/refunded (BR07). Cross-DB + tenant-safe: scope to the tenant's orders (Order DB —
+        // PaymentTransactions.TenantId is not reliably populated), then read every PaymentTransactions
+        // row for those orders (Payment DB). Payment Date filters on the gateway timestamp (CreatedAt).
         const string ordersSql = """
             SELECT o."Id" AS OrderId
             FROM "Orders" o
@@ -205,42 +215,26 @@ public sealed class OrderReportQueryStore
               AND (@StoreId = '' OR o."StoreId" = @StoreId)
               AND o."CreatedAt" >= @DateFrom AND o."CreatedAt" < @DateTo
             ORDER BY o."CreatedAt" DESC
-            LIMIT 2000
+            LIMIT 5000
             """;
 
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(ct).ConfigureAwait(false);
+        var from = dateFrom.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var to = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         var orderIds = (await conn.QueryAsync<Guid>(
             new CommandDefinition(ordersSql, new
             {
                 TenantId = tenantId,
                 StoreId = storeId,
-                DateFrom = dateFrom.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
-                DateTo = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+                DateFrom = from,
+                DateTo = to,
             }, cancellationToken: ct)).ConfigureAwait(false)).ToList();
 
         if (orderIds.Count == 0)
             return Array.Empty<EcommercePaymentRow>();
 
-        var paymentByOrder = await _paymentQueries.GetLatestByOrderIdsAsync(orderIds, ct).ConfigureAwait(false);
-        var trimmedMethod = NullIfBlank(paymentMethod);
-
-        var rows = new List<EcommercePaymentRow>(paymentByOrder.Count);
-        foreach (var orderId in orderIds)
-        {
-            if (!paymentByOrder.TryGetValue(orderId, out var p)) continue;
-            if (trimmedMethod is not null && !string.Equals(p.PaymentMethod, trimmedMethod, StringComparison.Ordinal))
-                continue;
-            rows.Add(new EcommercePaymentRow(
-                orderId,
-                p.PaymentMethod,
-                p.Amount,
-                p.Currency,
-                p.PaymentIntentId,
-                DateTime.UtcNow));
-        }
-
-        return rows.Take(500).ToList();
+        return await _paymentQueries.GetTransactionsForOrdersAsync(orderIds, from, to, filter, ct).ConfigureAwait(false);
     }
 
     public async Task<TransactionsOverviewRow> GetTransactionsOverviewAsync(
@@ -257,7 +251,7 @@ public sealed class OrderReportQueryStore
                 WHERE o."TenantId" = @TenantId
                   AND (@StoreId = '' OR o."StoreId" = @StoreId)
                   AND o."CreatedAt" >= @DateFrom AND o."CreatedAt" < @DateTo
-                  AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed')
+                  AND o."Status" NOT IN ('PaymentPending', 'PaymentFailed', 'AuthFailed', 'Cancelled', 'AdminCancelled', 'UserCancelled')
             ),
             by_day AS (
                 SELECT date_trunc('day', "CreatedAt") AS d, COUNT(*) AS c, SUM("Total") AS t
@@ -322,9 +316,9 @@ public sealed class OrderReportQueryStore
         const string sql = """
             SELECT
                 COALESCE(oi."ProductName"::text, '"Unknown"') AS Category,
-                COUNT(DISTINCT oi."ProductId") AS ProductsCount,
-                COUNT(DISTINCT o."Id") AS Transactions,
-                SUM(oi."Quantity") AS UnitsSold,
+                COUNT(DISTINCT oi."ProductId")::int AS ProductsCount,
+                COUNT(DISTINCT o."Id")::int AS Transactions,
+                SUM(oi."Quantity")::int AS UnitsSold,
                 SUM(oi."LineTotal") AS TotalSales,
                 o."Currency" AS Currency
             FROM "Orders" o
@@ -359,7 +353,7 @@ public sealed class OrderReportQueryStore
             SELECT
                 oi."ProductId" AS ProductId,
                 oi."ProductName"::text AS ProductNameJson,
-                SUM(oi."Quantity") AS UnitsSold,
+                SUM(oi."Quantity")::int AS UnitsSold,
                 SUM(oi."LineTotal") AS TotalSales,
                 o."Currency" AS Currency
             FROM "Orders" o
@@ -394,8 +388,8 @@ public sealed class OrderReportQueryStore
         const string sql = """
             SELECT
                 o."TenantId" AS TenantId,
-                COUNT(DISTINCT o."Id") AS OrdersCount,
-                SUM(oi."Quantity") AS ProductsSold,
+                COUNT(DISTINCT o."Id")::int AS OrdersCount,
+                SUM(oi."Quantity")::int AS ProductsSold,
                 SUM(o."Total") AS TotalSales,
                 o."Currency" AS Currency
             FROM "Orders" o
@@ -425,11 +419,13 @@ internal sealed class TransactionDetailRaw
     public Guid OrderId { get; set; }
     public string? ReceiptNumber { get; set; }
     public DateTime Date { get; set; }
+    public string TransactionType { get; set; } = string.Empty;
     public string Member { get; set; } = string.Empty;
     public string? CustomerName { get; set; }
     public string? CustomerEmail { get; set; }
     public string Store { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public decimal SubTotal { get; set; }
     public decimal Amount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal OrderDiscount { get; set; }
@@ -473,11 +469,13 @@ public sealed record TransactionDetailRow(
     Guid OrderId,
     string? ReceiptNumber,
     DateTime Date,
+    string TransactionType,
     string Member,
     string? CustomerName,
     string? CustomerEmail,
     string Store,
     string Status,
+    decimal SubTotal,
     decimal Amount,
     decimal TaxAmount,
     decimal OrderDiscount,
@@ -490,7 +488,29 @@ public sealed record TransactionDetailRow(
 
 public sealed record TransactionDetailPage(IReadOnlyList<TransactionDetailRow> Items, string? NextCursor);
 
-public sealed record EcommercePaymentRow(Guid OrderId, string PaymentMethod, decimal Amount, string Currency, string TransactionRef, DateTime Date);
+// Ecommerce Payments BRD §3 columns. GatewayMessage / CardNo are not modelled in PaymentTransactions
+// yet (BR03/BR06) → null, rendered as "—".
+public sealed record EcommercePaymentRow(
+    Guid OrderId,
+    string ReferenceNumber,
+    string GatewayName,
+    string PaymentMethod,
+    string PaymentStatus,
+    string? GatewayMessage,
+    DateTime PaymentDatetime,
+    string? CardNo,
+    decimal Amount,
+    string Currency);
+
+// BRD §2 search criteria. CardNo is omitted — no masked-card column exists to filter on.
+public sealed record EcommercePaymentFilter(
+    string? OrderNumber = null,
+    string? ReferenceNumber = null,
+    string? GatewayName = null,
+    string? PaymentMethod = null,
+    string? PaymentStatus = null,
+    decimal? AmountMin = null,
+    decimal? AmountMax = null);
 
 public sealed record TransactionsOverviewRow(
     int TotalTransactions,
