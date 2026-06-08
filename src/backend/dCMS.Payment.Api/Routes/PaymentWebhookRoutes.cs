@@ -1,6 +1,8 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using dCMS.Payment.Infrastructure.Webhooks;
+using dCMS.Payment.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 
@@ -51,7 +53,19 @@ public static class PaymentWebhookRoutes
                 statusCode: StatusCodes.Status401Unauthorized);
         }
 
-        if (!TryParseEnvelope(raw, out var paymentIntentId, out var succeeded, out var providerPaymentId, out var failureReason, out var occurredAt, out var parseErr))
+        var signatureDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signature ?? ""))).ToLowerInvariant();
+
+        if (!TryParseEnvelope(
+                raw,
+                out var paymentIntentId,
+                out var tenantId,
+                out var clientId,
+                out var eventId,
+                out var succeeded,
+                out var providerPaymentId,
+                out var failureReason,
+                out var occurredAt,
+                out var parseErr))
         {
             return Results.Json(
                 new { error = new { code = "INVALID_PAYLOAD", message = parseErr } },
@@ -65,8 +79,29 @@ public static class PaymentWebhookRoutes
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
+        eventId = string.IsNullOrWhiteSpace(eventId) ? $"sig:{signatureDigest}" : eventId.Trim();
+        clientId = string.IsNullOrWhiteSpace(clientId)
+            ? configuration.GetSection("Dcms:Client")["Id"]?.Trim() ?? "aeon"
+            : clientId.Trim();
+
+        if (!Guid.TryParse(tenantId, out var tenantGuid))
+        {
+            return Results.Json(
+                new { error = new { code = "INVALID_TENANT", message = "tenantId must be a valid UUID." } },
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var repository = http.RequestServices.GetRequiredService<IPaymentTransactionRepository>();
+        var recorded = await repository
+            .TryRecordWebhookDeliveryAsync(provider, eventId, signatureDigest, DateTimeOffset.UtcNow, cancellationToken)
+            .ConfigureAwait(false);
+        if (!recorded)
+        {
+            return Results.Ok();
+        }
+
         var result = await processor
-            .ProcessAsync(paymentIntentId, succeeded, providerPaymentId, failureReason, cancellationToken)
+            .ProcessAsync(paymentIntentId, tenantGuid, clientId, provider, succeeded, providerPaymentId, failureReason, cancellationToken)
             .ConfigureAwait(false);
 
         return result switch
@@ -83,6 +118,9 @@ public static class PaymentWebhookRoutes
     private static bool TryParseEnvelope(
         string rawJson,
         out string paymentIntentId,
+        out string tenantId,
+        out string clientId,
+        out string eventId,
         out bool succeeded,
         out string? providerPaymentId,
         out string failureReason,
@@ -90,6 +128,9 @@ public static class PaymentWebhookRoutes
         out string error)
     {
         paymentIntentId = "";
+        tenantId = "";
+        clientId = "";
+        eventId = "";
         succeeded = false;
         providerPaymentId = null;
         failureReason = "";
@@ -103,6 +144,19 @@ public static class PaymentWebhookRoutes
             paymentIntentId =
                 GetString(root, "paymentIntentId")
                 ?? GetString(root, "payment_intent_id")
+                ?? "";
+            tenantId =
+                GetString(root, "tenantId")
+                ?? GetString(root, "tenant_id")
+                ?? "";
+            clientId =
+                GetString(root, "clientId")
+                ?? GetString(root, "client_id")
+                ?? "";
+            eventId =
+                GetString(root, "eventId")
+                ?? GetString(root, "event_id")
+                ?? GetString(root, "id")
                 ?? "";
 
             var statusRaw =
@@ -128,6 +182,12 @@ public static class PaymentWebhookRoutes
             if (string.IsNullOrWhiteSpace(paymentIntentId))
             {
                 error = "paymentIntentId is required.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                error = "tenantId is required.";
                 return false;
             }
 
@@ -159,6 +219,7 @@ public static class PaymentWebhookRoutes
             }
 
             paymentIntentId = paymentIntentId.Trim();
+            tenantId = tenantId.Trim();
             return true;
         }
         catch (JsonException)

@@ -9,6 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>dCMS.Payment.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
     <ProjectReference Include="..\dCMS.Payment.Core\dCMS.Payment.Core.csproj" />
     <ProjectReference Include="..\dCMS.Payment.Infrastructure\dCMS.Payment.Infrastructure.csproj" />

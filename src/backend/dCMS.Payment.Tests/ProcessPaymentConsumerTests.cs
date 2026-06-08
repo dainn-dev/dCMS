@@ -4,6 +4,7 @@ using dCMS.Payment.Infrastructure.Messaging;
 using dCMS.Payment.Infrastructure.Persistence;
 using MassTransit;
 using MassTransit.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 
@@ -24,6 +25,7 @@ public sealed class ProcessPaymentConsumerTests
             orderId,
             tenantId,
             storeId,
+            "aeon",
             "cust",
             "card",
             intentId,
@@ -47,11 +49,13 @@ public sealed class ProcessPaymentConsumerTests
             .ReturnsAsync(new ProcessPaymentGatewayResult.Succeeded("ch_1"));
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, tenantId, "aeon", "stub", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
             .AddSingleton(gateway.Object)
             .AddSingleton(repo.Object)
+            .AddSingleton<IConfiguration>(TestConfiguration())
             .AddLogging()
             .AddMassTransitTestHarness(ConfigureHarness)
             .BuildServiceProvider(true);
@@ -74,7 +78,7 @@ public sealed class ProcessPaymentConsumerTests
 
             Assert.True(await harness.Published.Any<PaymentCompletedV1>());
             Assert.False(await harness.Published.Any<PaymentFailedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, "completed", It.IsAny<CancellationToken>()), Times.Once);
+            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, tenantId, storeId, "aeon", "stub", "completed", It.IsAny<CancellationToken>()), Times.Once);
             gateway.Verify(
                 g => g.ProcessPaymentAsync(
                     It.Is<ProcessPaymentGatewayRequest>(p =>
@@ -104,11 +108,13 @@ public sealed class ProcessPaymentConsumerTests
             .ReturnsAsync(new ProcessPaymentGatewayResult.AlreadySucceeded("ch_dup"));
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, tenantId, "aeon", "stub", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
             .AddSingleton(gateway.Object)
             .AddSingleton(repo.Object)
+            .AddSingleton<IConfiguration>(TestConfiguration())
             .AddLogging()
             .AddMassTransitTestHarness(ConfigureHarness)
             .BuildServiceProvider(true);
@@ -130,7 +136,7 @@ public sealed class ProcessPaymentConsumerTests
             await harness.InactivityTask;
 
             Assert.True(await harness.Published.Any<PaymentCompletedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, "completed", It.IsAny<CancellationToken>()), Times.Once);
+            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, tenantId, storeId, "aeon", "stub", "completed", It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {
@@ -152,11 +158,13 @@ public sealed class ProcessPaymentConsumerTests
             .ReturnsAsync(new ProcessPaymentGatewayResult.Failed("card_declined"));
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, tenantId, "aeon", "stub", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
             .AddSingleton(gateway.Object)
             .AddSingleton(repo.Object)
+            .AddSingleton<IConfiguration>(TestConfiguration())
             .AddLogging()
             .AddMassTransitTestHarness(ConfigureHarness)
             .BuildServiceProvider(true);
@@ -179,7 +187,7 @@ public sealed class ProcessPaymentConsumerTests
 
             Assert.True(await harness.Published.Any<PaymentFailedV1>());
             Assert.False(await harness.Published.Any<PaymentCompletedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, "failed", It.IsAny<CancellationToken>()), Times.Once);
+            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, tenantId, storeId, "aeon", "stub", "failed", It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {
@@ -197,11 +205,13 @@ public sealed class ProcessPaymentConsumerTests
 
         var gateway = new Mock<IPaymentGateway>();
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, tenantId, "aeon", "stub", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
             .AddSingleton(gateway.Object)
             .AddSingleton(repo.Object)
+            .AddSingleton<IConfiguration>(TestConfiguration())
             .AddLogging()
             .AddMassTransitTestHarness(ConfigureHarness)
             .BuildServiceProvider(true);
@@ -226,11 +236,19 @@ public sealed class ProcessPaymentConsumerTests
             gateway.Verify(
                 g => g.ProcessPaymentAsync(It.IsAny<ProcessPaymentGatewayRequest>(), It.IsAny<CancellationToken>()),
                 Times.Never);
-            repo.Verify(r => r.UpdateStatusByIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            repo.Verify(r => r.UpdateStatusByIdAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         }
         finally
         {
             await harness.Stop();
         }
     }
+
+    private static IConfiguration TestConfiguration() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Dcms:Client:Id"] = "aeon",
+            })
+            .Build();
 }
