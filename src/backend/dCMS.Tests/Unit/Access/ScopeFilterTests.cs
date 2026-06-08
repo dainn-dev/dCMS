@@ -161,6 +161,62 @@ public sealed class ScopeFilterTests
         StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
 
+    // ── AC2b TenantStore route (Notification Feed) ────────────────────────────
+    [Fact]
+    public async Task TenantStore_route_filter_passes_when_tenant_and_store_match()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1", ["storeId"] = "S1" },
+            user: User("T1", "S1", roles: DcmsRoles.StoreManager));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task TenantStore_route_filter_blocks_tenant_mismatch()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T2", ["storeId"] = "S1" },
+            user: User("T1", "S1", roles: DcmsRoles.StoreManager));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task TenantStore_route_filter_blocks_store_mismatch()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1", ["storeId"] = "S9" },
+            user: User("T1", "S1", roles: DcmsRoles.StoreManager));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task TenantStore_route_filter_lets_super_admin_through()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T9", ["storeId"] = "S9" },
+            user: User("T1", "S1", roles: DcmsRoles.SuperAdmin));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task TenantStore_route_filter_returns_401_for_unauthenticated()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1", ["storeId"] = "S1" },
+            user: new ClaimsPrincipal()); // no identity
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status401Unauthorized);
+    }
+
     // ── AC4 StoresFromBody ────────────────────────────────────────────────────
     [Fact]
     public async Task StoresFromBody_filter_passes_when_token_covers_all_ids()
