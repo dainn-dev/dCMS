@@ -1,6 +1,7 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using dCMS.Notification.Api.Migrations;
 using dCMS.Notification.Api.Rendering;
 using dCMS.Notification.Api.Routes;
@@ -25,6 +26,10 @@ else
 }
 
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -51,21 +56,27 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Notification API v1"); c.RoutePrefix = "swagger"; });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("notification-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
 
 app.UseDcmsImpersonationAudit();
+app.UseRateLimiter();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
 
 app.MapTemplateRoutes();
 app.MapTemplateCatalogRoutes();
 app.MapNotificationFeedRoutes();
 
-app.MapGet("/", () => Results.Text("dCMS.Notification.Api\n", "text/plain"));
+app.MapGet("/", () => Results.Text("dCMS.Notification.Api\n", "text/plain"))
+    .AllowAnonymous()
+    .DisableRateLimiting();
 app.Run();
 
 public partial class Program;

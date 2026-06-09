@@ -1,9 +1,9 @@
 // Payment API - US-23 service host (DAI-338+).
 
 using System.Security.Claims;
-using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using dCMS.Payment.Api.Routes;
 using dCMS.Payment.Core;
 using dCMS.Payment.Infrastructure;
@@ -16,47 +16,18 @@ builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "payment");
 
 if (builder.Configuration.GetSection("Auth").Exists())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
-
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-    {
-        var tenant = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        var key = string.IsNullOrWhiteSpace(tenant)
-            ? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"
-            : tenant.Trim();
-
-        return RateLimitPartition.GetFixedWindowLimiter(
-            key,
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = builder.Configuration.GetValue("RateLimiting:PermitLimit", 500),
-                Window = TimeSpan.FromSeconds(builder.Configuration.GetValue("RateLimiting:WindowSeconds", 60)),
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            });
-    });
-});
-
-var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-builder.Services.AddCors(o => o.AddPolicy("api", p =>
-{
-    if (origins.Length == 0) p.SetIsOriginAllowed(_ => false);
-    else p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
-}));
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 var app = builder.Build();
-app.UseCors("api");
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("payment-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (builder.Configuration.GetSection("Auth").Exists())
     app.UseDcmsJwtAuthentication(builder.Configuration);
 app.UseRateLimiter();
-app.Use(async (context, next) =>
-{
-    context.Response.Headers["X-Correlation-Id"] = context.TraceIdentifier;
-    await next().ConfigureAwait(false);
-});
 
 app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();

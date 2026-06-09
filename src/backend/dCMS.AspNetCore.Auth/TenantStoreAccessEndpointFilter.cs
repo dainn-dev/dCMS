@@ -20,6 +20,7 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
         var user = http.User;
         if (user.Identity?.IsAuthenticated != true)
         {
+            AccessFailureLogging.MarkAndLog(http, "unauthorized", "Authentication required.");
             return Results.Json(
                 new { data = (object?)null, meta = (object?)null, error = new { code = "unauthorized", message = "Authentication required." } },
                 statusCode: StatusCodes.Status401Unauthorized);
@@ -35,6 +36,7 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
 #pragma warning restore CS0618
         if (!string.Equals(tid, tenantRoute, StringComparison.Ordinal))
         {
+            AccessFailureLogging.MarkAndLog(http, "tenant_mismatch", "Token tenant does not match the request path.");
             return Results.Json(
                 new
                 {
@@ -50,37 +52,46 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
         {
             // If token explicitly constrains store scope, enforce it; else allow all stores within tenant (backward compat).
             if (allowedStores.Count > 0 && !allowedStores.Contains(storeRoute!, StringComparer.Ordinal))
+            {
+                AccessFailureLogging.MarkAndLog(http, "store_mismatch", "Token does not grant access to the requested store.");
                 return Results.Json(
                     new
                     {
                         data = (object?)null,
                         meta = (object?)null,
-                        error = new { code = "tenant_mismatch", message = "Token does not grant access to the requested store." }
+                        error = new { code = "store_mismatch", message = "Token does not grant access to the requested store." }
                     },
                     statusCode: StatusCodes.Status403Forbidden);
+            }
             return await next(context);
         }
 
         // Store-scoped roles must match the store and (if present) the allowedStores set.
         if (allowedStores.Count > 0 && !allowedStores.Contains(storeRoute!, StringComparer.Ordinal))
+        {
+            AccessFailureLogging.MarkAndLog(http, "store_mismatch", "Token does not grant access to the requested store.");
             return Results.Json(
                 new
                 {
                     data = (object?)null,
                     meta = (object?)null,
-                    error = new { code = "tenant_mismatch", message = "Token does not grant access to the requested store." }
+                    error = new { code = "store_mismatch", message = "Token does not grant access to the requested store." }
                 },
                 statusCode: StatusCodes.Status403Forbidden);
+        }
 
         if (!string.Equals(sid, storeRoute, StringComparison.Ordinal))
+        {
+            AccessFailureLogging.MarkAndLog(http, "store_mismatch", "Token store does not match the request path.");
             return Results.Json(
                 new
                 {
                     data = (object?)null,
                     meta = (object?)null,
-                    error = new { code = "tenant_mismatch", message = "Token store does not match the request path." }
+                    error = new { code = "store_mismatch", message = "Token store does not match the request path." }
                 },
                 statusCode: StatusCodes.Status403Forbidden);
+        }
 
         return await next(context);
     }

@@ -4,6 +4,7 @@ using dCMS.Core.Approvals;
 using dCMS.Core.Persistence;
 using dCMS.Infrastructure.Approvals;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using dCMS.Approval.Api.Migrations;
 using dCMS.Approval.Api.Routes;
 using dCMS.Approval.Api.Routes.Subjects;
@@ -46,6 +47,10 @@ else
 }
 
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -90,19 +95,25 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Approval API v1"); c.RoutePrefix = "swagger"; });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("approval-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
 
 app.UseDcmsImpersonationAudit();
+app.UseRateLimiter();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
 
 app.MapApprovalRoutes();
 
-app.MapGet("/", () => Results.Text("dCMS.Approval.Api\n", "text/plain"));
+app.MapGet("/", () => Results.Text("dCMS.Approval.Api\n", "text/plain"))
+    .AllowAnonymous()
+    .DisableRateLimiting();
 app.Run();
 
 public partial class Program;

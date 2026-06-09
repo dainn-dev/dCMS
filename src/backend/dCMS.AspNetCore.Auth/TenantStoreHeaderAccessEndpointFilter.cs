@@ -22,6 +22,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
         var user = http.User;
         if (user.Identity?.IsAuthenticated != true)
         {
+            AccessFailureLogging.MarkAndLog(http, "unauthorized", "Authentication required.");
             return Results.Json(
                 new { error = new { code = "UNAUTHORIZED", message = "Authentication required." } },
                 statusCode: StatusCodes.Status401Unauthorized);
@@ -37,6 +38,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
 #pragma warning restore CS0618
         if (string.IsNullOrWhiteSpace(tid))
         {
+            AccessFailureLogging.MarkAndLog(http, "missing_tenant_claim", "Token is missing tenant_id claim.");
             return Results.Json(
                 new { error = new { code = "FORBIDDEN", message = "Token is missing tenant_id claim." } },
                 statusCode: StatusCodes.Status403Forbidden);
@@ -44,6 +46,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
 
         if (!string.Equals(tid, tenantHeader, StringComparison.Ordinal))
         {
+            AccessFailureLogging.MarkAndLog(http, "tenant_mismatch", "Token tenant does not match X-Tenant-Id.");
             return Results.Json(
                 new { error = new { code = "FORBIDDEN", message = "Token tenant does not match X-Tenant-Id." } },
                 statusCode: StatusCodes.Status403Forbidden);
@@ -54,6 +57,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
             // If token explicitly constrains store scope, enforce it; else allow all stores within tenant (backward compat).
             if (allowedStores.Count > 0 && !allowedStores.Contains(storeHeader!, StringComparer.Ordinal))
             {
+                AccessFailureLogging.MarkAndLog(http, "store_mismatch", "Token does not grant access to X-Store-Id.");
                 return Results.Json(
                     new { error = new { code = "FORBIDDEN", message = "Token does not grant access to X-Store-Id." } },
                     statusCode: StatusCodes.Status403Forbidden);
@@ -63,6 +67,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
 
         if (string.IsNullOrWhiteSpace(sid))
         {
+            AccessFailureLogging.MarkAndLog(http, "missing_store_claim", "Token is missing store_id claim.");
             return Results.Json(
                 new { error = new { code = "FORBIDDEN", message = "Token is missing store_id claim." } },
                 statusCode: StatusCodes.Status403Forbidden);
@@ -71,6 +76,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
         // If token explicitly constrains store scope, enforce it for store-scoped roles too.
         if (allowedStores.Count > 0 && !allowedStores.Contains(storeHeader!, StringComparer.Ordinal))
         {
+            AccessFailureLogging.MarkAndLog(http, "store_mismatch", "Token does not grant access to X-Store-Id.");
             return Results.Json(
                 new { error = new { code = "FORBIDDEN", message = "Token does not grant access to X-Store-Id." } },
                 statusCode: StatusCodes.Status403Forbidden);
@@ -78,6 +84,7 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
 
         if (!string.Equals(sid, storeHeader, StringComparison.Ordinal))
         {
+            AccessFailureLogging.MarkAndLog(http, "store_mismatch", "Token store does not match X-Store-Id.");
             return Results.Json(
                 new { error = new { code = "FORBIDDEN", message = "Token store does not match X-Store-Id." } },
                 statusCode: StatusCodes.Status403Forbidden);

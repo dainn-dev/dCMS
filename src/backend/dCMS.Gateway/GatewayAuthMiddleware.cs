@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using dCMS.Infrastructure.Web;
 
 namespace dCMS.Gateway;
 
@@ -50,6 +51,12 @@ public sealed class GatewayAuthMiddleware(
         var token = ExtractBearerToken(context.Request);
         if (token is null)
         {
+            logger.LogWarning(
+                "Gateway auth rejected missing bearer token for {Method} {Path} correlation {CorrelationId} remote {RemoteIp}",
+                context.Request.Method,
+                context.Request.Path.Value,
+                context.Items.TryGetValue(DcmsWebHostDefaults.CorrelationIdHeaderName, out var value) ? value?.ToString() : context.TraceIdentifier,
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
             await WriteUnauthorized(context, "Bearer token required.");
             return;
         }
@@ -61,7 +68,13 @@ public sealed class GatewayAuthMiddleware(
         }
         catch (Exception ex)
         {
-            logger.LogWarning("Gateway token validation failed: {Message}", ex.Message);
+            logger.LogWarning(
+                ex,
+                "Gateway token validation failed for {Method} {Path} correlation {CorrelationId} remote {RemoteIp}",
+                context.Request.Method,
+                context.Request.Path.Value,
+                context.Items.TryGetValue(DcmsWebHostDefaults.CorrelationIdHeaderName, out var value) ? value?.ToString() : context.TraceIdentifier,
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
             await WriteUnauthorized(context, "Invalid or expired token.");
             return;
         }

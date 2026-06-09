@@ -73,6 +73,18 @@ public sealed class ScopeFilterTests
     private static int? StatusOf(object? r) =>
         r is IStatusCodeHttpResult s ? s.StatusCode : null;
 
+    private static string? ErrorCodeOf(object? r)
+    {
+        if (r is not IValueHttpResult valueResult || valueResult.Value is null)
+            return null;
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(valueResult.Value));
+        return json.RootElement
+            .GetProperty("error")
+            .GetProperty("code")
+            .GetString();
+    }
+
     // ── AC1 Tenant ────────────────────────────────────────────────────────────
     [Fact]
     public async Task TenantOnly_filter_passes_when_token_tenant_matches()
@@ -105,6 +117,30 @@ public sealed class ScopeFilterTests
 
         var result = await new TenantOnlyAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
         StatusOf(result).Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task TenantOnly_filter_returns_401_for_unauthenticated()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1" },
+            user: new ClaimsPrincipal());
+
+        var result = await new TenantOnlyAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status401Unauthorized);
+    }
+
+    [Fact]
+    public async Task TenantOnly_filter_blocks_when_token_missing_tenant_claim()
+    {
+        var claims = new List<Claim> { new(ClaimTypes.Role, DcmsRoles.ChainAdmin) };
+        var user = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1" },
+            user: user);
+
+        var result = await new TenantOnlyAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
     }
 
     // ── AC2 Store (header variant covers Order API path) ──────────────────────
@@ -215,6 +251,32 @@ public sealed class ScopeFilterTests
 
         var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
         StatusOf(result).Should().Be(StatusCodes.Status401Unauthorized);
+    }
+
+    [Fact]
+    public async Task TenantStore_filter_returns_store_mismatch_code_for_allowedStores_violation()
+    {
+        // ChainAdmin with store_ids constraint that excludes the route storeId
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1", ["storeId"] = "S9" },
+            user: User("T1", storeIdsCsv: "S1,S2", roles: DcmsRoles.ChainAdmin));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        ErrorCodeOf(result).Should().Be("store_mismatch");
+    }
+
+    [Fact]
+    public async Task TenantStore_filter_returns_store_mismatch_code_for_sid_mismatch()
+    {
+        // StoreManager with store_id claim that doesn't match route storeId
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1", ["storeId"] = "S9" },
+            user: User("T1", "S1", roles: DcmsRoles.StoreManager));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        ErrorCodeOf(result).Should().Be("store_mismatch");
     }
 
     // ── AC4 StoresFromBody ────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
 using Prometheus;
 using Swashbuckle.AspNetCore.SwaggerUI;
+using dCMS.Infrastructure.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -107,7 +108,7 @@ builder.Services.AddSwaggerGen(c =>
 var origins = builder.Configuration
     .GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
-builder.Services.AddCors(o => o.AddPolicy("gateway", p =>
+builder.Services.AddCors(o => o.AddPolicy("api", p =>
 {
     if (origins.Length == 0)
         p.SetIsOriginAllowed(_ => false);
@@ -124,6 +125,17 @@ builder.Services.AddRateLimiter(o =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.OnRejected = async (ctx, _) =>
     {
+        var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("dCMS.Gateway.RateLimiting");
+        var correlationId = ctx.HttpContext.Items.TryGetValue(DcmsWebHostDefaults.CorrelationIdHeaderName, out var value)
+            ? value?.ToString()
+            : ctx.HttpContext.TraceIdentifier;
+        logger.LogWarning(
+            "Gateway rate limit rejected {Method} {Path} correlation {CorrelationId} tenant {TenantId} remote {RemoteIp}",
+            ctx.HttpContext.Request.Method,
+            ctx.HttpContext.Request.Path.Value,
+            correlationId,
+            ctx.HttpContext.User.FindFirst("tenant_id")?.Value ?? "anonymous",
+            ctx.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
         ctx.HttpContext.Response.ContentType = "application/json";
         await ctx.HttpContext.Response.WriteAsJsonAsync(new
         {
@@ -158,9 +170,30 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 var app = builder.Build();
+var logger = app.Logger;
 
 app.UseForwardedHeaders();
-app.UseCors("gateway");
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("gateway");
+app.Use(async (context, next) =>
+{
+    var origin = context.Request.Headers.Origin.FirstOrDefault();
+    var allowedOrigins = builder.Configuration.GetSection(DcmsWebHostDefaults.CorsOriginsSectionName).Get<string[]>() ?? [];
+    if (!string.IsNullOrWhiteSpace(origin) &&
+        (allowedOrigins.Length == 0 || !allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase)))
+    {
+        logger.LogWarning(
+            "Gateway rejected CORS origin {Origin} for {Method} {Path} correlation {CorrelationId} remote {RemoteIp}",
+            origin,
+            context.Request.Method,
+            context.Request.Path.Value,
+            context.Items.TryGetValue(DcmsWebHostDefaults.CorrelationIdHeaderName, out var value) ? value?.ToString() : context.TraceIdentifier,
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+    }
+
+    await next().ConfigureAwait(false);
+});
+app.UseCors("api");
 
 // DAI-581: validate incoming token, mint internal JWT, overwrite Authorization header
 // Must run BEFORE exception handler so 401 responses are written directly (not caught as 500)

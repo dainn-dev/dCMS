@@ -1,6 +1,7 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using dCMS.Loyalty.Api.Migrations;
 using dCMS.Loyalty.Api.Persistence;
 using dCMS.Loyalty.Api.Routes;
@@ -25,6 +26,10 @@ else
     builder.Services.AddAuthorization();
 
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -62,19 +67,25 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Loyalty API v1"); c.RoutePrefix = "swagger"; });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("loyalty-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
 
 app.UseDcmsImpersonationAudit();
+app.UseRateLimiter();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
 
 app.MapLoyaltyRoutes();
 
-app.MapGet("/", () => Results.Text("dCMS.Loyalty.Api\n", "text/plain"));
+app.MapGet("/", () => Results.Text("dCMS.Loyalty.Api\n", "text/plain"))
+    .AllowAnonymous()
+    .DisableRateLimiting();
 app.Run();
 
 internal partial class Program;

@@ -27,8 +27,8 @@ using dCMS.Infrastructure.Caching;
 using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Pricing;
-using dCMS.Infrastructure.RateLimiting;
 using dCMS.Infrastructure.Search;
+using dCMS.Infrastructure.Web;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -144,31 +144,13 @@ builder.Services.AddScoped<ProductService>();
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
 
-builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
-    sp.GetRequiredService<IConfiguration>(),
-    sp.GetService<IConnectionMultiplexer>()));
 builder.Services.AddSingleton<AuditLogChannel>();
 builder.Services.AddSingleton(_ => new SqlAuditLogPersistence(catalogCs));
 builder.Services.AddHostedService<AuditLogBackgroundService>();
 builder.Services.AddSingleton<IPriceChangeAlerter, NoopPriceChangeAlerter>();
 
-builder.Services.AddRateLimiter(options =>
+builder.Services.AddDcmsTenantPlanRateLimiting(builder.Configuration, options =>
 {
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-    {
-        var resolver = httpContext.RequestServices.GetRequiredService<TenantPlanRateLimit>();
-        var key = resolver.ResolvePartitionKey(httpContext);
-        return RateLimitPartition.GetFixedWindowLimiter(key,
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = resolver.ResolvePermitLimit(key),
-                Window = resolver.Window,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0,
-                AutoReplenishment = true
-            });
-    });
     options.AddPolicy("PublicSlugCheck", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -193,18 +175,7 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true
             }));
 });
-
-var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-builder.Services.AddCors(o => o.AddPolicy("api", p =>
-{
-    if (origins.Length == 0)
-        p.SetIsOriginAllowed(_ => false);
-    else
-        p.WithOrigins(origins)
-         .AllowAnyHeader()
-         .WithExposedHeaders("Vary")
-         .AllowAnyMethod();
-}));
+builder.Services.AddDcmsCors(builder.Configuration);
 
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
@@ -256,9 +227,10 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
-app.UseCorrelationId();
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("catalog-api");
 app.UseForwardedHeaders();
-app.UseCors("api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
 app.UseDcmsImpersonationAudit();

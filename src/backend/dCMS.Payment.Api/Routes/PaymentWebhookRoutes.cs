@@ -1,10 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using dCMS.Infrastructure.Web;
 using dCMS.Payment.Infrastructure.Webhooks;
 using dCMS.Payment.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace dCMS.Payment.Api.Routes;
 
@@ -15,19 +17,24 @@ public static class PaymentWebhookRoutes
     {
         app.MapPost("/api/webhooks/payment/{provider}", HandleWebhook)
             .WithName("PaymentGatewayWebhook")
-            .WithTags("payments");
+            .WithTags("payments")
+            .AllowAnonymous()
+            .DisableRateLimiting();
     }
 
     private static async Task<IResult> HandleWebhook(
         string provider,
         HttpContext http,
         [FromServices] IConfiguration configuration,
+        [FromServices] ILoggerFactory loggerFactory,
         [FromServices] PaymentGatewayWebhookProcessor processor,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("dCMS.Payment.Webhooks");
         provider = (provider ?? "").Trim();
         if (string.IsNullOrWhiteSpace(provider))
         {
+            MarkWebhookFailure(http, logger, provider, "invalid_provider");
             return Results.Json(
                 new { error = new { code = "INVALID_PROVIDER", message = "provider is required." } },
                 statusCode: StatusCodes.Status400BadRequest);
@@ -36,6 +43,7 @@ public static class PaymentWebhookRoutes
         var secret = configuration[$"Payment:Providers:{provider}:WebhookSecret"]?.Trim();
         if (string.IsNullOrWhiteSpace(secret))
         {
+            MarkWebhookFailure(http, logger, provider, "unknown_provider");
             return Results.Json(
                 new { error = new { code = "UNKNOWN_PROVIDER", message = "No webhook secret configured for provider." } },
                 statusCode: StatusCodes.Status404NotFound);
@@ -48,6 +56,7 @@ public static class PaymentWebhookRoutes
 
         if (!PaymentWebhookVerifier.VerifyHmacSha256(signature, secret, bodyBytes))
         {
+            MarkWebhookFailure(http, logger, provider, "invalid_signature");
             return Results.Json(
                 new { error = new { code = "INVALID_SIGNATURE", message = "Invalid signature." } },
                 statusCode: StatusCodes.Status401Unauthorized);
@@ -67,6 +76,7 @@ public static class PaymentWebhookRoutes
                 out var occurredAt,
                 out var parseErr))
         {
+            MarkWebhookFailure(http, logger, provider, "invalid_payload");
             return Results.Json(
                 new { error = new { code = "INVALID_PAYLOAD", message = parseErr } },
                 statusCode: StatusCodes.Status400BadRequest);
@@ -74,6 +84,7 @@ public static class PaymentWebhookRoutes
 
         if (DateTimeOffset.UtcNow - occurredAt > TimeSpan.FromMinutes(5))
         {
+            MarkWebhookFailure(http, logger, provider, "replay_rejected");
             return Results.Json(
                 new { error = new { code = "REPLAY_REJECTED", message = "occurredAt is too old." } },
                 statusCode: StatusCodes.Status400BadRequest);
@@ -108,11 +119,34 @@ public static class PaymentWebhookRoutes
         {
             PaymentWebhookProcessResult.Ok or PaymentWebhookProcessResult.OkAlreadyProcessed => Results.Ok(),
             PaymentWebhookProcessResult.UnknownIntent => Results.Accepted(),
-            PaymentWebhookProcessResult.Conflict => Results.Json(
-                new { error = new { code = "CONFLICT", message = "Event does not match current payment state." } },
-                statusCode: StatusCodes.Status409Conflict),
-            _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+            PaymentWebhookProcessResult.Conflict => ConflictResult(http, logger, provider),
+            _ => ServerErrorResult(http, logger, provider),
         };
+    }
+
+    private static IResult ConflictResult(HttpContext http, ILogger logger, string provider)
+    {
+        MarkWebhookFailure(http, logger, provider, "state_conflict");
+        return Results.Json(
+            new { error = new { code = "CONFLICT", message = "Event does not match current payment state." } },
+            statusCode: StatusCodes.Status409Conflict);
+    }
+
+    private static IResult ServerErrorResult(HttpContext http, ILogger logger, string provider)
+    {
+        MarkWebhookFailure(http, logger, provider, "processor_error");
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
+
+    private static void MarkWebhookFailure(HttpContext http, ILogger logger, string provider, string reason)
+    {
+        http.SetDcmsFailureReason(reason);
+        DcmsObservabilityMetrics.ObserveWebhookFailure("payment-api", string.IsNullOrWhiteSpace(provider) ? "unknown" : provider, reason);
+        logger.LogWarning(
+            "Payment webhook rejected provider {Provider} reason {FailureReason} correlation {CorrelationId}",
+            string.IsNullOrWhiteSpace(provider) ? "unknown" : provider,
+            reason,
+            http.TraceIdentifier);
     }
 
     private static bool TryParseEnvelope(
