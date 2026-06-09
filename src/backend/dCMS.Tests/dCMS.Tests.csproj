@@ -20,6 +20,7 @@
     <PackageReference Include="PactNet" Version="5.0.0" />
     <PackageReference Include="Testcontainers.Elasticsearch" Version="3.10.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="3.10.0" />
     <PackageReference Include="Testcontainers.Redis" Version="3.10.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
@@ -46,6 +47,8 @@
     <ProjectReference Include="..\dCMS.Reports.Api\dCMS.Reports.Api.csproj" />
     <ProjectReference Include="..\dCMS.Notification.Api\dCMS.Notification.Api.csproj" />
     <ProjectReference Include="..\dCMS.Approval.Api\dCMS.Approval.Api.csproj" />
+    <ProjectReference Include="..\dCMS.Provisioning.Domain\dCMS.Provisioning.Domain.csproj" />
+    <ProjectReference Include="..\tools\SpawnTenant\SpawnTenant.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -75,7 +78,7 @@
     <None Include="..\dCMS.Infrastructure\Migrations\034_AddBrandIdToProducts.sql" Link="Migrations\034_AddBrandIdToProducts.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\035_AddProductPageMetadata.sql" Link="Migrations\035_AddProductPageMetadata.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\036_CreateStoreBestSellerSettings.sql" Link="Migrations\036_CreateStoreBestSellerSettings.sql" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\dCMS.Infrastructure\Migrations\037_AddPageViewsAndBestSellerHistory.sql" Link="Migrations\037_AddPageViewsAndBestSellerHistory.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\dCMS.Infrastructure\Migrations\043_CreateTenantProvisioning.sql" Link="Migrations\043_CreateTenantProvisioning.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\038_CreateStoreQuantityLimitSettings.sql" Link="Migrations\038_CreateStoreQuantityLimitSettings.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\039_StoreQuantityLimitHistory.sql" Link="Migrations\039_StoreQuantityLimitHistory.sql" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\dCMS.Infrastructure\Migrations\040_CreateStoreProductFieldConfig.sql" Link="Migrations\040_CreateStoreProductFieldConfig.sql" CopyToOutputDirectory="PreserveNewest" />

@@ -261,6 +261,7 @@ public sealed class OrderApiAuthIntegrationTests(OrderApiAuthFixture fx)
             new(DcmsClaims.TenantId, tenantId),
             new(DcmsClaims.StoreId, storeId),
             new(ClaimTypes.Role, role),
+            new(DcmsClaims.ClientId, OrderApiAuthFixture.ClientId),
         };
 
 #pragma warning disable CS0618 // Obsolete StoreIds — kept until US-5 (Users module) lands.
@@ -282,8 +283,11 @@ public sealed class OrderApiAuthIntegrationTests(OrderApiAuthFixture fx)
 public sealed class OrderApiAuthFixture : IAsyncLifetime
 {
     public const string JwtKey = "integration-test-signing-key-32bytes!!";
-    public const string TenantId = "t-auth-it";
-    public const string StoreId = "s-auth-it";
+    public const string TenantId = "t-saas-a";
+    public const string StoreId = "s-saas-a1";
+    public const string TenantB = "t-saas-b";
+    public const string StoreB = "s-saas-b1";
+    public const string ClientId = "saas-test-client";
 
     private PostgreSqlContainer? _postgres;
     private RabbitMqContainer? _rabbit;
@@ -321,6 +325,7 @@ public sealed class OrderApiAuthFixture : IAsyncLifetime
             b.UseSetting("Auth:JwtSigningKey", JwtKey);
             b.UseSetting("Auth:Issuer", "dcms");
             b.UseSetting("Auth:Audience", "dcms-api");
+            b.UseSetting("Dcms:Client:Id", ClientId);
             b.UseSetting("ConnectionStrings:Order", orderCs);
             b.UseSetting("ConnectionStrings:Redis", redisCs);
             b.UseSetting("RabbitMq:Host", "127.0.0.1");

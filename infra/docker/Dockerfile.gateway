@@ -2,12 +2,23 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
+COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
+COPY src/backend/dCMS.Common/dCMS.Common.csproj dCMS.Common/
+COPY src/backend/dCMS.Billing.Domain/dCMS.Billing.Domain.csproj dCMS.Billing.Domain/
+COPY src/backend/dCMS.Provisioning.Domain/dCMS.Provisioning.Domain.csproj dCMS.Provisioning.Domain/
+COPY src/backend/dCMS.Catalog.Domain/dCMS.Catalog.Domain.csproj dCMS.Catalog.Domain/
+COPY src/backend/dCMS.Promotions.Domain/dCMS.Promotions.Domain.csproj dCMS.Promotions.Domain/
+COPY src/backend/dCMS.Fulfillment.Domain/dCMS.Fulfillment.Domain.csproj dCMS.Fulfillment.Domain/
+COPY src/backend/dCMS.Approvals.Domain/dCMS.Approvals.Domain.csproj dCMS.Approvals.Domain/
+COPY src/backend/dCMS.Imports.Domain/dCMS.Imports.Domain.csproj dCMS.Imports.Domain/
 COPY src/backend/dCMS.AspNetCore.Auth/dCMS.AspNetCore.Auth.csproj dCMS.AspNetCore.Auth/
+COPY src/backend/dCMS.Infrastructure/dCMS.Infrastructure.csproj dCMS.Infrastructure/
 COPY src/backend/dCMS.Gateway/dCMS.Gateway.csproj dCMS.Gateway/
 RUN dotnet restore dCMS.Gateway/dCMS.Gateway.csproj
 
 COPY src/backend/ ./
-RUN dotnet publish dCMS.Gateway/dCMS.Gateway.csproj -c Release -o /app --no-restore
+RUN dotnet restore dCMS.Gateway/dCMS.Gateway.csproj \
+    && dotnet publish dCMS.Gateway/dCMS.Gateway.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

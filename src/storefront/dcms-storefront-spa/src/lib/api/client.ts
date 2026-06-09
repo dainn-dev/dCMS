@@ -1,13 +1,13 @@
 // DAI-751 / US-4 (T4.3) — storefront fetch interceptor.
-// Injects X-Active-Tenant on every storefront request after the user picks (or auto-resolves) a branch.
-// The header value is read fresh from sessionStorage on each call so a branch switch in another tab
-// is picked up without a full page reload.
+// Injects X-Active-Tenant on gateway catalog storefront routes after branch selection.
+
+import { GATEWAY } from "./gateway";
 
 const ACTIVE_TENANT_STORAGE_KEY = "dcms.active-tenant";
 const ACTIVE_TENANT_HEADER = "X-Active-Tenant";
 
-export const STOREFRONT_PATH_PREFIX = "/api/v1/storefront/";
-export const STOREFRONT_BOOTSTRAP_PREFIX = "/api/v1/storefront/branches";
+export const STOREFRONT_PATH_PREFIX = `${GATEWAY.catalog}/storefront/`;
+export const STOREFRONT_BOOTSTRAP_PREFIX = `${GATEWAY.catalog}/storefront/branches`;
 
 export function readActiveTenant(): string | null {
   try {
@@ -117,10 +117,10 @@ export interface NearestBranch extends Branch {
 }
 
 export function listBranches(): Promise<Branch[]> {
-  return callStorefrontJson<Branch[]>("/api/v1/storefront/branches");
+  return callStorefrontJson<Branch[]>(`${GATEWAY.catalog}/storefront/branches`);
 }
 
 export function findNearestBranch(lat: number, lng: number, maxKm = 10): Promise<NearestBranch> {
   const qs = new URLSearchParams({ lat: String(lat), lng: String(lng), maxKm: String(maxKm) });
-  return callStorefrontJson<NearestBranch>(`/api/v1/storefront/branches/nearest?${qs}`);
+  return callStorefrontJson<NearestBranch>(`${GATEWAY.catalog}/storefront/branches/nearest?${qs}`);
 }

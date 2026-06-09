@@ -6,6 +6,7 @@
 
 # Claude Code — local overrides (không commit)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # MCP config chứa API keys — không commit
 .mcp.json
@@ -105,3 +106,10 @@ src/backend/dCMS.Web/uSync/
 src/backend/dCMS.Web/umbraco/Data/
 src/backend/dCMS.Identity.Api/bin/
 src/backend/dCMS.Identity.Api/obj/
+.tmp/
+backups/
+src/backend/dCMS.Billing.Domain/obj/
+src/backend/dCMS.Provisioning.Domain/bin/
+src/backend/dCMS.Provisioning.Domain/obj/
+src/backend/dCMS.Billing.Domain/bin/
+.multica/

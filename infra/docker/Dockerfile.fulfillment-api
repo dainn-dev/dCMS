@@ -4,6 +4,8 @@ WORKDIR /src
 
 COPY src/backend/dCMS.Messaging.Contracts/dCMS.Messaging.Contracts.csproj dCMS.Messaging.Contracts/
 COPY src/backend/dCMS.Common/dCMS.Common.csproj dCMS.Common/
+COPY src/backend/dCMS.Billing.Domain/dCMS.Billing.Domain.csproj dCMS.Billing.Domain/
+COPY src/backend/dCMS.Provisioning.Domain/dCMS.Provisioning.Domain.csproj dCMS.Provisioning.Domain/
 COPY src/backend/dCMS.Catalog.Domain/dCMS.Catalog.Domain.csproj dCMS.Catalog.Domain/
 COPY src/backend/dCMS.Promotions.Domain/dCMS.Promotions.Domain.csproj dCMS.Promotions.Domain/
 COPY src/backend/dCMS.Fulfillment.Domain/dCMS.Fulfillment.Domain.csproj dCMS.Fulfillment.Domain/
@@ -15,7 +17,8 @@ COPY src/backend/dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj dCMS.Fulfillme
 RUN dotnet restore dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj
 
 COPY src/backend/ ./
-RUN dotnet publish dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj -c Release -o /app --no-restore
+RUN dotnet restore dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj \
+    && dotnet publish dCMS.Fulfillment.Api/dCMS.Fulfillment.Api.csproj -c Release -o /app --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*

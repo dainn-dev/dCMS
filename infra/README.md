@@ -111,6 +111,63 @@ Notes:
 - On **PowerShell**, do **not** chain commands with `&&` (it may fail depending on PS version). Prefer running commands on separate lines, or use `;`.
 - The build is configured to emit bundles directly into Umbraco’s `App_Plugins/DcmsV16/dist/` folder so the backoffice can load them without extra copy steps.
 
+## Scheduled backups (DAI-53-P0-04)
+
+Nightly backups for local/staging are scripted in [`infra/scripts/`](scripts/):
+
+| Script | Platform |
+|--------|----------|
+| `backup-nightly.ps1` | Windows / PowerShell |
+| `backup-nightly.sh` | Linux / macOS / cron |
+| `restore-drill.ps1` | Windows restore-drill helper (P0-01) |
+
+**Scope:** PostgreSQL (`dcms_catalog`, `dcms_inventory`, `dcms_order`, `dcms_payment`) + Umbraco SQL Server (`Umbraco`). Redis is **not** backed up — rebuild entitlements after restore per [tenant-entitlements.md](../docs/operations/tenant-entitlements.md).
+
+**RPO target:** 24h (nightly full). **RTO target:** ≤ 4h (see [backup-restore-drill.md](../docs/operations/backup-restore-drill.md)).
+
+From **repository root** (stack must be running):
+
+```powershell
+.\infra\scripts\backup-nightly.ps1
+```
+
+```bash
+chmod +x infra/scripts/backup-nightly.sh
+./infra/scripts/backup-nightly.sh
+```
+
+Artifacts: `backups/*_yyyyMMdd_HHmmss.*` + `manifest_*.json` (gitignored).
+
+### Scheduling
+
+**Windows Task Scheduler:** daily trigger, action = `powershell.exe -File <repo>\infra\scripts\backup-nightly.ps1`, run whether user is logged on or not.
+
+**Linux cron** (02:00 UTC example):
+
+```cron
+0 2 * * * cd /path/to/dCMS && ./infra/scripts/backup-nightly.sh >> /var/log/dcms-backup.log 2>&1
+```
+
+**Kubernetes CronJob (sketch):** Job pod with `pg_dump` + `kubectl exec` or sidecar to SQL Server; mount PVC or upload to object storage on completion.
+
+### Off-host copy
+
+Copy `backups/` to encrypted object storage after each run (examples):
+
+- **AWS S3:** `aws s3 sync backups/ s3://your-bucket/dcms-backups/$(date +%Y%m%d)/ --sse AES256`
+- **Azure Blob:** `az storage blob upload-batch -d dcms-backups -s backups/`
+
+Retain at least 7 daily copies for staging; production retention per compliance (DAI-51).
+
+### Restore drill
+
+Run at least once before first paying tenant go-live. Procedure: [backup-restore-drill.md](../docs/operations/backup-restore-drill.md). Evidence: `docs/operations/evidence/restore-drill-*.md`.
+
+```powershell
+.\infra\scripts\backup-nightly.ps1
+.\infra\scripts\restore-drill.ps1
+```
+
 ## Ports
 
 | Service        | Port |

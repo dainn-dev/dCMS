@@ -53,6 +53,7 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton<IInventoryClient, NoOpInventoryClient>();
+        services.AddSingleton<IPaymentClient, StubPaymentClient>();
         services.AddSingleton<OrderQueryStore>();
         services.AddSingleton<PaymentTransactionQueryStore>();
         services.AddSingleton<IOrderDetailCache, NullOrderDetailCache>();
@@ -94,15 +95,15 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
 
         var created = await _orderService!.CreateOrderAsync(cmd);
         Assert.Equal(orderId, created.Order.Id);
-        Assert.Null(created.PaymentUrl);
+        Assert.Equal(StubPaymentClient.CheckoutUrl(orderId), created.PaymentUrl);
         Assert.Equal(OrderDomain.OrderStatus.PaymentPending, created.Order.Status);
-        Assert.Null(created.Order.PaymentIntentId);
+        Assert.Equal($"pi_stub_{orderId}", created.Order.PaymentIntentId);
 
         var loaded = await _orderService.GetByIdAsync("t1", "s1", orderId);
         Assert.NotNull(loaded);
         Assert.Single(loaded!.Items);
         Assert.Equal("Widget", loaded.Items[0].ProductNameSnapshot);
-        Assert.Null(loaded.PaymentIntentId);
+        Assert.Equal($"pi_stub_{orderId}", loaded.PaymentIntentId);
 
         await using var conn = new NpgsqlConnection(_postgres!.GetConnectionString());
         await conn.OpenAsync();
@@ -405,5 +406,18 @@ public sealed class OrderServicePostgresIntegrationTests : IAsyncLifetime
             IReadOnlyList<InventoryCheckLine> lines,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class StubPaymentClient : IPaymentClient
+    {
+        public static string CheckoutUrl(string orderId) =>
+            $"https://checkout.local/pay/{Uri.EscapeDataString(orderId)}";
+
+        public Task<PaymentIntentResult> CreatePaymentIntentAsync(
+            CreatePaymentIntentRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PaymentIntentResult(
+                $"pi_stub_{request.OrderId}",
+                CheckoutUrl(request.OrderId)));
     }
 }

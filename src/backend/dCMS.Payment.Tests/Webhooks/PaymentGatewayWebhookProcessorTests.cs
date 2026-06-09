@@ -153,6 +153,50 @@ public sealed class PaymentGatewayWebhookProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_when_succeeded_row_gets_failure_event_returns_Conflict()
+    {
+        var orderId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        var storeId = Guid.NewGuid();
+        var row = Row(orderId, tenantId, storeId, PaymentTransactionStatus.Succeeded);
+
+        var repo = new Mock<IPaymentTransactionRepository>();
+        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+
+        var sut = new PaymentGatewayWebhookProcessor(
+            repo.Object,
+            Mock.Of<IBus>(),
+            NullLogger<PaymentGatewayWebhookProcessor>.Instance);
+
+        var outcome = await sut.ProcessAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, succeeded: false, null, "card_declined", CancellationToken.None);
+
+        Assert.Equal(PaymentWebhookProcessResult.Conflict, outcome);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_when_failed_row_gets_success_event_returns_Conflict()
+    {
+        var orderId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        var storeId = Guid.NewGuid();
+        var row = Row(orderId, tenantId, storeId, PaymentTransactionStatus.Failed);
+
+        var repo = new Mock<IPaymentTransactionRepository>();
+        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+
+        var sut = new PaymentGatewayWebhookProcessor(
+            repo.Object,
+            Mock.Of<IBus>(),
+            NullLogger<PaymentGatewayWebhookProcessor>.Instance);
+
+        var outcome = await sut.ProcessAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, succeeded: true, "ch_x", "", CancellationToken.None);
+
+        Assert.Equal(PaymentWebhookProcessResult.Conflict, outcome);
+    }
+
+    [Fact]
     public async Task ProcessAsync_when_unknown_intent_returns_UnknownIntent()
     {
         var repo = new Mock<IPaymentTransactionRepository>();

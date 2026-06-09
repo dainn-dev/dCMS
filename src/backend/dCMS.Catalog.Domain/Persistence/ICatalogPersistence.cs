@@ -170,4 +170,7 @@ public interface ICatalogPersistence
     /// <summary>Non-archived product ids for store-scoped maintenance (e.g. ES reindex after field-config change).</summary>
     Task<IReadOnlyList<string>> ListProductIdsForStoreAsync(string tenantId, string storeId, int limit = 5000,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Count tenant products that are not archived (DAI-29 quota enforcement).</summary>
+    Task<int> CountActiveProductsByTenantAsync(string tenantId, CancellationToken cancellationToken = default);
 }

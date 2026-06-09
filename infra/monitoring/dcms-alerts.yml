@@ -1,0 +1,72 @@
+# dCMS Prometheus Alert Rules — Production Observability Baseline
+# Reference: docs/operations/saas-core-observability.md
+
+groups:
+  - name: dcms_saas_core
+    interval: 30s
+    rules:
+      - alert: DcmsWebhookFailureRateHigh
+        expr: rate(dcms_webhook_failures_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: webhooks
+        annotations:
+          summary: "High webhook failure rate detected"
+          description: "Service {{ $labels.service }} provider {{ $labels.provider }} is experiencing {{ $value | humanize }} webhook failures/sec over the last 5 minutes."
+          runbook_url: "https://github.com/yourorg/dcms/blob/master/docs/operations/saas-core-observability.md#webhook-failures"
+
+      - alert: DcmsDlqDepthHigh
+        expr: dlq_depth > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: messaging
+        annotations:
+          summary: "Dead letter queue depth is high"
+          description: "Service {{ $labels.service }} queue {{ $labels.queue }} has {{ $value }} messages in DLQ."
+          runbook_url: "https://github.com/yourorg/dcms/blob/master/docs/operations/saas-core-observability.md#dlq-depth"
+
+      - alert: DcmsAuthFailureRateHigh
+        expr: rate(dcms_http_requests_total{failure_reason="unauthorized"}[5m]) > 1.0
+        for: 3m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Service {{ $labels.service }} route {{ $labels.route }} is experiencing {{ $value | humanize }} auth failures/sec."
+          runbook_url: "https://github.com/yourorg/dcms/blob/master/docs/operations/saas-core-observability.md#auth-failures"
+
+      - alert: DcmsHttpErrorRateHigh
+        expr: rate(dcms_http_requests_total{status=~"5.."}[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: http
+        annotations:
+          summary: "High HTTP 5xx error rate"
+          description: "Service {{ $labels.service }} is returning {{ $value | humanize }} 5xx errors/sec over the last 5 minutes."
+          runbook_url: "https://github.com/yourorg/dcms/blob/master/docs/operations/saas-core-observability.md#http-errors"
+
+      - alert: DcmsWorkerFailureRateHigh
+        expr: rate(dcms_worker_operations_total{status="failed"}[5m]) > 0.2
+        for: 3m
+        labels:
+          severity: warning
+          component: workers
+        annotations:
+          summary: "High worker operation failure rate"
+          description: "Service {{ $labels.service }} operation {{ $labels.operation }} is failing at {{ $value | humanize }}/sec."
+          runbook_url: "https://github.com/yourorg/dcms/blob/master/docs/operations/saas-core-observability.md#worker-failures"
+
+      - alert: DcmsTenantMismatchDetected
+        expr: rate(dcms_http_requests_total{failure_reason="tenant_mismatch"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: isolation
+        annotations:
+          summary: "Tenant isolation violation detected"
+          description: "Service {{ $labels.service }} detected tenant mismatch — potential isolation breach."
+          runbook_url: "https://github.com/yourorg/dcms/blob/master/docs/operations/saas-core-observability.md#tenant-mismatch"

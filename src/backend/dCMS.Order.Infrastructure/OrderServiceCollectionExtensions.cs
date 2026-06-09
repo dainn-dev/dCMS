@@ -1,6 +1,8 @@
 using dCMS.Order.Core.Integration;
 using dCMS.Order.Core.Ordering;
+using dCMS.Order.Core.Cart;
 using dCMS.Order.Infrastructure.Caching;
+using dCMS.Order.Infrastructure.Cart;
 using dCMS.Order.Infrastructure.Integration;
 using dCMS.Order.Infrastructure.Messaging;
 using dCMS.Order.Infrastructure.Operations;
@@ -52,6 +54,11 @@ public static class OrderServiceCollectionExtensions
             var mux = sp.GetService<IConnectionMultiplexer>();
             return mux is null ? new NullOrderDetailCache() : new RedisOrderDetailCache(mux);
         });
+        services.AddSingleton<ICartStore>(sp =>
+        {
+            var mux = sp.GetService<IConnectionMultiplexer>();
+            return mux is null ? new InMemoryCartStore() : new RedisCartStore(mux);
+        });
         services.AddSingleton<IOrderService, OrderService>();
 
         var catalogCs = configuration.GetConnectionString("Catalog");
@@ -97,6 +104,7 @@ public static class OrderServiceCollectionExtensions
             // DAI-724: multi-tender payment orchestration consumers.
             bus.AddConsumer<PaymentOrchestrator>();
             bus.AddConsumer<ReleasePaymentComponentsConsumer>();
+            bus.AddConsumer<CommerceNotificationPublisher>();
             bus.AddSagaStateMachine<OrderSaga, OrderSagaState>()
                 .EntityFrameworkRepository(r =>
                 {

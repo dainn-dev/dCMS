@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using dCMS.AspNetCore.Auth;
+using dCMS.Billing.Domain;
 using dCMS.Core.Models;
 using dCMS.Core.Persistence;
 using dCMS.Promotions.Api.Http;
@@ -93,8 +94,20 @@ public static class PromoCodeRoutes
 
     private static async Task<IResult> CreatePromoCode(
         string tenantId, [FromBody] PromoCodeWriteRequest body,
-        IPromoCodePersistence promo, CancellationToken cancellationToken = default)
+        IPromoCodePersistence promo,
+        IEntitlementGuard entitlementGuard,
+        CancellationToken cancellationToken = default)
     {
+        try
+        {
+            await entitlementGuard.EnsureFeatureAsync(tenantId, "promotions.write", cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TenantEntitlementException ex)
+        {
+            return ApiEnvelope.Error(ex.Code, ex.Message, StatusCodes.Status403Forbidden);
+        }
+
         if (string.IsNullOrWhiteSpace(body.Code))
             return ApiEnvelope.Error("validation_error", "Code is required.", StatusCodes.Status400BadRequest);
         var code = body.Code.Trim().ToUpperInvariant();

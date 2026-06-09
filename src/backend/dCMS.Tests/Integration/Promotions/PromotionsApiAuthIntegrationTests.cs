@@ -6,6 +6,7 @@ using System.Text;
 using Dapper;
 using dCMS.AspNetCore.Auth;
 using dCMS.Promotions.Api;
+using dCMS.Tests.Integration.Access;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.IdentityModel.Tokens;
@@ -62,6 +63,19 @@ public sealed class PromotionsApiAuthIntegrationTests(PromotionsApiAuthFixture f
     }
 
     [SkippableFact]
+    public async Task List_campaigns_token_tenant_a_route_tenant_b_returns_403()
+    {
+        Skip();
+        using var client = Client(fixture);
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", SaasCoreJwtFactory.MintForRole(
+                DcmsRoles.ChainAdmin, SaasCoreSeeds.TenantA));
+
+        var response = await client.GetAsync(CampaignsUrl(SaasCoreSeeds.TenantB));
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [SkippableFact]
     public async Task List_campaigns_super_admin_cross_tenant_returns_200()
     {
         Skip();
@@ -83,8 +97,10 @@ public sealed class PromotionsApiAuthCollection : ICollectionFixture<PromotionsA
 /// <summary>PostgreSQL + WAF with Auth:Enabled for tenant-scope integration tests.</summary>
 public sealed class PromotionsApiAuthFixture : IAsyncLifetime
 {
-    public const string JwtKey = "integration-test-signing-key-32bytes!!";
-    public const string TenantId = "t-promo-auth";
+    public const string InternalApiKey = "promotions-internal-test-key-32!!";
+    public const string JwtKey = SaasCoreSeeds.JwtKey;
+    public const string TenantId = SaasCoreSeeds.TenantA;
+    public const string TenantB = SaasCoreSeeds.TenantB;
 
     private PostgreSqlContainer? _postgres;
     private WebApplicationFactory<PromotionsApiAssemblyMarker>? _factory;
@@ -156,7 +172,8 @@ public sealed class PromotionsApiAuthFixture : IAsyncLifetime
                     b.UseSetting("Auth:JwtSigningKey", JwtKey);
                     b.UseSetting("Auth:Issuer", "dcms");
                     b.UseSetting("Auth:Audience", "dcms-api");
-                    b.UseSetting("Dcms:Client:Id", "test-client");
+                    b.UseSetting("Dcms:Client:Id", SaasCoreSeeds.ClientId);
+                    b.UseSetting("InternalPromotions:ApiKey", InternalApiKey);
                     b.UseSetting("Cors:AllowedOrigins:0", "http://localhost");
                 });
 

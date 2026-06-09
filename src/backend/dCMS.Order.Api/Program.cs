@@ -1,6 +1,8 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
+using dCMS.Infrastructure.Billing;
 using dCMS.Infrastructure.Middleware;
+using dCMS.Infrastructure.Platform;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Web;
 using dCMS.Order.Api.Routes;
@@ -32,14 +34,18 @@ var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
     builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisCs));
 
+builder.Services.AddDcmsTenantEntitlements(builder.Configuration);
+if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Catalog")))
+    builder.Services.AddDcmsPlatformScale(builder.Configuration);
 builder.Services.AddOrderInfrastructure(builder.Configuration);
+builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "order-api");
 
 // DAI-327: paths containing "/api/orders" → POST create + POST …/cancel (shared prefix).
 builder.Services.Configure<IdempotencyOptions>(o =>
 {
     o.RequireApiV1Prefix = false;
     o.UseStandardApiEnvelope = false;
-    o.PathSubstrings = ["/api/orders"];
+    o.PathSubstrings = ["/api/orders", "/api/v1/checkout"];
 });
 
 builder.Services.AddHealthChecks();
@@ -74,6 +80,7 @@ app.UseRateLimiter();
 app.UseMiddleware<IdempotencyMiddleware>();
 app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
+app.MapCartHttpRoutes();
 app.MapOrderHttpRoutes();
 app.MapOrderReturnRoutes();
 app.MapOrderReportRoutes();

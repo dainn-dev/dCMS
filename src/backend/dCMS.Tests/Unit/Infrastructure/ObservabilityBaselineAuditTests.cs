@@ -1,4 +1,5 @@
 using FluentAssertions;
+using dCMS.Billing.Domain;
 
 namespace dCMS.Tests.Unit.Infrastructure;
 
@@ -56,5 +57,50 @@ public sealed class ObservabilityBaselineAuditTests
         importConsumer.Should().Contain("CorrelationId");
         importConsumer.Should().Contain("TenantId");
         relay.Should().Contain("DcmsObservabilityMetrics.ObserveWorkerOperation");
+    }
+
+    [Fact]
+    public void Notification_worker_consumers_emit_operation_metrics()
+    {
+        var root = BackendSrcRoot();
+        var emailConsumer = File.ReadAllText(Path.Combine(root, "dCMS.Notification.Worker/Consumers/EmailQueuedConsumer.cs"));
+        var userNotifConsumer = File.ReadAllText(Path.Combine(root, "dCMS.Notification.Worker/Consumers/UserNotificationCreatedConsumer.cs"));
+
+        emailConsumer.Should().Contain("DcmsObservabilityMetrics.ObserveWorkerOperation");
+        emailConsumer.Should().Contain("correlationId");
+        userNotifConsumer.Should().Contain("DcmsObservabilityMetrics.ObserveWorkerOperation");
+        userNotifConsumer.Should().Contain("correlationId");
+    }
+
+    [Fact]
+    public void Gateway_auth_middleware_sets_failure_reason_on_unauthorized()
+    {
+        var root = BackendSrcRoot();
+        var middleware = File.ReadAllText(Path.Combine(root, "dCMS.Gateway/GatewayAuthMiddleware.cs"));
+
+        middleware.Should().Contain("SetDcmsFailureReason");
+        middleware.Should().Contain("unauthorized");
+    }
+
+    [Fact]
+    public void Gateway_entitlement_middleware_sets_failure_reason_on_denial()
+    {
+        var root = BackendSrcRoot();
+        var middleware = File.ReadAllText(Path.Combine(root, "dCMS.Gateway/GatewayTenantEntitlementMiddleware.cs"));
+
+        middleware.Should().Contain("SetDcmsFailureReason");
+        middleware.Should().Contain(nameof(EntitlementErrorCodes.EntitlementUnavailable));
+    }
+
+    [Fact]
+    public void SpawnTenant_uses_structured_logging_not_console()
+    {
+        var root = BackendSrcRoot();
+        var program = File.ReadAllText(Path.Combine(root, "tools/SpawnTenant/Program.cs"));
+
+        program.Should().Contain("ILogger");
+        program.Should().Contain("LogInformation");
+        program.Should().NotContain("Console.WriteLine");
+        program.Should().NotContain("Console.Error.WriteLine");
     }
 }

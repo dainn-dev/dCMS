@@ -2,6 +2,7 @@ using dCMS.Core.Messaging;
 using dCMS.Order.Core.Integration;
 using dCMS.Order.Core.Ordering;
 using dCMS.Order.Infrastructure.Caching;
+using dCMS.Order.Infrastructure.Integration;
 using dCMS.Order.Infrastructure.Persistence;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
@@ -14,6 +15,7 @@ public sealed class OrderService : IOrderService
     private readonly OrderQueryStore _queryStore;
     private readonly PaymentTransactionQueryStore _payments;
     private readonly IInventoryClient _inventoryClient;
+    private readonly IPaymentClient _paymentClient;
     private readonly IBus _bus;
     private readonly IOrderDetailCache _orderDetailCache;
 
@@ -22,6 +24,7 @@ public sealed class OrderService : IOrderService
         OrderQueryStore queryStore,
         PaymentTransactionQueryStore payments,
         IInventoryClient inventoryClient,
+        IPaymentClient paymentClient,
         IBus bus,
         IOrderDetailCache orderDetailCache)
     {
@@ -30,6 +33,7 @@ public sealed class OrderService : IOrderService
         _queryStore = queryStore;
         _payments = payments ?? throw new ArgumentNullException(nameof(payments));
         _inventoryClient = inventoryClient;
+        _paymentClient = paymentClient ?? throw new ArgumentNullException(nameof(paymentClient));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
         _orderDetailCache = orderDetailCache ?? throw new ArgumentNullException(nameof(orderDetailCache));
     }
@@ -59,7 +63,10 @@ public sealed class OrderService : IOrderService
             .GetByIdempotencyKeyAsync(command.TenantId, command.StoreId, command.IdempotencyKey, cancellationToken)
             .ConfigureAwait(false);
         if (existing is not null)
-            return new CreateOrderResult(existing, PaymentUrl: null, IsIdempotentReplay: true);
+        {
+            var replayUrl = await ResolvePaymentUrlForOrderAsync(existing, cancellationToken).ConfigureAwait(false);
+            return new CreateOrderResult(existing, replayUrl, IsIdempotentReplay: true);
+        }
 
         var stockLines = command.Lines
             .Select(l => new InventoryCheckLine(l.VariantId, l.WarehouseId, l.Quantity))
@@ -99,6 +106,21 @@ public sealed class OrderService : IOrderService
             command.PromoCodeId,
             command.AppliedPromotions);
 
+        var paymentIntent = await _paymentClient
+            .CreatePaymentIntentAsync(
+                new CreatePaymentIntentRequest(
+                    command.OrderId,
+                    command.TenantId,
+                    command.StoreId,
+                    command.CustomerId,
+                    order.Total.Amount,
+                    order.Total.Currency,
+                    command.PaymentMethod),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        order.AssignPaymentIntent(paymentIntent.PaymentIntentId);
+
         var events = order.DomainEvents.ToArray();
 
         await using var uow = new OrderUnitOfWork(_connectionString);
@@ -116,8 +138,20 @@ public sealed class OrderService : IOrderService
             throw;
         }
 
-        // Payment URL comes from Payment Service after saga emits ProcessPaymentV1 (US-19).
-        return new CreateOrderResult(order, PaymentUrl: null, IsIdempotentReplay: false);
+        return new CreateOrderResult(order, paymentIntent.PaymentUrl, IsIdempotentReplay: false);
+    }
+
+    private static Task<string?> ResolvePaymentUrlForOrderAsync(
+        Core.Domain.Order order,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(order.PaymentIntentId))
+            return Task.FromResult<string?>(null);
+
+        if (!Guid.TryParse(order.Id, out var orderGuid))
+            return Task.FromResult<string?>(null);
+
+        return Task.FromResult<string?>(PaymentCheckoutUrl.ForStubGateway(orderGuid));
     }
 
     public async Task<CancelOrderResult> CancelOrderAsync(CancelOrderCommand command, CancellationToken cancellationToken = default)

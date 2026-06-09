@@ -33,4 +33,5 @@ public sealed record CreateOrderCommand(
     /// <summary>DAI-725 — Promotions PromoCodeId resolved during evaluate.</summary>
     string? PromoCodeId = null,
     /// <summary>DAI-725 — applied campaign snapshots persisted in OrderPromotions for audit + saga side-effects.</summary>
-    IReadOnlyList<Domain.AppliedPromotionSnapshot>? AppliedPromotions = null);
+    IReadOnlyList<Domain.AppliedPromotionSnapshot>? AppliedPromotions = null,
+    string PaymentMethod = "card");

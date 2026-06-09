@@ -197,6 +197,28 @@ public sealed class ScopeFilterTests
         StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
 
+    [Fact]
+    public async Task TenantStore_route_filter_passes_tenant_admin_cross_store_within_tenant()
+    {
+        var ctx = NewContext(
+            routeValues: new Dictionary<string, string?> { ["tenantId"] = "T1", ["storeId"] = "S9" },
+            user: User("T1", roles: DcmsRoles.TenantAdmin));
+
+        var result = await new TenantStoreAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task TenantStoreHeader_filter_passes_tenant_admin_cross_store_within_tenant()
+    {
+        var ctx = NewContext(
+            headers: new Dictionary<string, string> { ["X-Tenant-Id"] = "T1", ["X-Store-Id"] = "S9" },
+            user: User("T1", roles: DcmsRoles.TenantAdmin));
+
+        var result = await new TenantStoreHeaderAccessEndpointFilter().InvokeAsync(Invocation(ctx), AlwaysOk());
+        StatusOf(result).Should().Be(StatusCodes.Status200OK);
+    }
+
     // ── AC2b TenantStore route (Notification Feed) ────────────────────────────
     [Fact]
     public async Task TenantStore_route_filter_passes_when_tenant_and_store_match()

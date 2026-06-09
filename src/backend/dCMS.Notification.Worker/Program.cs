@@ -1,4 +1,6 @@
 using dCMS.Infrastructure.Messaging;
+using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Platform;
 using dCMS.Notification.Api.Rendering;
 using dCMS.Notification.Api.Routes;
 using dCMS.Notification.Worker.Consumers;
@@ -12,6 +14,13 @@ _ = builder.Configuration.GetConnectionString("Notification")
 // Phase C: ProcessedMessages now lives in dcms_notification (no longer cross-DB into dcms_catalog).
 builder.Services.AddPostgresConsumedMessageIdempotency(builder.Configuration, "Notification");
 builder.Services.AddProcessedMessagesCleanup(builder.Configuration, "Notification");
+builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "notification-worker");
+if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Catalog")))
+{
+    builder.Services.AddDcmsPlatformScale(builder.Configuration);
+    builder.Services.AddHttpClient("tenant-webhooks")
+        .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+}
 builder.Services.AddSingleton<TemplateRepository>();
 builder.Services.AddSingleton<ITemplateRenderer, ScribanTemplateRenderer>();
 builder.Services.AddSingleton<NotificationEventsRepository>();
@@ -23,6 +32,7 @@ builder.Services.AddMassTransit(x =>
 
     x.AddConsumer<EmailQueuedConsumer>();
     x.AddConsumer<UserNotificationCreatedConsumer>();
+    x.AddConsumer<TenantWebhookDispatcherConsumer>();
 
     x.UsingRabbitMq((context, cfg) =>
     {

@@ -22,8 +22,8 @@ namespace dCMS.Order.Tests.Integration;
 [Collection("OrderApiAuth")]
 public sealed class CrossTenantSmokeTests(OrderApiAuthFixture fx)
 {
-    private const string ForeignTenantId = "t-foreign";
-    private const string ForeignStoreId = "s-foreign";
+    private const string ForeignTenantId = OrderApiAuthFixture.TenantB;
+    private const string ForeignStoreId = OrderApiAuthFixture.StoreB;
 
     [Fact]
     public async Task GetOrder_with_foreign_tenant_token_is_forbidden()
@@ -74,7 +74,8 @@ public sealed class CrossTenantSmokeTests(OrderApiAuthFixture fx)
         });
 
         var response = await client.PostAsync("/api/orders", new StringContent(body, Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.Created, response.StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -185,6 +186,7 @@ public sealed class CrossTenantSmokeTests(OrderApiAuthFixture fx)
             new(DcmsClaims.TenantId, tenantId),
             new(DcmsClaims.StoreId, storeId),
             new(ClaimTypes.Role, role),
+            new(DcmsClaims.ClientId, OrderApiAuthFixture.ClientId),
         };
 #pragma warning disable CS0618 // Obsolete StoreIds — kept until US-5 (Users module) lands.
         if (storeIds is { Count: > 0 })

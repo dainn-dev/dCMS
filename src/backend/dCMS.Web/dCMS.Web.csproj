@@ -22,6 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\dCMS.Provisioning.Domain\dCMS.Provisioning.Domain.csproj" />
     <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
     <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
     <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />

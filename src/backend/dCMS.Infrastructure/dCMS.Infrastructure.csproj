@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\dCMS.Billing.Domain\dCMS.Billing.Domain.csproj" />
+    <ProjectReference Include="..\dCMS.Provisioning.Domain\dCMS.Provisioning.Domain.csproj" />
     <ProjectReference Include="..\dCMS.Common\dCMS.Common.csproj" />
     <ProjectReference Include="..\dCMS.Catalog.Domain\dCMS.Catalog.Domain.csproj" />
     <ProjectReference Include="..\dCMS.Promotions.Domain\dCMS.Promotions.Domain.csproj" />

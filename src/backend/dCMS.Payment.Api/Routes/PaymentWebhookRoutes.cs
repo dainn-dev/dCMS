@@ -97,6 +97,7 @@ public static class PaymentWebhookRoutes
 
         if (!Guid.TryParse(tenantId, out var tenantGuid))
         {
+            MarkWebhookFailure(http, logger, provider, "invalid_tenant_id");
             return Results.Json(
                 new { error = new { code = "INVALID_TENANT", message = "tenantId must be a valid UUID." } },
                 statusCode: StatusCodes.Status400BadRequest);

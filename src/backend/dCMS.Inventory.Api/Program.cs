@@ -63,6 +63,8 @@ builder.Services.AddMassTransit(bus =>
     bus.AddDcmsPublishEnvelopeObserver();
     bus.AddDcmsConsumerEndpointDefaults();
     bus.AddConsumer<ProductRestockedConsumer>();
+    bus.AddConsumer<ReserveStockConsumer>();
+    bus.AddConsumer<ReleaseStockConsumer>();
     bus.SetKebabCaseEndpointNameFormatter();
     bus.UsingRabbitMq((context, cfg) =>
     {

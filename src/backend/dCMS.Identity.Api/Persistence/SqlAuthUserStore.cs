@@ -10,7 +10,7 @@ public sealed class SqlAuthUserStore(string connectionString) : IAuthUserStore
         await using var conn = new NpgsqlConnection(connectionString);
         return await conn.QuerySingleOrDefaultAsync<AuthUserRow>(new CommandDefinition(
             """
-            SELECT "Id" AS Id, "ClientId" AS ClientId, "TenantId" AS TenantId,
+            SELECT "Id" AS Id, "ClientId" AS ClientId, "TenantId" AS TenantId, "StoreId" AS StoreId,
                    "Email" AS Email, "DisplayName" AS DisplayName, "PasswordHash" AS PasswordHash,
                    "Role" AS Role, "IsActive" AS IsActive, "CreatedAt" AS CreatedAt
               FROM "AuthUsers"
@@ -25,7 +25,7 @@ public sealed class SqlAuthUserStore(string connectionString) : IAuthUserStore
         await using var conn = new NpgsqlConnection(connectionString);
         return await conn.QuerySingleOrDefaultAsync<AuthUserRow>(new CommandDefinition(
             """
-            SELECT "Id" AS Id, "ClientId" AS ClientId, "TenantId" AS TenantId,
+            SELECT "Id" AS Id, "ClientId" AS ClientId, "TenantId" AS TenantId, "StoreId" AS StoreId,
                    "Email" AS Email, "DisplayName" AS DisplayName, "PasswordHash" AS PasswordHash,
                    "Role" AS Role, "IsActive" AS IsActive, "CreatedAt" AS CreatedAt
               FROM "AuthUsers"

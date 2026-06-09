@@ -31,10 +31,10 @@ public sealed class GatewaySmokeTests
         {
             b.UseSetting("Auth:Enabled", "false");
             b.UseSetting("Cors:AllowedOrigins:0", "http://localhost");
-            // Point upstreams to a non-existent address — we only test routing decisions
             b.UseSetting("ReverseProxy:Clusters:catalog-cluster:Destinations:default:Address",   "http://127.0.0.1:19999");
             b.UseSetting("ReverseProxy:Clusters:orders-cluster:Destinations:default:Address",    "http://127.0.0.1:19999");
             b.UseSetting("ReverseProxy:Clusters:inventory-cluster:Destinations:default:Address", "http://127.0.0.1:19999");
+            b.UseGatewayTestEntitlementStore();
         });
 
     /// <summary>Auth enabled — test token validation and 401/403 responses.</summary>
@@ -49,6 +49,7 @@ public sealed class GatewaySmokeTests
             b.UseSetting("ReverseProxy:Clusters:catalog-cluster:Destinations:default:Address",   "http://127.0.0.1:19999");
             b.UseSetting("ReverseProxy:Clusters:orders-cluster:Destinations:default:Address",    "http://127.0.0.1:19999");
             b.UseSetting("ReverseProxy:Clusters:inventory-cluster:Destinations:default:Address", "http://127.0.0.1:19999");
+            b.UseGatewayTestEntitlementStore();
         });
 
     private static string MintToken(string tenantId = "t1", string role = "ChainAdmin")
@@ -146,6 +147,10 @@ public sealed class GatewaySmokeTests
     [InlineData("/gateway/v1/catalog/tenants/t1/stores/s1/products")]
     [InlineData("/gateway/v1/orders/tenants/t1/orders")]
     [InlineData("/gateway/v1/inventory/tenants/t1/stock")]
+    [InlineData("/storefront/v1/products")]
+    [InlineData("/storefront/v1/orders/orders")]
+    [InlineData("/storefront/v1/cart/")]
+    [InlineData("/storefront/v1/checkout")]
     public async Task Known_gateway_routes_are_not_404(string path)
     {
         using var factory = NoAuthFactory();
@@ -183,6 +188,7 @@ public sealed class GatewaySmokeTests
                 b.UseSetting("ReverseProxy:Clusters:catalog-cluster:Destinations:default:Address",   "http://127.0.0.1:19999");
                 b.UseSetting("ReverseProxy:Clusters:orders-cluster:Destinations:default:Address",    "http://127.0.0.1:19999");
                 b.UseSetting("ReverseProxy:Clusters:inventory-cluster:Destinations:default:Address", "http://127.0.0.1:19999");
+                b.UseGatewayTestEntitlementStore();
             });
 
         using var client = factory.CreateClient();

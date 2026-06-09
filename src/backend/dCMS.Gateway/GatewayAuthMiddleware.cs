@@ -51,6 +51,7 @@ public sealed class GatewayAuthMiddleware(
         var token = ExtractBearerToken(context.Request);
         if (token is null)
         {
+            context.SetDcmsFailureReason("unauthorized");
             logger.LogWarning(
                 "Gateway auth rejected missing bearer token for {Method} {Path} correlation {CorrelationId} remote {RemoteIp}",
                 context.Request.Method,
@@ -68,6 +69,7 @@ public sealed class GatewayAuthMiddleware(
         }
         catch (Exception ex)
         {
+            context.SetDcmsFailureReason("unauthorized");
             logger.LogWarning(
                 ex,
                 "Gateway token validation failed for {Method} {Path} correlation {CorrelationId} remote {RemoteIp}",

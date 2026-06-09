@@ -21,6 +21,7 @@ using dCMS.Core.Search;
 using dCMS.Core.Services;
 using dCMS.Core.Pricing;
 using dCMS.Infrastructure;
+using dCMS.Infrastructure.Billing;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Caching;
@@ -54,6 +55,8 @@ builder.Services.AddSingleton<ElasticsearchProductSearchService>();
 var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
     builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisCs));
+
+builder.Services.AddDcmsTenantEntitlements(builder.Configuration);
 
 if (!string.IsNullOrWhiteSpace(redisCs))
     builder.Services.AddSingleton<IProductPublicDetailCache, RedisProductPublicDetailCache>();

@@ -2,6 +2,7 @@ using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Core.Persistence;
 using dCMS.Infrastructure.Audit;
+using dCMS.Infrastructure.Billing;
 using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
@@ -50,6 +51,8 @@ builder.Services.AddSingleton<PromoCodeCache>(sp => new PromoCodeCache(
     sp.GetRequiredService<ILogger<PromoCodeCache>>()));
 builder.Services.AddSingleton<PromoCodeResolver, DefaultPromoCodeResolver>();
 builder.Services.AddSingleton<IPromotionEvaluator, PromotionEvaluator>();
+
+builder.Services.AddDcmsTenantEntitlements(builder.Configuration);
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 builder.Services.AddDcmsJwtAuthentication(builder.Configuration);

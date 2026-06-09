@@ -52,7 +52,8 @@ public sealed class TenantStoreHeaderAccessEndpointFilter : IEndpointFilter
                 statusCode: StatusCodes.Status403Forbidden);
         }
 
-        if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager))
+        if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager) ||
+            user.IsInRole(DcmsRoles.TenantAdmin))
         {
             // If token explicitly constrains store scope, enforce it; else allow all stores within tenant (backward compat).
             if (allowedStores.Count > 0 && !allowedStores.Contains(storeHeader!, StringComparer.Ordinal))

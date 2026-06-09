@@ -9,7 +9,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\dCMS.Billing.Domain\dCMS.Billing.Domain.csproj" />
+    <ProjectReference Include="..\..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\dCMS.Provisioning.Domain\dCMS.Provisioning.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.24" />
   </ItemGroup>
 
 </Project>

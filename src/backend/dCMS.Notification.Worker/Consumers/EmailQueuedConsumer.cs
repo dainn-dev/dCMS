@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Dapper;
 using dCMS.Infrastructure.Messaging;
+using dCMS.Infrastructure.Web;
 using dCMS.Messaging.Contracts.Messaging;
 using dCMS.Notification.Api.Routes;
 using MailKit.Net.Smtp;
@@ -41,6 +42,7 @@ public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
     {
         var m = context.Message;
         var messageId = context.MessageId?.ToString() ?? $"email:{m.TenantId}:{m.IdempotencyKey}";
+        var correlationId = context.CorrelationId?.ToString() ?? context.MessageId?.ToString() ?? "unknown";
 
         await using var _ = await _idempotency.AcquireOrderingLockAsync(messageId, context.CancellationToken).ConfigureAwait(false);
         if (await _idempotency.IsProcessedAsync(messageId, context.CancellationToken).ConfigureAwait(false))
@@ -59,10 +61,33 @@ public sealed class EmailQueuedConsumer : IConsumer<EmailQueuedV1>
             await MarkSentAsync(m, now, context.CancellationToken).ConfigureAwait(false);
 
             await _idempotency.MarkProcessedAsync(messageId, context.CancellationToken).ConfigureAwait(false);
+
+            DcmsObservabilityMetrics.ObserveWorkerOperation("notification-worker", "email_queued", "succeeded", "none");
+            _log.LogInformation(
+                "Worker operation completed service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} template {TemplateKey}",
+                "notification-worker",
+                "email_queued",
+                "succeeded",
+                "none",
+                correlationId,
+                m.TenantId,
+                m.TemplateKey);
         }
         catch (Exception ex)
         {
             await MarkFailedAsync(m, ex.Message, context.CancellationToken).ConfigureAwait(false);
+
+            DcmsObservabilityMetrics.ObserveWorkerOperation("notification-worker", "email_queued", "failed", "send_error");
+            _log.LogError(
+                ex,
+                "Worker operation failed service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} template {TemplateKey}",
+                "notification-worker",
+                "email_queued",
+                "failed",
+                "send_error",
+                correlationId,
+                m.TenantId,
+                m.TemplateKey);
             throw;
         }
     }

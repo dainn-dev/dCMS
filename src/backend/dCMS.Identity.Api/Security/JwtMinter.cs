@@ -44,6 +44,8 @@ public sealed class JwtMinter
         };
         if (!string.IsNullOrWhiteSpace(user.TenantId))
             claims.Add(new Claim(DcmsClaims.TenantId, user.TenantId));
+        if (!string.IsNullOrWhiteSpace(user.StoreId))
+            claims.Add(new Claim(DcmsClaims.StoreId, user.StoreId));
 
         var token = new JwtSecurityToken(
             issuer: _opt.Issuer,

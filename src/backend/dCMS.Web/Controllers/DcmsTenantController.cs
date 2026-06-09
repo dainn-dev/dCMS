@@ -1,8 +1,11 @@
 using System.Text.RegularExpressions;
+using dCMS.Billing.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Infrastructure.Persistence;
+using dCMS.Web.Billing;
 
 namespace dCMS.Web.Controllers;
 
@@ -17,8 +20,21 @@ public sealed class DcmsTenantController : ControllerBase
     private static readonly Regex CodeRegex = new(@"^[A-Za-z0-9][A-Za-z0-9_-]{0,18}$", RegexOptions.Compiled);
 
     private readonly IUmbracoDatabaseFactory _dbFactory;
+    private readonly ITenantEntitlementRepository _entitlementRepository;
+    private readonly ITenantEntitlementPublisher _entitlementPublisher;
+    private readonly IConfiguration _configuration;
 
-    public DcmsTenantController(IUmbracoDatabaseFactory dbFactory) => _dbFactory = dbFactory;
+    public DcmsTenantController(
+        IUmbracoDatabaseFactory dbFactory,
+        ITenantEntitlementRepository entitlementRepository,
+        ITenantEntitlementPublisher entitlementPublisher,
+        IConfiguration configuration)
+    {
+        _dbFactory = dbFactory;
+        _entitlementRepository = entitlementRepository;
+        _entitlementPublisher = entitlementPublisher;
+        _configuration = configuration;
+    }
 
     [HttpGet]
     public async Task<IActionResult> List()
@@ -29,7 +45,9 @@ public sealed class DcmsTenantController : ControllerBase
             var rows = await db.FetchAsync<DcmsTenantRow>("""
                 SELECT id AS Id, code AS Code, name AS Name,
                        contact_name AS ContactName, contact_email AS ContactEmail,
-                       brand_count AS BrandCount, active AS Active
+                       brand_count AS BrandCount, active AS Active,
+                       provisioning_status AS ProvisioningStatus, plan_tier AS PlanTier,
+                       provisioning_run_id AS ProvisioningRunId
                 FROM dcms_tenants
                 ORDER BY name
                 """).ConfigureAwait(false);
@@ -43,6 +61,9 @@ public sealed class DcmsTenantController : ControllerBase
                 contactEmail = r.ContactEmail,
                 brandCount = r.BrandCount,
                 active = r.Active,
+                provisioningStatus = r.ProvisioningStatus,
+                planTier = r.PlanTier,
+                provisioningRunId = r.ProvisioningRunId,
             });
 
             return Ok(new { data, meta = (object?)null, error = (object?)null });
@@ -76,6 +97,15 @@ public sealed class DcmsTenantController : ControllerBase
 
             if (n != 1)
                 return StatusCode(500, ErrorEnvelope("Insert failed."));
+
+            var trialDays = _configuration.GetValue("Dcms:Billing:DefaultTrialDays", 14);
+            var defaultPlan = PlanCode.Starter;
+            if (Enum.TryParse<PlanCode>(_configuration["Dcms:Billing:DefaultPlan"], true, out var configuredPlan))
+                defaultPlan = configuredPlan;
+
+            await _entitlementRepository.CreateDefaultTrialSubscriptionAsync(id, defaultPlan, trialDays)
+                .ConfigureAwait(false);
+            await _entitlementPublisher.PublishFromRepositoryAsync(id).ConfigureAwait(false);
 
             return Ok(new
             {
@@ -123,6 +153,8 @@ public sealed class DcmsTenantController : ControllerBase
             if (n == 0)
                 return NotFound(ErrorEnvelope("Tenant not found."));
 
+            await _entitlementPublisher.PublishFromRepositoryAsync(id).ConfigureAwait(false);
+
             return Ok(new
             {
                 data = new { id, code, name, contactName, contactEmail, brandCount, active },
@@ -156,6 +188,8 @@ public sealed class DcmsTenantController : ControllerBase
 
             if (n == 0)
                 return NotFound(ErrorEnvelope("Tenant not found."));
+
+            await _entitlementPublisher.PublishFromRepositoryAsync(id).ConfigureAwait(false);
 
             return Ok(new { data = new { id, deleted = true, active = false }, meta = (object?)null, error = (object?)null });
         }
@@ -220,5 +254,8 @@ public sealed class DcmsTenantController : ControllerBase
         public string ContactEmail { get; set; } = "";
         public int BrandCount { get; set; }
         public bool Active { get; set; }
+        public string ProvisioningStatus { get; set; } = "requested";
+        public string PlanTier { get; set; } = "starter";
+        public string? ProvisioningRunId { get; set; }
     }
 }

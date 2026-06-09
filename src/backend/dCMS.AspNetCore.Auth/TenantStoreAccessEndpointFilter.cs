@@ -48,7 +48,8 @@ public sealed class TenantStoreAccessEndpointFilter : IEndpointFilter
         }
 
         // US-11: ChainAdmin / BrandManager may operate across stores within the same tenant; others must match store.
-        if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager))
+        if (user.IsInRole(DcmsRoles.ChainAdmin) || user.IsInRole(DcmsRoles.BrandManager) ||
+            user.IsInRole(DcmsRoles.TenantAdmin))
         {
             // If token explicitly constrains store scope, enforce it; else allow all stores within tenant (backward compat).
             if (allowedStores.Count > 0 && !allowedStores.Contains(storeRoute!, StringComparer.Ordinal))

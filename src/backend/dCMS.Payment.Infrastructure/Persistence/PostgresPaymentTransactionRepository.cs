@@ -1,6 +1,7 @@
 using dCMS.Payment.Core;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace dCMS.Payment.Infrastructure.Persistence;
 
@@ -119,7 +120,8 @@ public sealed class PostgresPaymentTransactionRepository : IPaymentTransactionRe
         cmd.Parameters.AddWithValue("TenantId", tenantId);
         cmd.Parameters.AddWithValue("ClientId", clientId);
         cmd.Parameters.AddWithValue("Provider", provider);
-        cmd.Parameters.AddWithValue("StoreId", (object?)storeId ?? DBNull.Value);
+        var storeParam = cmd.Parameters.Add("StoreId", NpgsqlDbType.Uuid);
+        storeParam.Value = storeId.HasValue ? storeId.Value : DBNull.Value;
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             return null;

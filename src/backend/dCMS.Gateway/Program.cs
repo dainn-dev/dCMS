@@ -1,5 +1,7 @@
 using System.Threading.RateLimiting;
 using dCMS.Gateway;
+using dCMS.Infrastructure.Billing;
+using dCMS.Infrastructure.Routing;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
 using Prometheus;
@@ -20,6 +22,11 @@ if (authOpt.Enabled &&
 
 builder.Services.Configure<GatewayAuthOptions>(
     builder.Configuration.GetSection(GatewayAuthOptions.SectionName));
+
+builder.Services.AddDcmsTenantEntitlements(builder.Configuration);
+builder.Services.Configure<GatewayHostRoutingOptions>(
+    builder.Configuration.GetSection(GatewayHostRoutingOptions.SectionName));
+builder.Services.AddDcmsHostTenantResolution(builder.Configuration);
 
 // ── YARP (DAI-580) ────────────────────────────────────────────────────────────
 builder.Services
@@ -125,6 +132,7 @@ builder.Services.AddRateLimiter(o =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.OnRejected = async (ctx, _) =>
     {
+        ctx.HttpContext.SetDcmsFailureReason("rate_limited");
         var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("dCMS.Gateway.RateLimiting");
         var correlationId = ctx.HttpContext.Items.TryGetValue(DcmsWebHostDefaults.CorrelationIdHeaderName, out var value)
             ? value?.ToString()
@@ -195,16 +203,38 @@ app.Use(async (context, next) =>
 });
 app.UseCors("api");
 
+app.UseMiddleware<GatewayHostRoutingMiddleware>();
+
 // DAI-581: validate incoming token, mint internal JWT, overwrite Authorization header
 // Must run BEFORE exception handler so 401 responses are written directly (not caught as 500)
 if (authOpt.Enabled)
     app.UseMiddleware<GatewayAuthMiddleware>();
+
+if (authOpt.Enabled)
+    app.UseMiddleware<GatewayTenantEntitlementMiddleware>();
 
 app.UseRateLimiter();
 
 // Exception handler for unexpected errors from YARP / upstreams
 app.UseExceptionHandler(errApp => errApp.Run(async ctx =>
 {
+    var exLogger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("dCMS.Gateway.ExceptionHandler");
+    var exFeature = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+    var correlationId = ctx.Items.TryGetValue(DcmsWebHostDefaults.CorrelationIdHeaderName, out var value)
+        ? value?.ToString()
+        : ctx.TraceIdentifier;
+
+    if (exFeature?.Error != null)
+    {
+        exLogger.LogError(
+            exFeature.Error,
+            "Gateway unhandled exception {Method} {Path} correlation {CorrelationId}",
+            ctx.Request.Method,
+            ctx.Request.Path.Value,
+            correlationId);
+    }
+
+    ctx.SetDcmsFailureReason("internal_error");
     ctx.Response.StatusCode  = StatusCodes.Status500InternalServerError;
     ctx.Response.ContentType = "application/json";
     await ctx.Response.WriteAsJsonAsync(new

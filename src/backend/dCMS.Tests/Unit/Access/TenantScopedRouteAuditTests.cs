@@ -31,6 +31,13 @@ public sealed class TenantScopedRouteAuditTests
         "dCMS.Loyalty.Api/Routes/LoyaltyRoutes.cs",
         "dCMS.Voucher.Api/Routes/VoucherRoutes.cs",
         "dCMS.Notification.Api/Routes/NotificationFeedRoutes.cs",
+        "dCMS.Catalog.Api/Products/ProductRoutes.cs",
+        "dCMS.Catalog.Api/Imports/ImportJobRoutes.cs",
+        "dCMS.Inventory.Api/Stock/StockRoutes.cs",
+        "dCMS.Reports.Api/Routes/ReportsRoutes.cs",
+        "dCMS.Order.Api/Routes/OrderHttpRoutes.cs",
+        "dCMS.Order.Api/Routes/OrderReportRoutes.cs",
+        "dCMS.Order.Api/Routes/OrderFailedRoutes.cs",
     };
 
     [Theory]
@@ -41,10 +48,26 @@ public sealed class TenantScopedRouteAuditTests
         File.Exists(fullPath).Should().BeTrue($"expected route file at {fullPath}");
 
         var content = File.ReadAllText(fullPath);
-        content.Should().Contain("{tenantId}", $"route file {relativePath} should define tenant-scoped routes");
-        content.Should().MatchRegex(
-            @"WithTenant(?:Store)?Access\s*\(",
-            $"route file {relativePath} must call WithTenantAccess or WithTenantStoreAccess");
+        var isHeaderScoped = content.Contains("WithTenantStoreHeaderAccess(", StringComparison.Ordinal);
+        if (!isHeaderScoped)
+            content.Should().Contain("{tenantId}", $"route file {relativePath} should define tenant-scoped routes");
+        var hasTenantFilter = content.Contains("WithTenantAccess(", StringComparison.Ordinal)
+            || content.Contains("WithTenantStoreAccess(", StringComparison.Ordinal)
+            || content.Contains("WithTenantStoreHeaderAccess(", StringComparison.Ordinal);
+        hasTenantFilter.Should().BeTrue(
+            $"route file {relativePath} must call WithTenantAccess, WithTenantStoreAccess, or WithTenantStoreHeaderAccess");
+    }
+
+    [Fact]
+    public void Internal_catalog_routes_use_api_key_filter_not_jwt_tenant_filter()
+    {
+        var path = Path.Combine(BackendSrcRoot(), "dCMS.Catalog.Api/Internal/InternalCatalogRoutes.cs");
+        var content = File.ReadAllText(path);
+
+        content.Should().Contain("InternalCatalogApiKeyEndpointFilter",
+            "cross-service catalog routes are protected by API key, not JWT tenant filters");
+        content.Should().NotContain("WithTenantAccess",
+            "internal catalog routes must not use JWT tenant route filters");
     }
 
     [Fact]

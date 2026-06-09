@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using dCMS.AspNetCore.Auth;
+using dCMS.Billing.Domain;
 using dCMS.Catalog.Api.Http;
 using dCMS.Catalog.Api.Stores;
 using dCMS.Core.Commands;
@@ -443,11 +444,24 @@ public static class ProductRoutes
         string storeId,
         CreateProductBody body,
         ProductService products,
+        ICatalogPersistence catalogPersistence,
+        IEntitlementGuard entitlementGuard,
         IStoreProductFieldConfigPersistence fieldConfig,
         CancellationToken cancellationToken)
     {
         try
         {
+            await entitlementGuard.EnsureFeatureAsync(tenantId, "catalog.write", cancellationToken)
+                .ConfigureAwait(false);
+            var currentCount = await catalogPersistence.CountActiveProductsByTenantAsync(tenantId, cancellationToken)
+                .ConfigureAwait(false);
+            await entitlementGuard.EnsureQuotaAsync(
+                    tenantId,
+                    EntitlementQuotaNames.MaxActiveProducts,
+                    currentCount + 1,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
             var (cfOk, cfJson, cfError) = await NormalizeCustomFieldsAsync(body.CustomFields, tenantId, storeId, fieldConfig,
                 cancellationToken).ConfigureAwait(false);
             if (!cfOk)
@@ -458,6 +472,10 @@ public static class ProductRoutes
                 new CreateProductCommand(tenantId, storeId, body.CategoryId, body.NameJson, body.DescriptionJson ?? "{}",
                     body.Slug, body.BrandId, ToMetadata(body.Metadata), cfJson), now, cancellationToken).ConfigureAwait(false);
             return ApiEnvelope.Ok(new { id = p.Id, slug = p.Slug, status = p.Status.ToPersistedValue() });
+        }
+        catch (TenantEntitlementException ex)
+        {
+            return ApiEnvelope.Error(ex.Code, ex.Message, StatusCodes.Status403Forbidden);
         }
         catch (ArgumentException ex)
         {

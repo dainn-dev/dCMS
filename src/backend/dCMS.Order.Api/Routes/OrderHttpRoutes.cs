@@ -1,5 +1,7 @@
 using System.Text.Json;
 using dCMS.AspNetCore.Auth;
+using dCMS.Billing.Domain;
+using dCMS.Provisioning.Domain;
 using dCMS.Order.Api.Contracts;
 using dCMS.Order.Api.Security;
 using dCMS.Order.Core.Domain;
@@ -628,6 +630,8 @@ public static class OrderHttpRoutes
         [FromServices] QuantityLimitValidationService quantityLimits,
         [FromServices] IConfiguration configuration,
         [FromServices] IPromotionsClient promotions,
+        [FromServices] IEntitlementGuard entitlementGuard,
+        [FromServices] ITenantUsageRepository? usageRepository,
         [FromServices] ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
@@ -660,6 +664,17 @@ public static class OrderHttpRoutes
                     },
                 },
                 statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await entitlementGuard.EnsureFeatureAsync(tenantId, "orders.write", cancellationToken).ConfigureAwait(false);
+        }
+        catch (TenantEntitlementException ex)
+        {
+            return Results.Json(
+                new { error = new { code = ex.Code, message = ex.Message } },
+                statusCode: StatusCodes.Status403Forbidden);
         }
 
         if (!TryBuildCommand(tenantId, storeId, idempotencyKey, body, out var command, out var errorMessage, out var errorCode))
@@ -711,6 +726,12 @@ public static class OrderHttpRoutes
         try
         {
             var result = await orders.CreateOrderAsync(command, cancellationToken).ConfigureAwait(false);
+            if (!result.IsIdempotentReplay && usageRepository is not null)
+            {
+                await usageRepository.IncrementAsync(tenantId, c => c.OrdersDelta = 1, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             var statusCode = result.IsIdempotentReplay ? StatusCodes.Status200OK : StatusCodes.Status201Created;
             return Results.Json(
                 new
@@ -1588,7 +1609,7 @@ public static class OrderHttpRoutes
     /// <see cref="CreateOrderCommand"/>. Returns (enrichedCommand, null) on success; (originalCommand, IResult)
     /// when the call fails and Promotions:Required=true (fail-closed) or when a promo code is rejected.
     /// </summary>
-    private static async Task<(CreateOrderCommand Command, IResult? Error)> EvaluatePromotionsAsync(
+    internal static async Task<(CreateOrderCommand Command, IResult? Error)> EvaluatePromotionsAsync(
         IPromotionsClient promotions,
         IConfiguration configuration,
         ILogger logger,

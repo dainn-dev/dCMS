@@ -1440,4 +1440,18 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
         await tx.CommitAsync(cancellationToken).ConfigureAwait(false);
         return new AttributeImportResult(imported, skipped, results);
     }
+
+    public async Task<int> CountActiveProductsByTenantAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        const string sql = """
+            SELECT COUNT(*)::int
+            FROM "Products"
+            WHERE "TenantId" = @TenantId
+              AND "Status" NOT IN ('archived', 'pending_archive')
+            """;
+        return await connection.ExecuteScalarAsync<int>(
+            new CommandDefinition(sql, new { TenantId = tenantId }, cancellationToken: cancellationToken))
+            .ConfigureAwait(false);
+    }
 }

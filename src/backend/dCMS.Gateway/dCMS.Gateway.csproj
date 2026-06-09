@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\dCMS.Billing.Domain\dCMS.Billing.Domain.csproj" />
     <ProjectReference Include="..\dCMS.AspNetCore.Auth\dCMS.AspNetCore.Auth.csproj" />
     <ProjectReference Include="..\dCMS.Infrastructure\dCMS.Infrastructure.csproj" />
   </ItemGroup>

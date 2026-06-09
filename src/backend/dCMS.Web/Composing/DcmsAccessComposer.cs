@@ -1,6 +1,11 @@
+using dCMS.Billing.Domain;
 using dCMS.Web.Access.Migrations;
 using dCMS.Web.Access.Caching;
 using dCMS.Web.Access.Services;
+using dCMS.Web.Billing;
+using dCMS.Infrastructure.Billing;
+using dCMS.Infrastructure.Platform;
+using dCMS.Infrastructure.Provisioning;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Composing;
 using Umbraco.Cms.Core.Events;
@@ -31,6 +36,17 @@ public sealed class DcmsAccessComposer : IComposer
         }
 
         builder.Services.AddSingleton<IPermissionCache, PermissionCache>();
+
+        builder.Services.AddDcmsTenantEntitlements(builder.Config);
+        if (!string.IsNullOrWhiteSpace(builder.Config.GetConnectionString("Catalog")))
+        {
+            builder.Services.AddDcmsTenantProvisioning(builder.Config);
+            builder.Services.AddDcmsPlatformScale(builder.Config);
+            builder.Services.AddHttpClient("tenant-webhooks")
+                .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+        }
+        builder.Services.AddSingleton<ITenantEntitlementRepository, SqlTenantEntitlementRepository>();
+        builder.Services.AddSingleton<ITenantEntitlementPublisher, TenantEntitlementPublisher>();
 
         // Register the permission service as scoped (one-per-request).
         builder.Services.AddScoped<IPermissionService, PermissionService>();

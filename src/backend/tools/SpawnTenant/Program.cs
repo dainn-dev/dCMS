@@ -1,207 +1,24 @@
-using System.Diagnostics;
-using System.Net.Http.Json;
-using Microsoft.Data.SqlClient;
+using dCMS.Tools.SpawnTenant;
+using Microsoft.Extensions.Logging;
 
-// DAI-714: Tenant bootstrap — programmatically provision a fresh dCMS tenant.
-//
-// What it does:
-//   1. Creates an empty SQL Server database for the tenant (`Umbraco_<tenant>` by default).
-//   2. Renders an environment file that the dCMS.Web container picks up on first run:
-//      - `ConnectionStrings:umbracoDbDSN` → the new DB.
-//      - `Umbraco:CMS:Unattended:InstallUnattended` = true.
-//      - `Umbraco:CMS:Unattended:UnattendedUser{Name,Email,Password}` = supplied admin.
-//      - `uSync:Settings:ImportAtStartup` = "All"  (auto-import the baseline schema).
-//      - `uSync:Settings:ExportAtStartup` = "None" (tenant containers must NOT export).
-//   3. Optionally docker-compose-ups a dCMS.Web instance bound to that env file and waits
-//      until the boot health check returns 200 — proving the unattended install + uSync
-//      import completed cleanly.
-//
-// Usage:
-//   dotnet run --project src/backend/tools/SpawnTenant -- \
-//     spawn-tenant --tenant t-acme \
-//                  --sa-conn "Server=localhost,14333;User Id=sa;Password=Umbraco_Dev_2026!;TrustServerCertificate=True;" \
-//                  --admin-email admin@acme.test --admin-password 'P@ssw0rd!' \
-//                  [--out infra/tenants/t-acme.env] [--compose] [--health http://localhost:5000/umbraco/api/keepalive/ping]
-//
-// What it does NOT do (yet):
-//   - Spinning up the actual container — that's a `--compose` follow-up that shells out
-//     to `docker compose --env-file ... up -d`. Stub provided; live wiring tracked separately.
-//   - Any tenant-row provisioning in the platform DB. dCMS.Web on first run with the
-//     unattended user becomes the tenant superadmin; tenant directory entries are
-//     handled by the existing onboarding flow.
+// DAI-714 / DAI-29: Tenant bootstrap with explicit provisioning lifecycle.
+// PII policy: passwords, connection strings, and email addresses are NEVER logged.
 
-if (args.Length == 0 || args[0] != "spawn-tenant")
+using var loggerFactory = LoggerFactory.Create(b =>
+    b.AddSimpleConsole(o =>
+    {
+        o.IncludeScopes = false;
+        o.TimestampFormat = "yyyy-MM-ddTHH:mm:ssZ ";
+    }).SetMinimumLevel(LogLevel.Information));
+
+var log = loggerFactory.CreateLogger("SpawnTenant");
+
+try
 {
-    Console.Error.WriteLine("usage: spawn-tenant --tenant <id> --sa-conn <conn> --admin-email <email> --admin-password <pw> [--out <env-file>] [--compose] [--health <url>]");
-    return 64;
+    return await SpawnTenantCli.RunAsync(args, log, loggerFactory).ConfigureAwait(false);
 }
-
-var argsMap = ParseArgs(args[1..]);
-var tenant = Required(argsMap, "--tenant");
-var saConn = Required(argsMap, "--sa-conn");
-var adminEmail = Required(argsMap, "--admin-email");
-var adminPassword = Required(argsMap, "--admin-password");
-var dbName = Optional(argsMap, "--db") ?? $"Umbraco_{Sanitize(tenant)}";
-var outEnvPath = Optional(argsMap, "--out") ?? Path.Combine("infra", "tenants", $"{tenant}.env");
-var doCompose = argsMap.ContainsKey("--compose");
-var healthUrl = Optional(argsMap, "--health");
-
-if (!IsSafeIdentifier(tenant))
+catch (InvalidOperationException ex)
 {
-    Console.Error.WriteLine($"--tenant must match [a-zA-Z0-9_-]+; got '{tenant}'");
+    log.LogError("Command failed: {Message}", ex.Message);
     return 65;
 }
-
-Console.WriteLine($"[1/4] Creating database '{dbName}' if not exists...");
-await CreateDatabaseAsync(saConn, dbName);
-
-var tenantConn = BuildTenantConnectionString(saConn, dbName);
-
-Console.WriteLine($"[2/4] Writing tenant env file → {outEnvPath}");
-Directory.CreateDirectory(Path.GetDirectoryName(outEnvPath)!);
-await WriteEnvFileAsync(outEnvPath, tenant, tenantConn, adminEmail, adminPassword);
-
-Console.WriteLine("[3/4] Verifying database is reachable...");
-await VerifyConnectionAsync(tenantConn);
-
-if (doCompose)
-{
-    Console.WriteLine("[4/4] Starting dCMS.Web container with the new env file...");
-    var rc = RunComposeUp(outEnvPath, tenant);
-    if (rc != 0)
-    {
-        Console.Error.WriteLine($"docker compose exited with code {rc}");
-        return rc;
-    }
-
-    if (!string.IsNullOrWhiteSpace(healthUrl))
-    {
-        Console.WriteLine($"      Polling {healthUrl} for boot completion...");
-        var ok = await WaitForHealthAsync(healthUrl, TimeSpan.FromMinutes(5));
-        if (!ok)
-        {
-            Console.Error.WriteLine("Tenant container failed to come healthy within 5 min.");
-            return 70;
-        }
-    }
-}
-else
-{
-    Console.WriteLine("[4/4] (skipped) --compose not set; tenant env file is ready.");
-}
-
-Console.WriteLine($"Tenant '{tenant}' bootstrap complete.");
-return 0;
-
-// ───────────────────────────────────────────────────────────────────────────
-
-static async Task CreateDatabaseAsync(string saConn, string dbName)
-{
-    await using var conn = new SqlConnection(saConn);
-    await conn.OpenAsync();
-    await using var cmd = conn.CreateCommand();
-    // SQL Server doesn't allow parameterised CREATE DATABASE — guarded by IsSafeIdentifier above.
-    cmd.CommandText = $"IF DB_ID('{dbName}') IS NULL CREATE DATABASE [{dbName}];";
-    await cmd.ExecuteNonQueryAsync();
-}
-
-static string BuildTenantConnectionString(string saConn, string dbName)
-{
-    var b = new SqlConnectionStringBuilder(saConn) { InitialCatalog = dbName };
-    return b.ConnectionString;
-}
-
-static async Task WriteEnvFileAsync(string path, string tenant, string conn, string email, string password)
-{
-    var sb = new System.Text.StringBuilder();
-    sb.AppendLine($"# Generated by SpawnTenant for tenant={tenant}");
-    sb.AppendLine($"# Do NOT commit this file — it contains the unattended admin password.");
-    sb.AppendLine();
-    sb.AppendLine($"DCMS_TENANT_ID={tenant}");
-    sb.AppendLine($"ConnectionStrings__umbracoDbDSN={conn}");
-    sb.AppendLine($"ConnectionStrings__umbracoDbDSN_ProviderName=Microsoft.Data.SqlClient");
-    sb.AppendLine();
-    sb.AppendLine($"Umbraco__CMS__Unattended__InstallUnattended=true");
-    sb.AppendLine($"Umbraco__CMS__Unattended__UnattendedUserName={tenant} admin");
-    sb.AppendLine($"Umbraco__CMS__Unattended__UnattendedUserEmail={email}");
-    sb.AppendLine($"Umbraco__CMS__Unattended__UnattendedUserPassword={password}");
-    sb.AppendLine();
-    sb.AppendLine($"uSync__Settings__RootFolder=~/uSync/v16/");
-    sb.AppendLine($"uSync__Settings__ImportAtStartup=All");
-    sb.AppendLine($"uSync__Settings__ExportAtStartup=None");
-    sb.AppendLine($"uSync__Settings__ExportOnSave=None");
-
-    await File.WriteAllTextAsync(path, sb.ToString());
-}
-
-static async Task VerifyConnectionAsync(string conn)
-{
-    await using var c = new SqlConnection(conn);
-    await c.OpenAsync();
-    await using var cmd = c.CreateCommand();
-    cmd.CommandText = "SELECT 1;";
-    _ = await cmd.ExecuteScalarAsync();
-}
-
-static int RunComposeUp(string envFile, string tenant)
-{
-    var psi = new ProcessStartInfo("docker", $"compose --env-file \"{envFile}\" up -d dcms-web")
-    {
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-    };
-    var p = Process.Start(psi)!;
-    p.OutputDataReceived += (_, e) => { if (e.Data is not null) Console.WriteLine($"[compose:{tenant}] {e.Data}"); };
-    p.ErrorDataReceived  += (_, e) => { if (e.Data is not null) Console.Error.WriteLine($"[compose:{tenant}] {e.Data}"); };
-    p.BeginOutputReadLine();
-    p.BeginErrorReadLine();
-    p.WaitForExit();
-    return p.ExitCode;
-}
-
-static async Task<bool> WaitForHealthAsync(string url, TimeSpan timeout)
-{
-    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-    var deadline = DateTime.UtcNow + timeout;
-    while (DateTime.UtcNow < deadline)
-    {
-        try
-        {
-            var resp = await http.GetAsync(url);
-            if (resp.IsSuccessStatusCode) return true;
-        }
-        catch { /* container still starting */ }
-        await Task.Delay(TimeSpan.FromSeconds(5));
-    }
-    return false;
-}
-
-// ── arg parsing ─────────────────────────────────────────────────────────────
-
-static Dictionary<string, string> ParseArgs(string[] args)
-{
-    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    for (var i = 0; i < args.Length; i++)
-    {
-        var k = args[i];
-        if (!k.StartsWith("--", StringComparison.Ordinal)) continue;
-        var v = (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal)) ? args[i + 1] : "true";
-        map[k] = v;
-        if (v != "true") i++;
-    }
-    return map;
-}
-
-static string Required(Dictionary<string, string> m, string key) =>
-    m.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v)
-        ? v : throw new InvalidOperationException($"Missing required arg {key}");
-
-static string? Optional(Dictionary<string, string> m, string key) =>
-    m.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
-
-static bool IsSafeIdentifier(string s) =>
-    !string.IsNullOrWhiteSpace(s) && s.All(c => char.IsLetterOrDigit(c) || c is '_' or '-');
-
-static string Sanitize(string s) =>
-    new string(s.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using dCMS.AspNetCore.Auth;
+using dCMS.Billing.Domain;
 using dCMS.Promotions.Api.Http;
 using dCMS.Core.Models;
 using dCMS.Core.Persistence;
@@ -103,8 +104,20 @@ public static class CampaignRoutes
 
     private static async Task<IResult> CreateCampaign(
         string tenantId, [FromBody] CampaignWriteRequest body,
-        ICampaignPersistence campaigns, CancellationToken cancellationToken = default)
+        ICampaignPersistence campaigns,
+        IEntitlementGuard entitlementGuard,
+        CancellationToken cancellationToken = default)
     {
+        try
+        {
+            await entitlementGuard.EnsureFeatureAsync(tenantId, "promotions.write", cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TenantEntitlementException ex)
+        {
+            return ApiEnvelope.Error(ex.Code, ex.Message, StatusCodes.Status403Forbidden);
+        }
+
         if (string.IsNullOrWhiteSpace(body.Code))
             return ApiEnvelope.Error("validation_error", "Code is required.", StatusCodes.Status400BadRequest);
         var code = body.Code.Trim().ToUpperInvariant();

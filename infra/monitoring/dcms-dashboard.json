@@ -1,0 +1,110 @@
+{
+  "dashboard": {
+    "title": "dCMS — SaaS Core Observability",
+    "tags": ["dcms", "saas", "core"],
+    "timezone": "utc",
+    "editable": true,
+    "panels": [
+      {
+        "id": 1,
+        "title": "HTTP Request Rate by Service",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(dcms_http_requests_total[5m])",
+            "legendFormat": "{{service}} {{route}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 2,
+        "title": "HTTP Error Rate (5xx)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(dcms_http_requests_total{status=~\"5..\"}[5m])",
+            "legendFormat": "{{service}} {{route}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+      },
+      {
+        "id": 3,
+        "title": "Auth Failure Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(dcms_http_requests_total{failure_reason=\"unauthorized\"}[5m])",
+            "legendFormat": "{{service}} {{route}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "id": 4,
+        "title": "Webhook Failure Rate by Provider",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(dcms_webhook_failures_total[5m])",
+            "legendFormat": "{{service}} {{provider}} {{failure_reason}}"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8}
+      },
+      {
+        "id": 5,
+        "title": "DLQ Depth by Service",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "dlq_depth",
+            "legendFormat": "{{service}} {{queue}}"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8}
+      },
+      {
+        "id": 6,
+        "title": "Worker Operation Success/Failure Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(dcms_worker_operations_total{status=\"succeeded\"}[5m])",
+            "legendFormat": "{{service}} {{operation}} success"
+          },
+          {
+            "expr": "rate(dcms_worker_operations_total{status=\"failed\"}[5m])",
+            "legendFormat": "{{service}} {{operation}} failure"
+          }
+        ],
+        "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8}
+      },
+      {
+        "id": 7,
+        "title": "Tenant Isolation — Mismatch Events",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(dcms_http_requests_total{failure_reason=\"tenant_mismatch\"}[5m]))",
+            "legendFormat": "Tenant mismatch rate"
+          }
+        ],
+        "gridPos": {"x": 0, "y": 24, "w": 6, "h": 4}
+      },
+      {
+        "id": 8,
+        "title": "Rate Limit Rejections",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(dcms_http_requests_total{failure_reason=\"rate_limited\"}[5m]))",
+            "legendFormat": "Rate limit rejections/sec"
+          }
+        ],
+        "gridPos": {"x": 6, "y": 24, "w": 6, "h": 4}
+      }
+    ]
+  }
+}

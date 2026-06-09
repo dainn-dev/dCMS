@@ -1,5 +1,6 @@
 using System.Text.Json;
 using dCMS.AspNetCore.Auth;
+using dCMS.Billing.Domain;
 using Microsoft.AspNetCore.Mvc;
 
 namespace dCMS.Reports.Api.Routes;
@@ -60,6 +61,7 @@ public static class ReportsRoutes
     private static async Task<IResult> GetSales(
         HttpContext http,
         [FromServices] AnalyticsReportQueryStore store,
+        [FromServices] IEntitlementGuard entitlementGuard,
         [FromQuery] string? groupBy,
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
@@ -69,6 +71,8 @@ public static class ReportsRoutes
         // category | brand | product (default category — the first BRD report).
         if (!TryTenantStore(http, out var tenantId, out var storeId))
             return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (await EnsureReportsReadAsync(entitlementGuard, tenantId, ct).ConfigureAwait(false) is { } denied)
+            return denied;
         if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
             return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
         var gb = (groupBy ?? "category").Trim().ToLowerInvariant();
@@ -88,15 +92,34 @@ public static class ReportsRoutes
         }
     }
 
+    private static async Task<IResult> EnsureReportsReadAsync(
+        IEntitlementGuard guard,
+        string tenantId,
+        CancellationToken ct)
+    {
+        try
+        {
+            await guard.EnsureFeatureAsync(tenantId, "reports.read", ct).ConfigureAwait(false);
+            return null;
+        }
+        catch (TenantEntitlementException ex)
+        {
+            return Err(403, ex.Code, ex.Message);
+        }
+    }
+
     private static async Task<IResult> GetAbandonCart(
         HttpContext http,
         [FromServices] AnalyticsReportQueryStore store,
+        [FromServices] IEntitlementGuard entitlementGuard,
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
         CancellationToken ct)
     {
         if (!TryTenantStore(http, out var tenantId, out var storeId))
             return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (await EnsureReportsReadAsync(entitlementGuard, tenantId, ct).ConfigureAwait(false) is { } denied)
+            return denied;
         if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
             return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
 
@@ -107,6 +130,7 @@ public static class ReportsRoutes
     private static async Task<IResult> GetRestockSubscriptions(
         HttpContext http,
         [FromServices] AnalyticsReportQueryStore store,
+        [FromServices] IEntitlementGuard entitlementGuard,
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
         [FromQuery] string? upc,
@@ -118,6 +142,8 @@ public static class ReportsRoutes
         // BRD §3 / BR03: per-subscription detail. BR01: subscription-date range required.
         if (!TryTenantStore(http, out var tenantId, out var storeId))
             return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (await EnsureReportsReadAsync(entitlementGuard, tenantId, ct).ConfigureAwait(false) is { } denied)
+            return denied;
         if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
             return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
 
@@ -129,6 +155,7 @@ public static class ReportsRoutes
     private static async Task<IResult> GetDeliverySlots(
         HttpContext http,
         [FromServices] FulfillmentReportQueryStore store,
+        [FromServices] IEntitlementGuard entitlementGuard,
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
         [FromQuery] string? deliveryMode,
@@ -138,6 +165,8 @@ public static class ReportsRoutes
         // order→slot booking projection exists. BR02: deliveryMode optional ('all'/empty = every mode).
         if (!TryTenantStore(http, out var tenantId, out _))
             return Err(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
+        if (await EnsureReportsReadAsync(entitlementGuard, tenantId, ct).ConfigureAwait(false) is { } denied)
+            return denied;
         if (!TryDateRange(dateFrom, dateTo, out var df, out var dt))
             return Err(400, "INVALID_DATE_RANGE", "dateFrom and dateTo are required (yyyy-MM-dd).");
 

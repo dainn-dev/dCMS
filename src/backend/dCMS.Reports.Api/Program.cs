@@ -1,4 +1,5 @@
 using dCMS.AspNetCore.Auth;
+using dCMS.Infrastructure.Billing;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Web;
@@ -25,6 +26,7 @@ builder.Services.AddDcmsRateLimiting(
     builder.Configuration,
     DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
+builder.Services.AddDcmsTenantEntitlements(builder.Configuration);
 builder.Services.AddHealthChecks();
 
 builder.Services.AddEndpointsApiExplorer();
@@ -67,4 +69,7 @@ app.MapGet("/", () => Results.Text("dCMS.Reports.Api — analytics read-model re
 app.Run();
 
 public partial class Program;
+
+/// <summary>Entry assembly marker for Microsoft.AspNetCore.Mvc.Testing.</summary>
+public sealed class ReportsApiAssemblyMarker;
 
