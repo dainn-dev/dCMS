@@ -269,9 +269,9 @@ public static class OrderHttpRoutes
             RefundNo: BuildRefundNo(oid),
             ReferenceHash: BuildReferenceHash(oid),
             OrderId: d.OrderId,
-            CustomerName: "",
+            CustomerName: d.CustomerName,
             CustomerPhone: "",
-            CustomerEmail: "",
+            CustomerEmail: d.CustomerEmail,
             Amount: d.Amount,
             Currency: d.Currency,
             PaymentMethod: d.PaymentMethod,
@@ -447,6 +447,9 @@ public static class OrderHttpRoutes
         {
             orderId = t.Order.Id,
             customerId = t.Order.CustomerId,
+            // DAI-649 snapshot — lets the list render the customer name without a per-row detail fetch.
+            customerName = t.Order.CustomerName,
+            customerEmail = t.Order.CustomerEmail,
             status = ToApiStatus(t.Order.Status),
             totalAmount = t.Order.Total.Amount,
             currency = t.Order.Total.Currency,

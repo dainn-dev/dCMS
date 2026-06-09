@@ -28,6 +28,7 @@ public sealed class CreatePaymentIntentServiceTests
         var storeId = Guid.NewGuid();
 
         var outcome = await sut.ExecuteAsync(
+            "aeon",
             orderId.ToString("D"),
             tenantId.ToString("D"),
             storeId.ToString("D"),
@@ -44,6 +45,7 @@ public sealed class CreatePaymentIntentServiceTests
         Assert.Equal(orderId, captured!.OrderId);
         Assert.Equal(tenantId, captured.TenantId);
         Assert.Equal(storeId, captured.StoreId);
+        Assert.Equal("aeon", captured.ClientId);
         Assert.Equal("customer-1", captured.CustomerId);
         Assert.Equal("card", captured.PaymentMethod);
         Assert.Equal("pi_test", captured.PaymentIntentId);
@@ -76,6 +78,7 @@ public sealed class CreatePaymentIntentServiceTests
         var sut = new CreatePaymentIntentService(gateway.Object, repo.Object);
 
         var outcome = await sut.ExecuteAsync(
+            "aeon",
             "not-a-guid",
             Guid.NewGuid().ToString("D"),
             Guid.NewGuid().ToString("D"),

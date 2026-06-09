@@ -18,7 +18,8 @@ public static class NotificationFeedRoutes
     {
         var auth = app.Configuration.IsDcmsAuthEnabled();
         var g = app.MapGroup("/api/v1/tenants/{tenantId}/stores/{storeId}/notifications")
-            .WithTags("notification-feed");
+            .WithTags("notification-feed")
+            .WithTenantStoreAccess(app.Configuration);
 
         Auth(g.MapGet("unread-count", GetUnreadCount), auth, write: false);
         Auth(g.MapGet("", List), auth, write: false);

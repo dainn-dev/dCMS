@@ -6,7 +6,7 @@ import { exportRowsByColumns, type ExportColumn } from "../shared/exportReportRo
 import { ReportFilterField, ReportFilterPanel, inputClass } from "../shared/ReportFilterPanel";
 import { useReportExportState } from "../shared/useReportExport";
 import {
-  fetchTransactionDetails,
+  fetchAllTransactionDetails,
   fetchTransactionsOverview,
   type TransactionDetailRow as ApiDetailRow,
   type TransactionsOverviewRow,
@@ -55,13 +55,16 @@ type TransactionRow = {
   receiptNumber: string;
   orderId: string;
   orderIdShort: string;
-  date: string;
-  source: string;
+  transactDate: string;
+  receiptDate: string;
+  receiptTime: string;
   transactionType: string;
+  source: string;
+  deliveryMode: string;
   store: string;
-  brandCode: string;
   customerName: string;
   customerEmail: string;
+  customerCountry: string;
   member: string;
   membershipType: string;
   membershipTier: string;
@@ -71,20 +74,13 @@ type TransactionRow = {
   rebatesCode: string;
   paymentType: string;
   paymentMethod: string;
-  amount: string;
+  totalAmount: string;
   taxAmount: string;
-  shippingFee: string;
-  orderDiscount: string;
+  deliveryFee: string;
+  promotionDiscount: string;
   rebatesAmount: string;
-  pointsEarned: string;
-  pointsRedeemed: string;
+  netAmount: string;
   status: string;
-  affiliateId: string;
-  billingCountry: string;
-  userAgent: string;
-  browser: string;
-  os: string;
-  application: string;
 };
 
 const PENDING = "—";
@@ -93,19 +89,31 @@ function formatAmount(n: number): string {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// BRD Details: Receipt Date / Receipt Time are split from the order timestamp.
+function datePart(iso: string): string {
+  return (iso ?? "").substring(0, 10);
+}
+function timePart(iso: string): string {
+  const t = (iso ?? "").substring(11, 19);
+  return t || PENDING;
+}
+
 function mapApiDetail(r: ApiDetailRow): TransactionRow {
   return {
     id: r.orderId,
     receiptNumber: r.receiptNumber ?? PENDING,
     orderId: r.orderId,
     orderIdShort: r.orderId.substring(0, 12).toUpperCase(),
-    date: (r.date ?? "").substring(0, 10),
+    transactDate: datePart(r.date),
+    receiptDate: datePart(r.date),
+    receiptTime: timePart(r.date),
+    transactionType: r.transactionType || PENDING,
     source: PENDING,
-    transactionType: PENDING,
+    deliveryMode: PENDING,
     store: r.store,
-    brandCode: PENDING,
     customerName: r.customerName ?? PENDING,
     customerEmail: r.customerEmail ?? PENDING,
+    customerCountry: r.billingCountry ?? PENDING,
     member: r.member,
     membershipType: PENDING,
     membershipTier: PENDING,
@@ -115,20 +123,13 @@ function mapApiDetail(r: ApiDetailRow): TransactionRow {
     rebatesCode: PENDING,
     paymentType: r.paymentType || PENDING,
     paymentMethod: PENDING,
-    amount: formatAmount(r.amount),
+    totalAmount: formatAmount(r.subTotal), // BRD "Total Amount" = gross (pre-discount)
     taxAmount: formatAmount(r.taxAmount),
-    shippingFee: PENDING,
-    orderDiscount: formatAmount(r.orderDiscount),
+    deliveryFee: PENDING,
+    promotionDiscount: formatAmount(r.orderDiscount),
     rebatesAmount: PENDING,
-    pointsEarned: PENDING,
-    pointsRedeemed: PENDING,
+    netAmount: formatAmount(r.amount), // BR03 Net Amount = final payable (order Total)
     status: r.status,
-    affiliateId: PENDING,
-    billingCountry: r.billingCountry ?? PENDING,
-    userAgent: PENDING,
-    browser: PENDING,
-    os: PENDING,
-    application: PENDING,
   };
 }
 
@@ -145,24 +146,18 @@ const num =
     <span className="tabular-nums whitespace-nowrap text-xs">{String(row.getValue(key as string) ?? "")}</span>
   );
 
+// Columns whose backing data isn't modelled yet (storefront telemetry, receipt sequence, fulfillment
+// link, rebate domain, loyalty membership, Payment DB method). Flagged so the UI can mark them "—".
 const PENDING_KEYS: ReadonlySet<keyof TransactionRow> = new Set<keyof TransactionRow>([
+  "receiptNumber",
   "source",
-  "transactionType",
-  "brandCode",
+  "deliveryMode",
   "membershipType",
   "membershipTier",
   "rebatesCode",
   "paymentMethod",
-  "shippingFee",
+  "deliveryFee",
   "rebatesAmount",
-  "pointsEarned",
-  "pointsRedeemed",
-  "affiliateId",
-  "userAgent",
-  "browser",
-  "os",
-  "application",
-  "receiptNumber",
 ]);
 
 function makeColumn(key: keyof TransactionRow, header: string, kind: "text" | "num" = "text"): ColumnDef<TransactionRow> {
@@ -174,6 +169,7 @@ function makeColumn(key: keyof TransactionRow, header: string, kind: "text" | "n
   };
 }
 
+// Column order follows the Transaction Reports BRD (Details + Summary supersets).
 const COLUMNS: ColumnDef<TransactionRow>[] = [
   makeColumn("receiptNumber", "Receipt #"),
   {
@@ -181,35 +177,32 @@ const COLUMNS: ColumnDef<TransactionRow>[] = [
     header: "Order ID",
     cell: ({ row }) => <span className="font-mono text-xs font-bold">{row.getValue("orderIdShort") as string}</span>,
   },
-  makeColumn("date", "Date"),
-  makeColumn("source", "Source"),
+  makeColumn("transactDate", "Transact date"),
+  makeColumn("receiptDate", "Receipt date"),
+  makeColumn("receiptTime", "Receipt time"),
   makeColumn("transactionType", "Trans. type"),
+  makeColumn("source", "Source"),
+  makeColumn("deliveryMode", "Delivery mode"),
   makeColumn("store", "Store"),
-  makeColumn("brandCode", "Brand"),
   makeColumn("customerName", "Customer name"),
-  makeColumn("customerEmail", "Email"),
+  makeColumn("customerEmail", "Customer email"),
+  makeColumn("customerCountry", "Customer country"),
   makeColumn("member", "Member"),
   makeColumn("membershipType", "Mem. type"),
   makeColumn("membershipTier", "Mem. tier"),
-  makeColumn("campaigns", "Campaigns"),
-  makeColumn("orderPromoCode", "Order promo"),
-  makeColumn("itemPromoCodes", "Item promos"),
+  makeColumn("campaigns", "Qualifying campaigns"),
+  makeColumn("orderPromoCode", "Order promo code"),
+  makeColumn("itemPromoCodes", "Item promo code"),
   makeColumn("rebatesCode", "Rebates code"),
   makeColumn("paymentType", "Payment type"),
   makeColumn("paymentMethod", "Payment method"),
-  makeColumn("amount", "Amount", "num"),
-  makeColumn("taxAmount", "Tax", "num"),
-  makeColumn("shippingFee", "Shipping", "num"),
-  makeColumn("orderDiscount", "Discount", "num"),
-  makeColumn("rebatesAmount", "Rebate amt", "num"),
-  makeColumn("pointsEarned", "Pts earned", "num"),
-  makeColumn("pointsRedeemed", "Pts redeemed", "num"),
+  makeColumn("totalAmount", "Total amount", "num"),
+  makeColumn("taxAmount", "Tax amount", "num"),
+  makeColumn("deliveryFee", "Delivery fee", "num"),
+  makeColumn("promotionDiscount", "Promotion discount", "num"),
+  makeColumn("rebatesAmount", "Rebates amount", "num"),
+  makeColumn("netAmount", "Net amount", "num"),
   makeColumn("status", "Status"),
-  makeColumn("affiliateId", "Affiliate"),
-  makeColumn("billingCountry", "Country"),
-  makeColumn("browser", "Browser"),
-  makeColumn("os", "OS"),
-  makeColumn("application", "App"),
 ];
 
 const EXPORT_COLUMNS: ExportColumn<TransactionRow>[] = COLUMNS
@@ -282,7 +275,7 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
     };
     try {
       const [details, ov] = await Promise.all([
-        fetchTransactionDetails(tenantId, filters, { limit: 100 }, authToken),
+        fetchAllTransactionDetails(tenantId, filters, authToken),
         fetchTransactionsOverview(tenantId, filters, authToken),
       ]);
       setRows(details.rows.map(mapApiDetail));
@@ -332,43 +325,38 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
     await exportRowsByColumns("Transactions", `transactions-${dateFrom}_${dateTo}.xlsx`, EXPORT_COLUMNS, rows);
   }, [rows, dateFrom, dateTo]);
 
+  // BRD "Overview Metrics" (Summary + Details share the same KPI set). Derived from the 12-field
+  // overview projection; BR04 — every metric reflects the active filters only.
   const overviewMetrics = useMemo(() => {
     if (!overview) return [];
     const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmtInt = (n: number) => n.toLocaleString("en-US");
+    const txns = overview.totalTransactions;
+    // Net Sales = Σ order totals (already net of discount; rebate domain not modelled).
+    const netSales = overview.totalAmount;
+    // Total Sales (Without Discount) = gross = net + discounts.
+    const grossSales = overview.totalAmount + overview.totalDiscount;
+    const txnsPerMonth = overview.distinctMonths > 0 ? txns / overview.distinctMonths : 0;
+    const txnsPerDay = overview.distinctDays > 0 ? txns / overview.distinctDays : 0;
+    const topDayAvg =
+      overview.topDayAmount !== null && overview.topDayTransactions
+        ? overview.topDayAmount / overview.topDayTransactions
+        : null;
     return [
-      { label: "Total transactions", value: fmtInt(overview.totalTransactions) },
-      { label: "Total amount", value: `$${fmt(overview.totalAmount)}` },
-      { label: "Total tax", value: `$${fmt(overview.totalTax)}` },
-      { label: "Total discount", value: `$${fmt(overview.totalDiscount)}` },
-      { label: "Unique customers", value: fmtInt(overview.uniqueCustomers) },
-      { label: "Avg order value", value: `$${fmt(overview.averageOrderValue)}` },
-      {
-        label: `Avg / month (${overview.distinctMonths})`,
-        value: `$${fmt(overview.averageMonthlyAmount)}`,
-      },
-      {
-        label: `Avg / day (${overview.distinctDays})`,
-        value: `$${fmt(overview.averageDailyAmount)}`,
-      },
-      {
-        label: "Top day",
-        value: overview.topDayDate ? overview.topDayDate.substring(0, 10) : "—",
-      },
-      {
-        label: "Top day amount",
-        value: overview.topDayAmount !== null ? `$${fmt(overview.topDayAmount)}` : "—",
-      },
-      {
-        label: "Top day txns",
-        value: overview.topDayTransactions !== null ? fmtInt(overview.topDayTransactions) : "—",
-      },
-      {
-        label: "Date range",
-        value: `${dateFrom} → ${dateTo}`,
-      },
+      { label: "Net sales", value: `$${fmt(netSales)}` },
+      { label: "Avg. sales / transaction", value: `$${fmt(overview.averageOrderValue)}` },
+      { label: "Total sales transactions", value: fmtInt(txns) },
+      { label: "Total sales (w/o discount)", value: `$${fmt(grossSales)}` },
+      { label: `Avg. monthly sales (${overview.distinctMonths} mo)`, value: `$${fmt(overview.averageMonthlyAmount)}` },
+      { label: "Avg. txns / month", value: fmt(txnsPerMonth) },
+      { label: `Avg. daily sales (${overview.distinctDays} d)`, value: `$${fmt(overview.averageDailyAmount)}` },
+      { label: "Avg. txns / day", value: fmt(txnsPerDay) },
+      { label: "Top sales day", value: overview.topDayDate ? overview.topDayDate.substring(0, 10) : "—" },
+      { label: "Net sales on top day", value: overview.topDayAmount !== null ? `$${fmt(overview.topDayAmount)}` : "—" },
+      { label: "Txns on top day", value: overview.topDayTransactions !== null ? fmtInt(overview.topDayTransactions) : "—" },
+      { label: "Avg. / txn on top day", value: topDayAvg !== null ? `$${fmt(topDayAvg)}` : "—" },
     ];
-  }, [overview, dateFrom, dateTo]);
+  }, [overview]);
 
   const emptyMessage =
     dateFrom > dateTo
@@ -386,8 +374,9 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
           </nav>
           <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface">Transaction report</h1>
           <p className="max-w-3xl text-sm text-on-surface-variant">
-            Single flat view of every transaction — receipt, customer, payment composition, promos and rebates. Columns
-            marked “—” are persisted in upcoming releases (storefront telemetry, receipt sequence, loyalty membership).
+            Per-transaction detail with the shared KPI overview (Transaction Reports BRD). Columns marked “—” are
+            persisted in upcoming releases — Source (storefront telemetry), Receipt # (receipt sequence), Delivery
+            mode/fee (fulfillment link), Rebates (rebate domain), Membership (loyalty), Payment method (Payment DB).
           </p>
           <p className="text-xs font-semibold uppercase tracking-wider text-primary">
             {tenantId ? `Tenant: ${tenantId}` : "Tenant context unavailable"}
@@ -461,7 +450,14 @@ export function TransactionReportPage({ tenantId, storeId, authToken }: Transact
             />
           </ReportFilterField>
           <ReportFilterField label="Payment method" htmlFor="tx-pay">
-            <select id="tx-pay" className={inputClass} value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+            <select
+              id="tx-pay"
+              className={`${inputClass} cursor-not-allowed opacity-50`}
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+              disabled
+              title="Payment method lives in the Payment DB projection (upcoming). Use Payment type for now."
+            >
               {PAYMENT_METHOD_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}

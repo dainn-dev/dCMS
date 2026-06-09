@@ -67,10 +67,11 @@ export type FailedOrder = {
 
 // ── Refund Cases — §3.3 (mock until API) ───────────────────────────────────────
 
-export type RefundStatus = "Pending Refund" | "Success" | "Failed";
+// Canonical refund statuses accepted/emitted by the Order API (RefundCaseStatusMaps).
+export type RefundStatus = "Pending" | "Processing" | "Success" | "Rejected";
 
 /** UI status options for the refund case status dropdown (DAI-651). */
-export const REFUND_STATUS_OPTIONS: RefundStatus[] = ["Pending Refund", "Success", "Failed"];
+export const REFUND_STATUS_OPTIONS: RefundStatus[] = ["Pending", "Processing", "Success", "Rejected"];
 
 export type RefundCaseDoLine = {
   sku: string;
@@ -112,7 +113,7 @@ export type RefundCase = {
   remark: string;
   /** Full processor / gateway message (Remark Details popup). */
   paymentGatewayMessage: string;
-  /** When true, status edit is only allowed for Pending Refund or Failed. */
+  /** When true, status edit is only allowed for Pending or Rejected. */
   isPaymentGatewayCase: boolean;
   doCancelledItems: RefundCaseDoLine[];
   refundBreakdown: RefundCaseBreakdownLine[];

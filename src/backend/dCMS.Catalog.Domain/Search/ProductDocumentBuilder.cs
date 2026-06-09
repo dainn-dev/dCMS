@@ -40,6 +40,8 @@ public static class ProductDocumentBuilder
             minBase = 0;
 
         var hasInStock = variants.Exists(static x => x.InStock);
+        // Product-level stock total: drives the "0 Quantity" (==0) and "Re-stock needed" (0<qty<=threshold) filters.
+        var totalAvailableQty = variants.Sum(static x => Math.Max(0, x.AvailableQty));
 
         return new ProductDocument
         {
@@ -58,6 +60,7 @@ public static class ProductDocumentBuilder
             Attributes = new Dictionary<string, string>(input.AttributesFlattened, StringComparer.Ordinal),
             Variants = variants,
             HasInStockVariant = hasInStock,
+            TotalAvailableQty = totalAvailableQty,
             MinBasePrice = new MoneyAmount(minBase, input.StoreCurrency),
             SnapshotVersion = input.SnapshotVersion,
             UpdatedAt = product.UpdatedAt,

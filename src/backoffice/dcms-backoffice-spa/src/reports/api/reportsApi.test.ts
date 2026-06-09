@@ -6,7 +6,7 @@ import {
   fetchSalesByCategory,
   fetchSalesByProduct,
   fetchSalesByTenant,
-  fetchSalesGrouped,
+  fetchSalesReport,
   fetchAbandonCart,
   fetchRestockSubscriptions,
 } from "./reportsApi";
@@ -169,42 +169,54 @@ describe("fetchSalesByTenant", () => {
   });
 });
 
-// ── fetchSalesGrouped (DAI-685 analytics) ───────────────────────────────────
+// ── fetchSalesReport (Sales Reports BRD §1–§3, analytics) ───────────────────
 
-describe("fetchSalesGrouped", () => {
-  it("hits analytics /sales with groupBy=store", async () => {
+describe("fetchSalesReport", () => {
+  it("hits analytics /sales with groupBy=category and tenant/store headers", async () => {
     mockFetchOnce({ data: [], meta: null, error: null });
-    await fetchSalesGrouped("t1", { ...filters, storeId: "s1" }, "store", "tok");
+    await fetchSalesReport("t1", { ...filters, storeId: "s1" }, "category", "tok");
     expect(lastFetchUrl()).toContain("/reports/sales");
-    expect(lastFetchUrl()).toContain("groupBy=store");
+    expect(lastFetchUrl()).toContain("groupBy=category");
     expect(lastFetchUrl()).toContain("dateFrom=2026-04-01");
     expect(lastFetchHeaders()["X-Tenant-Id"]).toBe("t1");
     expect(lastFetchHeaders()["X-Store-Id"]).toBe("s1");
     expect(lastFetchHeaders()["Authorization"]).toBe("Bearer tok");
   });
 
-  it("supports groupBy=product", async () => {
+  it("supports the brand and product dimensions", async () => {
     mockFetchOnce({ data: [], meta: null, error: null });
-    await fetchSalesGrouped("t1", filters, "product");
+    await fetchSalesReport("t1", filters, "brand");
+    expect(lastFetchUrl()).toContain("groupBy=brand");
+
+    mockFetchOnce({ data: [], meta: null, error: null });
+    await fetchSalesReport("t1", filters, "product");
     expect(lastFetchUrl()).toContain("groupBy=product");
   });
 
-  it("supports groupBy=category", async () => {
-    mockFetchOnce({ data: [], meta: null, error: null });
-    await fetchSalesGrouped("t1", filters, "category");
-    expect(lastFetchUrl()).toContain("groupBy=category");
-  });
-
-  it("returns rows from envelope", async () => {
+  it("returns BRD-shaped rows from the envelope", async () => {
     mockFetchOnce({
-      data: [{ key: "s1", orders: 10, gross: 1000 }],
+      data: [{ key: "cat-1", name: null, upc: null, sku: null, productsCount: null, transactions: null, unitsSold: 24, gross: 1000, currency: "SGD" }],
       meta: null,
       error: null,
     });
-    const result = await fetchSalesGrouped("t1", filters, "store");
-    expect(result).toHaveLength(1);
-    expect(result[0].key).toBe("s1");
-    expect(result[0].gross).toBe(1000);
+    const { rows, overview } = await fetchSalesReport("t1", filters, "category");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].key).toBe("cat-1");
+    expect(rows[0].unitsSold).toBe(24);
+    expect(rows[0].gross).toBe(1000);
+    expect(overview).toBeNull();
+  });
+
+  it("surfaces the product overview from meta", async () => {
+    mockFetchOnce({
+      data: [],
+      meta: { overview: { totalProducts: 3, totalSales: 500, totalSalesTransactions: 12, totalProductsSold: 40, currency: "SGD" } },
+      error: null,
+    });
+    const { overview } = await fetchSalesReport("t1", filters, "product");
+    expect(overview).not.toBeNull();
+    expect(overview?.totalProducts).toBe(3);
+    expect(overview?.totalSalesTransactions).toBe(12);
   });
 });
 
@@ -241,31 +253,55 @@ describe("fetchAbandonCart", () => {
 // ── fetchRestockSubscriptions (DAI-685 analytics) ───────────────────────────
 
 describe("fetchRestockSubscriptions", () => {
-  it("omits storeId param when 'all'", async () => {
+  const range = { dateFrom: "2026-04-01", dateTo: "2026-04-30", storeId: "all" };
+
+  it("sends the required date range and omits storeId when 'all'", async () => {
     mockFetchOnce({ data: [], meta: null, error: null });
-    await fetchRestockSubscriptions("t1", { storeId: "all" });
+    await fetchRestockSubscriptions("t1", range, {});
     expect(lastFetchUrl()).toContain("/reports/restock-subscriptions");
+    expect(lastFetchUrl()).toContain("dateFrom=2026-04-01");
+    expect(lastFetchUrl()).toContain("dateTo=2026-04-30");
     expect(lastFetchUrl()).not.toContain("storeId=");
   });
 
-  it("includes storeId param when set", async () => {
+  it("includes storeId + optional BR02 filters when set", async () => {
     mockFetchOnce({ data: [], meta: null, error: null });
-    await fetchRestockSubscriptions("t1", { storeId: "s7" }, "tok");
+    await fetchRestockSubscriptions(
+      "t1",
+      { ...range, storeId: "s7" },
+      { upc: "012", sku: "SKU-9", productName: "widget", email: "a@x.com" },
+      "tok",
+    );
     expect(lastFetchUrl()).toContain("storeId=s7");
+    expect(lastFetchUrl()).toContain("upc=012");
+    expect(lastFetchUrl()).toContain("sku=SKU-9");
+    expect(lastFetchUrl()).toContain("productName=widget");
+    expect(lastFetchUrl()).toContain("email=a%40x.com");
     expect(lastFetchHeaders()["X-Tenant-Id"]).toBe("t1");
     expect(lastFetchHeaders()["X-Store-Id"]).toBe("s7");
     expect(lastFetchHeaders()["Authorization"]).toBe("Bearer tok");
   });
 
-  it("returns aggregated subscription rows", async () => {
+  it("returns per-subscription detail rows", async () => {
     mockFetchOnce({
-      data: [{ productId: "p1", subscriptions: 12, fulfilled: 5 }],
+      data: [
+        {
+          productId: "p1",
+          upc: "0001",
+          sku: "SKU-1",
+          productName: "Widget",
+          email: "a@x.com",
+          subscriptionDate: "2026-04-10T08:00:00Z",
+          restockNotificationSentOn: null,
+        },
+      ],
       meta: null,
       error: null,
     });
-    const result = await fetchRestockSubscriptions("t1", { storeId: "all" });
+    const result = await fetchRestockSubscriptions("t1", range, {});
     expect(result).toHaveLength(1);
-    expect(result[0].productId).toBe("p1");
-    expect(result[0].subscriptions).toBe(12);
+    expect(result[0].productName).toBe("Widget");
+    expect(result[0].email).toBe("a@x.com");
+    expect(result[0].restockNotificationSentOn).toBeNull();
   });
 });

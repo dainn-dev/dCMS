@@ -1,4 +1,3 @@
-using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Core.Persistence;
@@ -8,7 +7,7 @@ using dCMS.Infrastructure.Audit;
 using dCMS.Infrastructure.Catalog;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
-using dCMS.Infrastructure.RateLimiting;
+using dCMS.Infrastructure.Web;
 using MassTransit;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.OpenApi.Models;
@@ -50,36 +49,8 @@ var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
     builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisCs));
 
-builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
-    sp.GetRequiredService<IConfiguration>(),
-    sp.GetService<IConnectionMultiplexer>()));
-
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-    {
-        var resolver = httpContext.RequestServices.GetRequiredService<TenantPlanRateLimit>();
-        var key = resolver.ResolvePartitionKey(httpContext);
-        return RateLimitPartition.GetFixedWindowLimiter(key,
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = resolver.ResolvePermitLimit(key),
-                Window = resolver.Window,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            });
-    });
-});
-
-
-var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-builder.Services.AddCors(o => o.AddPolicy("api", p =>
-{
-    if (origins.Length == 0) p.SetIsOriginAllowed(_ => false);
-    else p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
-}));
+builder.Services.AddDcmsTenantPlanRateLimiting(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
 
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
     o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto);
@@ -127,8 +98,10 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("fulfillment-api");
 app.UseForwardedHeaders();
-app.UseCors("api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
 app.UseDcmsImpersonationAudit();

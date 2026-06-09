@@ -75,6 +75,23 @@ export async function putTemplate(
   await checkOk(res);
 }
 
+export async function deleteTemplate(
+  tenantId: string,
+  storeId: string | undefined,
+  input: { key: string; locale: string; channel: TemplateRow["channel"] },
+  token?: string,
+): Promise<number> {
+  const q = new URLSearchParams({ key: input.key, locale: input.locale, channel: input.channel });
+  const res = await fetch(`${BASE}/templates?${q.toString()}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: headers(tenantId, storeId, token),
+  });
+  await checkOk(res);
+  const body: ApiEnvelope<{ deleted: number }> = await res.json();
+  return body.data?.deleted ?? 0;
+}
+
 export async function previewTemplate(
   tenantId: string,
   storeId: string | undefined,

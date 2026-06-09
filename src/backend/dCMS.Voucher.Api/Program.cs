@@ -1,6 +1,7 @@
 using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using dCMS.Voucher.Api.Migrations;
 using dCMS.Voucher.Api.Persistence;
 using dCMS.Voucher.Api.Routes;
@@ -9,6 +10,9 @@ using MassTransit;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Bind timestamptz columns to DateTimeOffset (incl. positional records). See DapperTypeHandlers.
+dCMS.Infrastructure.Persistence.DapperTypeHandlers.Register();
 
 var connectionString = builder.Configuration.GetConnectionString("Voucher");
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -22,6 +26,10 @@ else
     builder.Services.AddAuthorization();
 
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 builder.Services.AddHealthChecks();
 builder.Services.AddEndpointsApiExplorer();
@@ -59,19 +67,25 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Voucher API v1"); c.RoutePrefix = "swagger"; });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("voucher-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
 
 app.UseDcmsImpersonationAudit();
+app.UseRateLimiter();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
 
 app.MapVoucherRoutes();
 
-app.MapGet("/", () => Results.Text("dCMS.Voucher.Api\n", "text/plain"));
+app.MapGet("/", () => Results.Text("dCMS.Voucher.Api\n", "text/plain"))
+    .AllowAnonymous()
+    .DisableRateLimiting();
 app.Run();
 
 internal partial class Program;

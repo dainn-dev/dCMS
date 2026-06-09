@@ -5,9 +5,13 @@ using dCMS.Identity.Api.Persistence;
 using dCMS.Identity.Api.Routes;
 using dCMS.Identity.Api.Security;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Bind timestamptz columns to DateTimeOffset (incl. positional records). See DapperTypeHandlers.
+dCMS.Infrastructure.Persistence.DapperTypeHandlers.Register();
 
 var connectionString = builder.Configuration.GetConnectionString("Identity");
 if (string.IsNullOrWhiteSpace(connectionString))
@@ -50,26 +54,36 @@ builder.Services.AddSingleton(authOptions);
 builder.Services.AddSingleton(sp => new JwtMinter(authOptions, staticClientId ?? "dev"));
 
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 var app = builder.Build();
 
 app.UseSwagger();
 app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity API v1"); c.RoutePrefix = "swagger"; });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("identity-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
 
 app.UseDcmsImpersonationAudit();
+app.UseRateLimiter();
 
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
 
 app.MapLoginRoutes();
 app.MapAdminImpersonateRoutes();
 
-app.MapGet("/", () => Results.Text("dCMS.Identity.Api\n", "text/plain"));
+app.MapGet("/", () => Results.Text("dCMS.Identity.Api\n", "text/plain"))
+    .AllowAnonymous()
+    .DisableRateLimiting();
 app.Run();
 
 public partial class Program;

@@ -15,6 +15,7 @@ public sealed record PaymentTransaction(
     Guid OrderId,
     Guid TenantId,
     Guid StoreId,
+    string ClientId,
     string CustomerId,
     string PaymentMethod,
     string PaymentIntentId,

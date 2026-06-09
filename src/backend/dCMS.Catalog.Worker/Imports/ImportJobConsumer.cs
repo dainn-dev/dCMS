@@ -1,6 +1,7 @@
 using dCMS.Core.Messaging;
 using dCMS.Core.Models;
 using dCMS.Core.Persistence;
+using dCMS.Infrastructure.Web;
 using MassTransit;
 using Microsoft.Extensions.Logging;
 
@@ -35,19 +36,48 @@ public sealed class ImportJobConsumer : IConsumer<ImportJobQueuedV1>
         var job = await _repo.GetAsync(msg.JobId, msg.TenantId, ct).ConfigureAwait(false);
         if (job is null)
         {
-            _log.LogWarning("ImportJob {JobId} not found for tenant {TenantId}; skipping.", msg.JobId, msg.TenantId);
+            DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "import_job", "skipped", "job_not_found");
+            _log.LogWarning(
+                "Worker operation skipped service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} job {JobId}",
+                "catalog-worker",
+                "import_job",
+                "skipped",
+                "job_not_found",
+                context.CorrelationId?.ToString() ?? context.MessageId?.ToString() ?? "unknown",
+                msg.TenantId,
+                msg.JobId);
             return;
         }
         if (job.Status is ImportJobStatuses.Completed or ImportJobStatuses.PartiallyCompleted or ImportJobStatuses.Failed)
         {
-            _log.LogInformation("ImportJob {JobId} already terminal ({Status}); skipping.", msg.JobId, job.Status);
+            DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "import_job", "skipped", "already_terminal");
+            _log.LogInformation(
+                "Worker operation skipped service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} job {JobId} jobStatus {JobStatus}",
+                "catalog-worker",
+                "import_job",
+                "skipped",
+                "already_terminal",
+                context.CorrelationId?.ToString() ?? context.MessageId?.ToString() ?? "unknown",
+                msg.TenantId,
+                msg.JobId,
+                job.Status);
             return;
         }
 
         var processor = _processors.FirstOrDefault(p => p.Type == msg.Type);
         if (processor is null)
         {
-            _log.LogError("No processor registered for import type {Type} (job {JobId}).", msg.Type, msg.JobId);
+            DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "import_job", "failed", "processor_missing");
+            _log.LogError(
+                "Worker operation failed service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} job {JobId} importType {ImportType}",
+                "catalog-worker",
+                "import_job",
+                "failed",
+                "processor_missing",
+                context.CorrelationId?.ToString() ?? context.MessageId?.ToString() ?? "unknown",
+                msg.TenantId,
+                msg.JobId,
+                msg.Type);
             await _repo.MarkCompletedAsync(msg.JobId, msg.TenantId, ImportJobStatuses.Failed, job.Processed, ct)
                 .ConfigureAwait(false);
             return;
@@ -84,7 +114,18 @@ public sealed class ImportJobConsumer : IConsumer<ImportJobQueuedV1>
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Row {Index} ({Key}) failed in job {JobId}.", row.Index, row.Key, msg.JobId);
+                DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "import_row", "failed", "row_processor_error");
+                _log.LogError(
+                    ex,
+                    "Worker operation failed service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} job {JobId} row {RowIndex}",
+                    "catalog-worker",
+                    "import_row",
+                    "failed",
+                    "row_processor_error",
+                    context.CorrelationId?.ToString() ?? context.MessageId?.ToString() ?? "unknown",
+                    msg.TenantId,
+                    msg.JobId,
+                    row.Index);
                 await _repo.AppendErrorAsync(msg.JobId, msg.TenantId,
                     new ImportRowError(row.Index, row.Key, ex.Message), ct).ConfigureAwait(false);
                 errorCount++;
@@ -97,7 +138,21 @@ public sealed class ImportJobConsumer : IConsumer<ImportJobQueuedV1>
 
         var finalStatus = errorCount == 0 ? ImportJobStatuses.Completed : ImportJobStatuses.PartiallyCompleted;
         await _repo.MarkCompletedAsync(msg.JobId, msg.TenantId, finalStatus, processed, ct).ConfigureAwait(false);
-        _log.LogInformation("ImportJob {JobId} done: {Processed} rows, {Errors} errors, status={Status}.",
-            msg.JobId, processed, errorCount, finalStatus);
+        DcmsObservabilityMetrics.ObserveWorkerOperation(
+            "catalog-worker",
+            "import_job",
+            errorCount == 0 ? "succeeded" : "partial",
+            errorCount == 0 ? "none" : "row_errors");
+        _log.LogInformation(
+            "Worker operation completed service {Service} operation {Operation} status {Status} failure {FailureReason} correlation {CorrelationId} tenant {TenantId} job {JobId} processed {Processed} errors {Errors}",
+            "catalog-worker",
+            "import_job",
+            errorCount == 0 ? "succeeded" : "partial",
+            errorCount == 0 ? "none" : "row_errors",
+            context.CorrelationId?.ToString() ?? context.MessageId?.ToString() ?? "unknown",
+            msg.TenantId,
+            msg.JobId,
+            processed,
+            errorCount);
     }
 }

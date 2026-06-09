@@ -2,6 +2,7 @@ using dCMS.Core.Messaging;
 using dCMS.Payment.Core;
 using dCMS.Payment.Infrastructure.Persistence;
 using MassTransit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace dCMS.Payment.Infrastructure.Messaging;
@@ -10,6 +11,7 @@ namespace dCMS.Payment.Infrastructure.Messaging;
 public sealed class RefundPaymentConsumer(
     IPaymentGateway gateway,
     IPaymentTransactionRepository repository,
+    IConfiguration configuration,
     ILogger<RefundPaymentConsumer> logger) : IConsumer<RefundPaymentV1>
 {
     public async Task Consume(ConsumeContext<RefundPaymentV1> context)
@@ -29,8 +31,11 @@ public sealed class RefundPaymentConsumer(
             return;
         }
 
+        var clientId = ResolveClientId(configuration);
+        const string provider = "stub";
+
         var row = await repository
-            .GetLatestByOrderIdAsync(orderId, context.CancellationToken)
+            .GetLatestByOrderIdAsync(orderId, msgTenant, clientId, provider, context.CancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
@@ -89,7 +94,7 @@ public sealed class RefundPaymentConsumer(
         {
             case RefundPaymentGatewayResult.Succeeded ok:
                 await repository
-                    .UpdateStatusByIdAsync(row.Id, "refunded", context.CancellationToken)
+                    .UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, row.ClientId, row.Provider, "refunded", context.CancellationToken)
                     .ConfigureAwait(false);
                 await context
                     .Publish(
@@ -99,7 +104,7 @@ public sealed class RefundPaymentConsumer(
                 return;
             case RefundPaymentGatewayResult.AlreadyRefunded ok:
                 await repository
-                    .UpdateStatusByIdAsync(row.Id, "refunded", context.CancellationToken)
+                    .UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, row.ClientId, row.Provider, "refunded", context.CancellationToken)
                     .ConfigureAwait(false);
                 await context
                     .Publish(
@@ -117,4 +122,7 @@ public sealed class RefundPaymentConsumer(
                 throw new InvalidOperationException($"Unexpected refund result: {result.GetType().Name}");
         }
     }
+
+    private static string ResolveClientId(IConfiguration configuration) =>
+        configuration.GetSection("Dcms:Client")["Id"]?.Trim() ?? "aeon";
 }

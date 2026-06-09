@@ -105,6 +105,8 @@ public sealed class TemplateRepository
 
         await using var conn = new NpgsqlConnection(_cs);
         await conn.OpenAsync(ct).ConfigureAwait(false);
+        // Template + audit must be atomic: either both persist or neither does.
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         await conn.ExecuteAsync(new CommandDefinition(upsert, new
         {
             Id = id,
@@ -117,9 +119,9 @@ public sealed class TemplateRepository
             ModelVersion = req.ModelVersion <= 0 ? 1 : req.ModelVersion,
             UpdatedAt = now,
             UpdatedBy = actorUserId,
-        }, cancellationToken: ct)).ConfigureAwait(false);
+        }, tx, cancellationToken: ct)).ConfigureAwait(false);
 
-        // Minimal audit row (reuse Catalog AuditLogs).
+        // Minimal audit row in the Notification service's own AuditLogs table (DAI-687).
         const string audit = """
             INSERT INTO "AuditLogs"
                 ("TenantId","StoreId","UserId","UserRole","Action","EntityType","EntityId","Diff","IpAddress","CreatedAt")
@@ -138,7 +140,9 @@ public sealed class TemplateRepository
             Diff = (string?)null,
             IpAddress = ipForAudit,
             CreatedAt = now,
-        }, cancellationToken: ct)).ConfigureAwait(false);
+        }, tx, cancellationToken: ct)).ConfigureAwait(false);
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<int> DeleteAsync(string? tenantId, string key, string locale, string channel, CancellationToken ct)
@@ -162,7 +166,12 @@ public sealed class TemplateRepository
     }
 
     public static string? ActorUserId(HttpContext http) =>
-        http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? http.User.FindFirst("sub")?.Value;
+        // The gateway re-mints the token; depending on inbound/outbound claim mapping the
+        // subject arrives as NameIdentifier, "nameid", "sub", or (for client tokens) client_id.
+        http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        ?? http.User.FindFirst("nameid")?.Value
+        ?? http.User.FindFirst("sub")?.Value
+        ?? http.User.FindFirst("client_id")?.Value;
 }
 
 public sealed class TemplateRow

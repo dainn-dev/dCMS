@@ -2,6 +2,7 @@ using dCMS.Core.Messaging;
 using dCMS.Payment.Core;
 using dCMS.Payment.Infrastructure.Persistence;
 using MassTransit;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace dCMS.Payment.Infrastructure.Messaging;
@@ -10,6 +11,7 @@ namespace dCMS.Payment.Infrastructure.Messaging;
 public sealed class ProcessPaymentConsumer(
     IPaymentGateway gateway,
     IPaymentTransactionRepository repository,
+    IConfiguration configuration,
     ILogger<ProcessPaymentConsumer> logger) : IConsumer<ProcessPaymentV1>
 {
     public async Task Consume(ConsumeContext<ProcessPaymentV1> context)
@@ -23,8 +25,17 @@ public sealed class ProcessPaymentConsumer(
             return;
         }
 
+        if (!Guid.TryParse(m.TenantId, out var msgTenant))
+        {
+            logger.LogWarning("ProcessPaymentV1 skipped: TenantId is not a GUID.");
+            return;
+        }
+
+        var clientId = ResolveClientId(configuration);
+        const string provider = "stub";
+
         var row = await repository
-            .GetLatestByOrderIdAsync(orderId, context.CancellationToken)
+            .GetLatestByOrderIdAsync(orderId, msgTenant, clientId, provider, context.CancellationToken)
             .ConfigureAwait(false);
         if (row is null)
         {
@@ -36,7 +47,7 @@ public sealed class ProcessPaymentConsumer(
             return;
         }
 
-        if (Guid.TryParse(m.TenantId, out var msgTenant) && msgTenant != row.TenantId)
+        if (msgTenant != row.TenantId)
         {
             await context
                 .Publish(
@@ -120,7 +131,7 @@ public sealed class ProcessPaymentConsumer(
         {
             case ProcessPaymentGatewayResult.Succeeded ok:
                 await repository
-                    .UpdateStatusByIdAsync(row.Id, "completed", context.CancellationToken)
+                    .UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, row.ClientId, row.Provider, "completed", context.CancellationToken)
                     .ConfigureAwait(false);
                 await context
                     .Publish(
@@ -130,7 +141,7 @@ public sealed class ProcessPaymentConsumer(
                 return;
             case ProcessPaymentGatewayResult.AlreadySucceeded ok:
                 await repository
-                    .UpdateStatusByIdAsync(row.Id, "completed", context.CancellationToken)
+                    .UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, row.ClientId, row.Provider, "completed", context.CancellationToken)
                     .ConfigureAwait(false);
                 await context
                     .Publish(
@@ -140,7 +151,7 @@ public sealed class ProcessPaymentConsumer(
                 return;
             case ProcessPaymentGatewayResult.Failed err:
                 await repository
-                    .UpdateStatusByIdAsync(row.Id, "failed", context.CancellationToken)
+                    .UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, row.ClientId, row.Provider, "failed", context.CancellationToken)
                     .ConfigureAwait(false);
                 await context
                     .Publish(
@@ -152,4 +163,7 @@ public sealed class ProcessPaymentConsumer(
                 throw new InvalidOperationException($"Unexpected gateway result: {result.GetType().Name}");
         }
     }
+
+    private static string ResolveClientId(IConfiguration configuration) =>
+        configuration.GetSection("Dcms:Client")["Id"]?.Trim() ?? "aeon";
 }

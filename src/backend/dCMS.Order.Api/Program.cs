@@ -2,6 +2,7 @@ using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Monitoring;
+using dCMS.Infrastructure.Web;
 using dCMS.Order.Api.Routes;
 using dCMS.Order.Infrastructure;
 using Microsoft.OpenApi.Models;
@@ -22,6 +23,10 @@ else
 }
 
 builder.Services.AddDcmsImpersonationAudit(builder.Configuration);
+builder.Services.AddDcmsCors(builder.Configuration);
+builder.Services.AddDcmsRateLimiting(
+    builder.Configuration,
+    DcmsRateLimitingPartitionKeys.FromTenantHeaderOrRemoteIp);
 
 var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
@@ -55,15 +60,19 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c => { c.SwaggerEndpoint("/swagger/v1/swagger.json", "Order API v1"); c.RoutePrefix = "swagger"; });
 
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("order-api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 if (app.Configuration.IsDcmsAuthEnabled())
     app.UseDcmsJwtAuthentication(app.Configuration);
 else
     app.UseAuthorization();
 
 app.UseDcmsImpersonationAudit();
+app.UseRateLimiter();
 
 app.UseMiddleware<IdempotencyMiddleware>();
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous().DisableRateLimiting();
 app.MapDcmsPrometheusMetrics();
 app.MapOrderHttpRoutes();
 app.MapOrderReturnRoutes();

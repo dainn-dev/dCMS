@@ -8,6 +8,7 @@ public sealed class CreatePaymentIntentService(
     IPaymentTransactionRepository repository)
 {
     public async Task<CreatePaymentIntentOutcome> ExecuteAsync(
+        string clientId,
         string orderId,
         string tenantId,
         string storeId,
@@ -23,6 +24,8 @@ public sealed class CreatePaymentIntentService(
             return CreatePaymentIntentOutcome.Error("INVALID_TENANT", "tenantId must be a valid UUID.");
         if (!Guid.TryParse(storeId, out var storeGuid))
             return CreatePaymentIntentOutcome.Error("INVALID_STORE", "storeId must be a valid UUID.");
+        if (string.IsNullOrWhiteSpace(clientId))
+            return CreatePaymentIntentOutcome.Error("INVALID_CLIENT", "clientId is required.");
         if (string.IsNullOrWhiteSpace(customerId))
             return CreatePaymentIntentOutcome.Error("INVALID_CUSTOMER", "customerId is required.");
         if (amount <= 0)
@@ -52,6 +55,7 @@ public sealed class CreatePaymentIntentService(
                     orderGuid,
                     tenantGuid,
                     storeGuid,
+                    clientId.Trim(),
                     customerId.Trim(),
                     paymentMethod.Trim(),
                     intent.PaymentIntentId,

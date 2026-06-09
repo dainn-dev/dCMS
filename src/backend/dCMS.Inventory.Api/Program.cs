@@ -1,4 +1,3 @@
-using System.Threading.RateLimiting;
 using dCMS.AspNetCore.Auth;
 using dCMS.AspNetCore.Auth.Middleware;
 using Microsoft.OpenApi.Models;
@@ -17,7 +16,7 @@ using dCMS.Infrastructure.Middleware;
 using dCMS.Infrastructure.Outbox;
 using dCMS.Infrastructure.Monitoring;
 using dCMS.Infrastructure.Pricing;
-using dCMS.Infrastructure.RateLimiting;
+using dCMS.Infrastructure.Web;
 using MassTransit;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
@@ -39,9 +38,7 @@ var redisCs = builder.Configuration.GetConnectionString("Redis");
 if (!string.IsNullOrWhiteSpace(redisCs))
     builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisCs));
 
-builder.Services.AddSingleton(sp => new TenantPlanRateLimit(
-    sp.GetRequiredService<IConfiguration>(),
-    sp.GetService<IConnectionMultiplexer>()));
+builder.Services.AddDcmsTenantPlanRateLimiting(builder.Configuration);
 // Phase C + P1 #4: audit → local AuditOutbox → MassTransit (at-least-once).
 builder.Services.AddSingleton<AuditLogChannel>();
 builder.Services.AddSingleton(_ => new AuditOutboxPersistence(inventoryCs));
@@ -92,33 +89,7 @@ builder.Services.AddMassTransit(bus =>
     });
 });
 
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-    {
-        var resolver = httpContext.RequestServices.GetRequiredService<TenantPlanRateLimit>();
-        var key = resolver.ResolvePartitionKey(httpContext);
-        return RateLimitPartition.GetFixedWindowLimiter(key,
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = resolver.ResolvePermitLimit(key),
-                Window = resolver.Window,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0,
-                AutoReplenishment = true
-            });
-    });
-});
-
-var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-builder.Services.AddCors(o => o.AddPolicy("api", p =>
-{
-    if (origins.Length == 0)
-        p.SetIsOriginAllowed(_ => false);
-    else
-        p.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod();
-}));
+builder.Services.AddDcmsCors(builder.Configuration);
 
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {
@@ -153,9 +124,10 @@ app.UseExceptionHandler(errApp => errApp.Run(async context =>
     });
 }));
 
-app.UseCorrelationId();
+app.UseDcmsCorrelationId();
+app.UseDcmsRequestObservability("inventory-api");
 app.UseForwardedHeaders();
-app.UseCors("api");
+app.UseCors(DcmsWebHostDefaults.CorsPolicyName);
 app.UseMiddleware<HostTenantRoutingMiddleware>();
 app.UseDcmsJwtAuthentication(builder.Configuration);
 app.UseDcmsImpersonationAudit();

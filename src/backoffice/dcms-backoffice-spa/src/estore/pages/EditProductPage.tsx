@@ -1247,8 +1247,8 @@ export function EditProductPage({ mode, product, onBack, tenantId, storeId, auth
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className={labelBase}>SKU <span className="text-error">*</span></label>
-                    <input className={`${inputBase} font-mono`} type="text" defaultValue={isAdd ? "" : product?.sku} placeholder="e.g. WT-550-B" />
+                    <label className={labelBase}>SKU <span className="text-[9px] font-normal normal-case text-primary/70">managed in Variants</span></label>
+                    <input className={`${inputBase} font-mono`} type="text" readOnly value={isAdd ? "" : (product?.sku ?? "")} placeholder="Set per variant in the Variants section" />
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>PID1</label>
@@ -1343,41 +1343,40 @@ export function EditProductPage({ mode, product, onBack, tenantId, storeId, auth
 
               {/* Inventory & Pricing */}
               <div>
-                <h3 className={sectionTitle}>Inventory & Pricing</h3>
+                <h3 className={sectionTitle}>Inventory &amp; Pricing</h3>
+                <p className="mb-4 rounded-md border border-outline-variant/20 bg-surface-container/60 px-3 py-2 text-[11px] text-on-surface-variant">
+                  Read-only overview. Stock and prices are set per variant in the <strong>Variants</strong> section
+                  (and stock via the Inventory tools). Editing here is not saved.
+                </p>
                 <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="space-y-1.5">
                     <label className={labelBase}>Total Quantity</label>
-                    <div className="flex gap-2">
-                      <input className={inputBase} type="number" defaultValue={isAdd ? 0 : product?.qty} min={0} />
-                      <button type="button" className="shrink-0 whitespace-nowrap rounded-md border border-outline-variant/30 px-3 py-2 text-xs font-semibold text-on-surface-variant hover:bg-surface-container-high transition-colors">
-                        Update Qty
-                      </button>
-                    </div>
+                    <input className={inputBase} type="number" readOnly value={isAdd ? 0 : (product?.qty ?? 0)} min={0} />
                     <p className="text-[10px] text-on-surface-variant">
                       Quantity can be retrieved per outlet on the product page.
                     </p>
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>Total eStore Quantity</label>
-                    <input className={inputBase} type="number" defaultValue={isAdd ? 0 : product?.qty} min={0} />
+                    <input className={inputBase} type="number" readOnly value={isAdd ? 0 : (product?.qty ?? 0)} min={0} />
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>eStore Cut-Off Quantity</label>
-                    <input className={inputBase} type="number" defaultValue={0} min={0} />
+                    <input className={inputBase} type="number" readOnly value={0} min={0} />
                     <p className="text-[10px] text-on-surface-variant">Product tagged out of stock when this threshold is reached.</p>
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>Retail Price</label>
                     <div className="relative">
                       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-on-surface-variant">$</span>
-                      <input className={`${inputBase} pl-6`} type="text" defaultValue={isAdd ? "" : product?.price?.replace("$", "")} placeholder="0.00" />
+                      <input className={`${inputBase} pl-6`} type="text" readOnly value={isAdd ? "" : (product?.price?.replace("$", "") ?? "")} placeholder="0.00" />
                     </div>
                   </div>
                   <div className="space-y-1.5">
                     <label className={labelBase}>Current Price (Incl Tax)</label>
                     <div className="relative">
                       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-on-surface-variant">$</span>
-                      <input className={`${inputBase} pl-6`} type="text" defaultValue={isAdd ? "" : product?.price?.replace("$", "")} placeholder="0.00" />
+                      <input className={`${inputBase} pl-6`} type="text" readOnly value={isAdd ? "" : (product?.price?.replace("$", "") ?? "")} placeholder="0.00" />
                     </div>
                   </div>
                 </div>

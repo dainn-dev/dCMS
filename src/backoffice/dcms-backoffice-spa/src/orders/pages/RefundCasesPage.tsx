@@ -16,9 +16,10 @@ type StatusFilter = "all" | RefundStatus;
 
 const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "all", label: "All statuses" },
-  { value: "Pending Refund", label: "Pending Refund" },
+  { value: "Pending", label: "Pending" },
+  { value: "Processing", label: "Processing" },
   { value: "Success", label: "Success" },
-  { value: "Failed", label: "Failed" },
+  { value: "Rejected", label: "Rejected" },
 ];
 
 function findCase(refundNo: string, list: RefundCase[]): RefundCase | null {

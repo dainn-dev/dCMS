@@ -19,18 +19,24 @@ public sealed class TenantOnlyAccessEndpointFilter : IEndpointFilter
 
         var user = http.User;
         if (user.Identity?.IsAuthenticated != true)
+        {
+            AccessFailureLogging.MarkAndLog(http, "unauthorized", "Authentication required.");
             return Results.Json(
                 new { data = (object?)null, meta = (object?)null, error = new { code = "unauthorized", message = "Authentication required." } },
                 statusCode: StatusCodes.Status401Unauthorized);
+        }
 
         if (user.IsInRole(DcmsRoles.SuperAdmin))
             return await next(context);
 
         var tid = user.FindFirst(DcmsClaims.TenantId)?.Value;
         if (!string.Equals(tid, tenantRoute, StringComparison.Ordinal))
+        {
+            AccessFailureLogging.MarkAndLog(http, "tenant_mismatch", "Token tenant does not match the request path.");
             return Results.Json(
                 new { data = (object?)null, meta = (object?)null, error = new { code = "tenant_mismatch", message = "Token tenant does not match the request path." } },
                 statusCode: StatusCodes.Status403Forbidden);
+        }
 
         return await next(context);
     }

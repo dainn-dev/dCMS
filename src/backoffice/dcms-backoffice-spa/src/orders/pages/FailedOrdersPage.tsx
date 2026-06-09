@@ -1,5 +1,5 @@
 import type { RowSelectionState } from "@tanstack/react-table";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DataTable } from "../components/DataTable";
 import { ConfirmResolveFailedOrdersDialog } from "../components/ConfirmResolveFailedOrdersDialog";
 import { exportFailedOrdersToCsv } from "../exportFailedOrders";
@@ -97,7 +97,10 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
   const [retryHintOpen, setRetryHintOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [tabCounts, setTabCounts] = useState<Record<string, number>>(() => ({ all: 0 }));
-  const [countsKey, setCountsKey] = useState<string>("");
+  // Bumped after retry/resolve so the tab counts re-scan; the ref dedupes per (tenant,store,tick)
+  // WITHOUT a state write inside the effect (a state write there would self-cancel the in-flight scan).
+  const [countsTick, setCountsTick] = useState(0);
+  const countsKeyRef = useRef<string>("");
 
   // Auto-dismiss toast after 3s (matches OrderProcessingPage pattern).
   useEffect(() => {
@@ -147,9 +150,9 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
       return;
     }
 
-    const key = `${tenantId}::${storeId}`;
-    if (countsKey === key) return;
-    setCountsKey(key);
+    const key = `${tenantId}::${storeId}::${countsTick}`;
+    if (countsKeyRef.current === key) return;
+    countsKeyRef.current = key;
 
     let cancelled = false;
     (async () => {
@@ -184,7 +187,7 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
     return () => {
       cancelled = true;
     };
-  }, [tenantId, storeId, authToken, countsKey]);
+  }, [tenantId, storeId, authToken, countsTick]);
 
   const columns = useMemo(
     () => createFailedOrderColumns(onViewFailedOrder),
@@ -222,6 +225,7 @@ export function FailedOrdersPage({ tenantId, storeId, authToken, onViewFailedOrd
     );
     if (failed === 0) setRowSelection({});
     await refresh();
+    setCountsTick((t) => t + 1); // re-scan tab counts now that some orders left the failure set
   }
 
   async function loadMore() {

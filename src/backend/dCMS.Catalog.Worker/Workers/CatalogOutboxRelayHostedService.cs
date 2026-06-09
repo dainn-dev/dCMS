@@ -1,4 +1,5 @@
 using dCMS.Core.Messaging;
+using dCMS.Infrastructure.Web;
 using dCMS.Infrastructure.Outbox;
 using MassTransit;
 
@@ -17,20 +18,72 @@ public sealed class CatalogOutboxRelayHostedService(SqlOutboxRelay relay, IBus b
             }
             catch (Exception ex)
             {
-                log.LogError(ex, "Catalog outbox relay iteration failed");
+                DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "outbox_relay", "failed", "relay_iteration_failed");
+                log.LogError(
+                    ex,
+                    "Worker operation failed service {Service} operation {Operation} status {Status} failure {FailureReason}",
+                    "catalog-worker",
+                    "outbox_relay",
+                    "failed",
+                    "relay_iteration_failed");
             }
 
             await Task.Delay(1000, stoppingToken).ConfigureAwait(false);
         }
     }
 
-    private Task PublishAsync(object message, CancellationToken ct) =>
-        message switch
+    private async Task PublishAsync(object message, CancellationToken ct)
+    {
+        var eventType = message.GetType().Name;
+        try
         {
-            ProductCreatedV1 m => bus.Publish(m, ct),
-            ProductUpdatedV1 m => bus.Publish(m, ct),
-            ProductPublishedV1 m => bus.Publish(m, ct),
-            ProductArchivedV1 m => bus.Publish(m, ct),
-            _ => Task.CompletedTask
-        };
+            switch (message)
+            {
+                case ProductCreatedV1 m:
+                    await bus.Publish(m, ct).ConfigureAwait(false);
+                    break;
+                case ProductUpdatedV1 m:
+                    await bus.Publish(m, ct).ConfigureAwait(false);
+                    break;
+                case ProductPublishedV1 m:
+                    await bus.Publish(m, ct).ConfigureAwait(false);
+                    break;
+                case ProductArchivedV1 m:
+                    await bus.Publish(m, ct).ConfigureAwait(false);
+                    break;
+                default:
+                    DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "outbox_publish", "skipped", "unsupported_event");
+                    log.LogWarning(
+                        "Worker operation skipped service {Service} operation {Operation} status {Status} failure {FailureReason} eventType {EventType}",
+                        "catalog-worker",
+                        "outbox_publish",
+                        "skipped",
+                        "unsupported_event",
+                        eventType);
+                    return;
+            }
+
+            DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "outbox_publish", "succeeded");
+            log.LogInformation(
+                "Worker operation completed service {Service} operation {Operation} status {Status} failure {FailureReason} eventType {EventType}",
+                "catalog-worker",
+                "outbox_publish",
+                "succeeded",
+                "none",
+                eventType);
+        }
+        catch (Exception ex)
+        {
+            DcmsObservabilityMetrics.ObserveWorkerOperation("catalog-worker", "outbox_publish", "failed", "publish_failed");
+            log.LogError(
+                ex,
+                "Worker operation failed service {Service} operation {Operation} status {Status} failure {FailureReason} eventType {EventType}",
+                "catalog-worker",
+                "outbox_publish",
+                "failed",
+                "publish_failed",
+                eventType);
+            throw;
+        }
+    }
 }

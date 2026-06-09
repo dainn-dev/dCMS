@@ -97,7 +97,11 @@ public static class TemplateRoutes
             return Err(400, "INVALID_BODY", "key, channel, body are required.");
 
         var actor = TemplateRepository.ActorUserId(http);
-        var role = http.User.FindFirst("role")?.Value ?? "unknown";
+        // Role claim type varies by inbound claim mapping (ClaimTypes.Role vs literal "role"/"roles").
+        var role = http.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value
+            ?? http.User.FindFirst("role")?.Value
+            ?? http.User.FindFirst("roles")?.Value
+            ?? "unknown";
         var ip = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         // Tenant override: if client omitted TenantId, default to current tenant.

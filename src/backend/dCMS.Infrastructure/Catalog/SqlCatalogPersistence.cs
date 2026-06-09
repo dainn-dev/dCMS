@@ -786,7 +786,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         const string sql = """
-            SELECT p."Id", p."Name", ''::text AS "BrandName",
+            SELECT p."Id", p."Name", COALESCE(b."Name", '') AS "BrandName",
                    cat."Name" AS "CategoryPath",
                    c."UserId"    AS "SubmittedByUserId",
                    c."CreatedAt" AS "SubmittedAt",
@@ -800,6 +800,7 @@ public sealed class SqlCatalogPersistence(string connectionString) : ICatalogPer
                 LIMIT 1
             ) c ON TRUE
             LEFT JOIN "Categories" cat ON cat."Id" = p."CategoryId" AND cat."TenantId" = p."TenantId"
+            LEFT JOIN "Brands" b ON b."TenantId" = p."TenantId" AND b."Code" = p."BrandId"
             WHERE p."TenantId" = @TenantId AND p."StoreId" = @StoreId
               AND p."Status" IN ('pending_approval', 'pending_archive')
               AND (@AfterProductId IS NULL OR p."Id" > @AfterProductId)
