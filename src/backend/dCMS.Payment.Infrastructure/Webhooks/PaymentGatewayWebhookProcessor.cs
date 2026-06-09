@@ -7,13 +7,16 @@ using Microsoft.Extensions.Logging;
 namespace dCMS.Payment.Infrastructure.Webhooks;
 
 /// <summary>DAI-341 — applies gateway webhook outcomes to <see cref="PaymentTransaction"/> and notifies Order saga.</summary>
-public sealed class PaymentGatewayWebhookProcessor(
+public class PaymentGatewayWebhookProcessor(
     IPaymentTransactionRepository repository,
     IBus bus,
     ILogger<PaymentGatewayWebhookProcessor> logger)
 {
-    public async Task<PaymentWebhookProcessResult> ProcessAsync(
+    public virtual async Task<PaymentWebhookProcessResult> ProcessAsync(
         string paymentIntentId,
+        Guid tenantId,
+        string clientId,
+        string provider,
         bool succeeded,
         string? providerPaymentId,
         string failureReason,
@@ -21,7 +24,7 @@ public sealed class PaymentGatewayWebhookProcessor(
     {
         paymentIntentId = paymentIntentId.Trim();
         var row = await repository
-            .GetLatestByPaymentIntentIdAsync(paymentIntentId, cancellationToken)
+            .GetLatestByPaymentIntentIdAsync(paymentIntentId, tenantId, clientId, provider, null, cancellationToken)
             .ConfigureAwait(false);
         if (row is null)
             return PaymentWebhookProcessResult.UnknownIntent;
@@ -47,24 +50,40 @@ public sealed class PaymentGatewayWebhookProcessor(
         }
 
         var at = DateTimeOffset.UtcNow;
-        var tenantId = row.TenantId.ToString("D");
-        var storeId = row.StoreId.ToString("D");
-        var orderId = row.OrderId.ToString("D");
+        var tenantIdStr = row.TenantId.ToString("D");
+        var storeIdStr = row.StoreId.ToString("D");
+        var orderIdStr = row.OrderId.ToString("D");
 
         if (succeeded)
         {
-            await repository.UpdateStatusByIdAsync(row.Id, "completed", cancellationToken).ConfigureAwait(false);
+            await repository.UpdateStatusByIdAsync(
+                    row.Id,
+                    row.TenantId,
+                    row.StoreId,
+                    row.ClientId,
+                    row.Provider,
+                    "completed",
+                    cancellationToken)
+                .ConfigureAwait(false);
             var payId = string.IsNullOrWhiteSpace(providerPaymentId) ? row.PaymentIntentId : providerPaymentId.Trim();
             await bus
-                .Publish(new PaymentCompletedV1(orderId, payId, tenantId, storeId, at), cancellationToken)
+                .Publish(new PaymentCompletedV1(orderIdStr, payId, tenantIdStr, storeIdStr, at), cancellationToken)
                 .ConfigureAwait(false);
             return PaymentWebhookProcessResult.Ok;
         }
 
         var reason = string.IsNullOrWhiteSpace(failureReason) ? "gateway_webhook_failed" : failureReason.Trim();
-        await repository.UpdateStatusByIdAsync(row.Id, "failed", cancellationToken).ConfigureAwait(false);
+        await repository.UpdateStatusByIdAsync(
+                row.Id,
+                row.TenantId,
+                row.StoreId,
+                row.ClientId,
+                row.Provider,
+                "failed",
+                cancellationToken)
+            .ConfigureAwait(false);
         await bus
-            .Publish(new PaymentFailedV1(orderId, reason, tenantId, storeId, at), cancellationToken)
+            .Publish(new PaymentFailedV1(orderIdStr, reason, tenantIdStr, storeIdStr, at), cancellationToken)
             .ConfigureAwait(false);
         return PaymentWebhookProcessResult.Ok;
     }

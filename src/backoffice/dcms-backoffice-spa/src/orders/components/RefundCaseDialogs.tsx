@@ -146,8 +146,8 @@ export function RefundUpdateStatusDialog({
         Refund <span className="font-mono font-bold text-on-surface">{c.refundNo}</span>
         {c.isPaymentGatewayCase ? (
           <span className="block mt-1 text-[10px]">
-            Payment gateway case — status can only be changed while in <strong>Pending Refund</strong> or{" "}
-            <strong>Failed</strong> (mock RBAC applies).
+            Payment gateway case — status can only be changed while in <strong>Pending</strong> or{" "}
+            <strong>Rejected</strong> (mock RBAC applies).
           </span>
         ) : (
           <span className="block mt-1 text-[10px]">Non–payment-gateway case — always editable (mock).</span>

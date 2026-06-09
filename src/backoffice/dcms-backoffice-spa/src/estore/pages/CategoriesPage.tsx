@@ -570,6 +570,46 @@ export function CategoriesPage({
   const [imgCategoryPageSrc, setImgCategoryPageSrc] = useState("");
   const [imgThumbSrc, setImgThumbSrc] = useState("");
 
+  // Controlled mirrors of the Navbar / Product-Page / SEO tab fields so Save persists them
+  // (DAI-591: previously uncontrolled defaults that were silently dropped on save).
+  type ExtraForm = {
+    showInNav: boolean;
+    showInBrands: boolean;
+    publishFrom: string; // datetime-local string ("" = none)
+    publishUntil: string;
+    navSortPriority: number;
+    customNavUrl: string;
+    breakNavColumn: boolean;
+    noRecommendations: boolean;
+    defaultSort: string;
+    accessApp: string;
+    accessMemberType: string;
+    accessMemberTier: string;
+    metaTitle: Record<string, string>;
+    metaKeywords: Record<string, string>;
+    metaDesc: Record<string, string>;
+  };
+  const EMPTY_EXTRA: ExtraForm = {
+    showInNav: true,
+    showInBrands: false,
+    publishFrom: "",
+    publishUntil: "",
+    navSortPriority: 10,
+    customNavUrl: "",
+    breakNavColumn: false,
+    noRecommendations: false,
+    defaultSort: "bestseller",
+    accessApp: "",
+    accessMemberType: "",
+    accessMemberTier: "",
+    metaTitle: {},
+    metaKeywords: {},
+    metaDesc: {},
+  };
+  const [extra, setExtra] = useState<ExtraForm>(EMPTY_EXTRA);
+  const patchExtra = useCallback((p: Partial<ExtraForm>) => setExtra((s) => ({ ...s, ...p })), []);
+  const [restrictAccess, setRestrictAccess] = useState(false);
+
   // Auto-hide toast after 3 s
   useEffect(() => {
     if (!toast.visible) return;
@@ -588,6 +628,11 @@ export function CategoriesPage({
       setTab("general");
       setFormNameValues({});
       setFormActive(true);
+      setExtra(EMPTY_EXTRA);
+      setImgMenuSrc("");
+      setImgCategoryPageSrc("");
+      setImgThumbSrc("");
+      setRestrictAccess(false);
     } else {
       const p = findParentId(treeData, mode.nodeId);
       const pid = p !== undefined ? p : null;
@@ -596,6 +641,39 @@ export function CategoriesPage({
       const node = findNodeRef(treeData, mode.nodeId);
       setFormNameValues(node ? { en: node.name } : {});
       setFormActive(node?.active !== false);
+      // Hydrate the Navbar / Images / Product-Page / SEO tabs from the saved DTO.
+      const dto = (node?._dto ?? {}) as Record<string, unknown>;
+      const asBool = (v: unknown, d = false) => (typeof v === "boolean" ? v : d);
+      const asStr = (v: unknown, d = "") => (typeof v === "string" ? v : d);
+      const jsonRec = (v: unknown): Record<string, string> => {
+        try {
+          const o = typeof v === "string" && v ? JSON.parse(v) : {};
+          return o && typeof o === "object" ? (o as Record<string, string>) : {};
+        } catch {
+          return {};
+        }
+      };
+      setExtra({
+        showInNav: asBool(dto.showInNav, true),
+        showInBrands: asBool(dto.showInBrands, false),
+        publishFrom: typeof dto.publishFrom === "string" ? dto.publishFrom.slice(0, 16) : "",
+        publishUntil: typeof dto.publishUntil === "string" ? dto.publishUntil.slice(0, 16) : "",
+        navSortPriority: typeof dto.navSortPriority === "number" ? dto.navSortPriority : 10,
+        customNavUrl: asStr(dto.customNavUrl),
+        breakNavColumn: asBool(dto.breakNavColumn, false),
+        noRecommendations: asBool(dto.noRecommendations, false),
+        defaultSort: asStr(dto.defaultSort, "bestseller") || "bestseller",
+        accessApp: asStr(dto.accessApp),
+        accessMemberType: asStr(dto.accessMemberType),
+        accessMemberTier: asStr(dto.accessMemberTier),
+        metaTitle: jsonRec(dto.metaTitleJson),
+        metaKeywords: jsonRec(dto.metaKeywordsJson),
+        metaDesc: jsonRec(dto.metaDescJson),
+      });
+      setImgMenuSrc(asStr(dto.imageMenuUrl));
+      setImgCategoryPageSrc(asStr(dto.imagePageUrl));
+      setImgThumbSrc(asStr(dto.imageThumbUrl));
+      setRestrictAccess(asBool(dto.restrictAccess, false));
     }
   // treeData intentionally excluded — only sync when mode changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -614,6 +692,29 @@ export function CategoriesPage({
     formParentId === null
       ? "Top Level"
       : (findNodeName(treeData, formParentId) ?? "Unknown");
+
+  // All non-General fields (Navbar / Images / Product-Page / SEO), serialized for the payload.
+  const buildExtraPayload = useCallback((): Partial<CategoryPayload> => ({
+    showInNav: extra.showInNav,
+    showInBrands: extra.showInBrands,
+    publishFrom: extra.publishFrom ? new Date(extra.publishFrom).toISOString() : null,
+    publishUntil: extra.publishUntil ? new Date(extra.publishUntil).toISOString() : null,
+    navSortPriority: Number(extra.navSortPriority) || 0,
+    customNavUrl: extra.customNavUrl.trim(),
+    breakNavColumn: extra.breakNavColumn,
+    noRecommendations: extra.noRecommendations,
+    defaultSort: extra.defaultSort,
+    imageMenuUrl: imgMenuSrc,
+    imagePageUrl: imgCategoryPageSrc,
+    imageThumbUrl: imgThumbSrc,
+    metaTitleJson: JSON.stringify(extra.metaTitle ?? {}),
+    metaKeywordsJson: JSON.stringify(extra.metaKeywords ?? {}),
+    metaDescJson: JSON.stringify(extra.metaDesc ?? {}),
+    restrictAccess,
+    accessApp: extra.accessApp,
+    accessMemberType: extra.accessMemberType,
+    accessMemberTier: extra.accessMemberTier,
+  }), [extra, imgMenuSrc, imgCategoryPageSrc, imgThumbSrc, restrictAccess]);
 
   const handleSaveCategory = useCallback(async () => {
     const nodeNumericId = mode.kind === "edit" ? parseInt(mode.nodeId, 10) : NaN;
@@ -651,10 +752,13 @@ export function CategoriesPage({
           slug,
           parentId: formParentId ? parseInt(formParentId, 10) : null,
           active: formActive,
+          ...buildExtraPayload(),
         };
         try {
           const newNode = await createCategory(tenantId, payload, authToken);
           setTreeData((prev) => insertNode(prev, newNode, formParentId));
+          // Select the new category so "Continue Editing" edits it (not the previous selection).
+          setMode({ kind: "edit", nodeId: newNode.id });
           showToast("Category created successfully.");
           setShowSuccessModal(true);
         } catch (err) {
@@ -670,14 +774,18 @@ export function CategoriesPage({
     if (tenantId && !isNaN(nodeNumericId)) {
       // ── Update via API ────────────────────────────────────────────────
       const existing = findNodeRef(treeData, mode.nodeId);
-      const existingSlug = (existing?._dto as { slug?: string } | undefined)?.slug;
+      const existingDto = (existing?._dto ?? {}) as { slug?: string; code?: string; sortOrder?: number };
       const nameEn = (formNameValues.en ?? "").trim() || existing?.name || "Category";
       const payload: CategoryPayload = {
         name: nameEn,
         // Preserve the real slug — never clobber it with a synthetic "cat-{id}".
-        slug: existingSlug || slugify(nameEn) || `cat-${nodeNumericId}`,
+        slug: existingDto.slug || slugify(nameEn) || `cat-${nodeNumericId}`,
         parentId: parentNumericId,
         active: formActive,
+        // Preserve code + sort order (managed elsewhere) so a save doesn't reset them.
+        code: existingDto.code,
+        sortOrder: existingDto.sortOrder,
+        ...buildExtraPayload(),
       };
       try {
         await updateCategory(tenantId, nodeNumericId, payload, authToken);
@@ -693,7 +801,7 @@ export function CategoriesPage({
   }, [
     isAddMode, isReclassifying, mode, treeData, formParentId,
     reclassifyToLabel, showToast, tenantId, authToken,
-    formNameValues, formActive,
+    formNameValues, formActive, buildExtraPayload,
   ]);
 
   // After cancel/close, return to a real node (or the add form if the tree is empty).
@@ -794,7 +902,7 @@ export function CategoriesPage({
 
       if (!hasChildren) {
         return (
-          <div key={node.id} style={{ marginLeft: depth ? 24 : 0 }}>
+          <div key={node.id} className={depth ? "mt-1" : ""}>
             <div
               role="button"
               tabIndex={0}
@@ -861,7 +969,6 @@ export function CategoriesPage({
 
   // ── Derived display values ──────────────────────────────────────────────────
 
-  const [restrictAccess, setRestrictAccess] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const editNodeName =
@@ -1291,7 +1398,8 @@ export function CategoriesPage({
                       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                         <input
                           type="checkbox"
-                          defaultChecked
+                          checked={extra.showInNav}
+                          onChange={(e) => patchExtra({ showInNav: e.target.checked })}
                           className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                         />
                         <div>
@@ -1304,6 +1412,8 @@ export function CategoriesPage({
                       <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                         <input
                           type="checkbox"
+                          checked={extra.showInBrands}
+                          onChange={(e) => patchExtra({ showInBrands: e.target.checked })}
                           className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                         />
                         <div>
@@ -1330,7 +1440,8 @@ export function CategoriesPage({
                         <input
                           type="datetime-local"
                           className={inputBase}
-                          defaultValue=""
+                          value={extra.publishFrom}
+                          onChange={(e) => patchExtra({ publishFrom: e.target.value })}
                         />
                         <p className="text-[10px] text-on-surface-variant">
                           Date &amp; time the category starts appearing on eStore.
@@ -1346,7 +1457,8 @@ export function CategoriesPage({
                         <input
                           type="datetime-local"
                           className={inputBase}
-                          defaultValue=""
+                          value={extra.publishUntil}
+                          onChange={(e) => patchExtra({ publishUntil: e.target.value })}
                         />
                         <p className="text-[10px] text-on-surface-variant">
                           Date &amp; time the category is removed from eStore. Leave blank for no expiry.
@@ -1364,7 +1476,8 @@ export function CategoriesPage({
                         <input
                           type="number"
                           className={`${inputBase} w-36`}
-                          defaultValue={10}
+                          value={extra.navSortPriority}
+                          onChange={(e) => patchExtra({ navSortPriority: Number(e.target.value) })}
                           min={1}
                         />
                         <p className="text-[10px] text-on-surface-variant">
@@ -1376,7 +1489,8 @@ export function CategoriesPage({
                         <input
                           className={inputBase}
                           placeholder="/category/custom-path"
-                          defaultValue={isAddMode ? "" : ""}
+                          value={extra.customNavUrl}
+                          onChange={(e) => patchExtra({ customNavUrl: e.target.value })}
                         />
                         <p className="text-[10px] text-on-surface-variant">
                           Override the default URL for this category in the navigation menu.
@@ -1386,6 +1500,8 @@ export function CategoriesPage({
                     <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                       <input
                         type="checkbox"
+                        checked={extra.breakNavColumn}
+                        onChange={(e) => patchExtra({ breakNavColumn: e.target.checked })}
                         className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                       />
                       <div>
@@ -1408,6 +1524,8 @@ export function CategoriesPage({
                     <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-outline-variant/15 bg-surface p-4 transition-colors hover:bg-surface-container-low">
                       <input
                         type="checkbox"
+                        checked={extra.noRecommendations}
+                        onChange={(e) => patchExtra({ noRecommendations: e.target.checked })}
                         className="mt-0.5 h-4 w-4 rounded border-outline-variant accent-primary"
                       />
                       <div>
@@ -1450,7 +1568,11 @@ export function CategoriesPage({
                     <h3 className={sectionHeading}>Default Sort Order</h3>
                     <div className="max-w-xs space-y-2">
                       <label className={labelBase}>Default Sort Option</label>
-                      <select className={inputBase} defaultValue="bestseller">
+                      <select
+                        className={inputBase}
+                        value={extra.defaultSort}
+                        onChange={(e) => patchExtra({ defaultSort: e.target.value })}
+                      >
                         <option value="latest">Latest</option>
                         <option value="price-asc">Price (Low – High)</option>
                         <option value="price-desc">Price (High – Low)</option>
@@ -1489,8 +1611,10 @@ export function CategoriesPage({
                   <div className="space-y-5">
                     <h3 className={sectionHeading}>SEO &amp; Metadata</h3>
                     <MultiLangInput
+                      key={`meta-title-${mode.kind === "edit" ? mode.nodeId : "add"}`}
                       label="Meta Title"
-                      defaultValues={{ en: "" }}
+                      defaultValues={extra.metaTitle}
+                      onValuesChange={(v) => patchExtra({ metaTitle: v })}
                       placeholders={{
                         en: isAddMode ? "e.g. Shop Electronics Online | Best Deals" : "",
                         vn: isAddMode ? "VD: Mua sắm điện tử | Ưu đãi tốt nhất" : "",
@@ -1500,8 +1624,10 @@ export function CategoriesPage({
                       hint="Text that appears on the browser's title bar and tab."
                     />
                     <MultiLangInput
+                      key={`meta-kw-${mode.kind === "edit" ? mode.nodeId : "add"}`}
                       label="Meta Keywords"
-                      defaultValues={{ en: "" }}
+                      defaultValues={extra.metaKeywords}
+                      onValuesChange={(v) => patchExtra({ metaKeywords: v })}
                       placeholders={{
                         en: "Comma-separated keywords, e.g. electronics, gadgets, tech",
                         vn: "Từ khóa cách nhau bằng dấu phẩy",
@@ -1511,9 +1637,11 @@ export function CategoriesPage({
                       hint="Relevant keywords to help search engines improve this category's visibility."
                     />
                     <MultiLangTextarea
+                      key={`meta-desc-${mode.kind === "edit" ? mode.nodeId : "add"}`}
                       label="Meta Description"
                       rows={3}
-                      defaultValues={{ en: "" }}
+                      defaultValues={extra.metaDesc}
+                      onValuesChange={(v) => patchExtra({ metaDesc: v })}
                       placeholders={{
                         en: isAddMode ? "Describe this category for search engines..." : "",
                         vn: isAddMode ? "Mô tả ngắn về danh mục này cho công cụ tìm kiếm..." : "",
@@ -1567,7 +1695,11 @@ export function CategoriesPage({
                       <div className="grid grid-cols-1 gap-5 rounded-lg border border-primary/15 bg-primary/5 p-5 md:grid-cols-3">
                         <div className="space-y-2">
                           <label className={labelBase}>Application</label>
-                          <select className={inputBase} defaultValue="">
+                          <select
+                            className={inputBase}
+                            value={extra.accessApp}
+                            onChange={(e) => patchExtra({ accessApp: e.target.value })}
+                          >
                             <option value="">All Applications</option>
                             <option value="website">Website</option>
                             <option value="mobile">Mobile App</option>
@@ -1578,7 +1710,11 @@ export function CategoriesPage({
                         </div>
                         <div className="space-y-2">
                           <label className={labelBase}>Member Type</label>
-                          <select className={inputBase} defaultValue="">
+                          <select
+                            className={inputBase}
+                            value={extra.accessMemberType}
+                            onChange={(e) => patchExtra({ accessMemberType: e.target.value })}
+                          >
                             <option value="">All Member Types</option>
                             <option value="retail">Retail</option>
                             <option value="wholesale">Wholesale</option>
@@ -1590,7 +1726,11 @@ export function CategoriesPage({
                         </div>
                         <div className="space-y-2">
                           <label className={labelBase}>Member Tier</label>
-                          <select className={inputBase} defaultValue="">
+                          <select
+                            className={inputBase}
+                            value={extra.accessMemberTier}
+                            onChange={(e) => patchExtra({ accessMemberTier: e.target.value })}
+                          >
                             <option value="">All Tiers</option>
                             <option value="bronze">Bronze</option>
                             <option value="silver">Silver</option>
@@ -1857,8 +1997,8 @@ export function CategoriesPage({
                   type="button"
                   className={btnFooterPrimary + " w-full justify-center"}
                   onClick={() => {
+                    // mode is already set to the newly-created category — just close.
                     setShowSuccessModal(false);
-                    selectFirstOrAdd();
                   }}
                 >
                   Continue Editing

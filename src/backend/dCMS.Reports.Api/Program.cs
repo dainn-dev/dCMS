@@ -34,6 +34,8 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddSingleton<AnalyticsReportQueryStore>();
+// DAI-711: delivery-slots report reads the Fulfillment read-model (cross-DB, optional connstring).
+builder.Services.AddSingleton<FulfillmentReportQueryStore>();
 
 var app = builder.Build();
 

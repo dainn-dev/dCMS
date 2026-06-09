@@ -359,24 +359,24 @@ type Props = {
   onTakeAction?: (orderId: string) => void;
 };
 
+// Values are the snake_case statuses the Order API accepts (OrderQueryStore.TryMapApiStatusToDb).
+// "Open Order" maps to the pre-fulfillment lifecycle (comma list = OR filter, supported by the API).
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "all",                label: "All statuses" },
-  { value: "Created",            label: "Open Order" },
-  { value: "Processing",         label: "Processing" },
-  { value: "ReadyForDelivery",   label: "Ready for Delivery" },
-  { value: "ReadyForPickup",     label: "Ready for Pickup" },
-  { value: "Shipped",            label: "Out for Delivery" },
-  { value: "Delivered",          label: "Delivered" },
-  { value: "Returned",           label: "Returned" },
-  { value: "AdminCancelled",     label: "Admin Cancelled" },
-  { value: "PendingCancellation",label: "Pending Cancellation" },
-  { value: "UserCancelled",      label: "User Cancelled" },
-  { value: "PartiallyFulfilled", label: "Partially Fulfilled" },
-  { value: "payment_failed",     label: "Payment Failed" },
-  { value: "auth_failed",        label: "Auth Failed" },
-  { value: "address_error",      label: "Address Error" },
-  { value: "stock_error",        label: "Stock Error" },
-  { value: "system_error",       label: "System Error" },
+  { value: "all",                       label: "All statuses" },
+  { value: "payment_pending,confirmed", label: "Open Order" },
+  { value: "processing",                label: "Processing" },
+  { value: "ready_for_delivery",        label: "Ready for Delivery" },
+  { value: "shipped",                   label: "Out for Delivery" },
+  { value: "picked_up",                 label: "Picked Up" },
+  { value: "delivered",                 label: "Delivered" },
+  { value: "returned",                  label: "Returned" },
+  { value: "partial_fulfilled",         label: "Partially Fulfilled" },
+  { value: "cancelled",                 label: "Cancelled" },
+  { value: "payment_failed",            label: "Payment Failed" },
+  { value: "auth_failed",               label: "Auth Failed" },
+  { value: "address_error",             label: "Address Error" },
+  { value: "stock_error",               label: "Stock Error" },
+  { value: "system_error",              label: "System Error" },
 ];
 
 export function OrderProcessingPage({ tenantId, storeId, authToken, onViewOrder }: Props) {

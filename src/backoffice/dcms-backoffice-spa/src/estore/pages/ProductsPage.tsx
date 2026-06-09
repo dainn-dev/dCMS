@@ -126,14 +126,9 @@ type ProductsPageProps = {
   onCategoryAssignment?: () => void;
 };
 
-const FILTER_CATEGORIES = [
-  "Timepieces", "Audio", "Footwear", "Photography",
-  "Electronics", "Apparel", "Home & Living",
-];
-
 const QUICK_ACCESS_OPTIONS: { key: string; label: string; hint: string }[] = [
-  { key: "zero-qty",       label: "0 Quantity Product(s)",  hint: "Total Quantity = 0"        },
-  { key: "restock",        label: "Re-stock needed",         hint: "Out of stock product(s)"   },
+  { key: "zero-qty",       label: "0 Quantity Product(s)",  hint: "Total quantity = 0 (out of stock)" },
+  { key: "restock",        label: "Re-stock needed",         hint: "Low stock (1–5 left)"             },
   { key: "sell-on-estore", label: "Sell on eStore",          hint: ""                          },
   { key: "estore-only",    label: "eStore Only",             hint: ""                          },
 ];
@@ -458,11 +453,13 @@ export function ProductsPage({
       qtyMax: typeof debQtyMax === "number" ? debQtyMax : undefined,
       brand: debBrand !== "all" ? debBrand : undefined,
       category: debCategory !== "all" ? debCategory : undefined,
+      categories: activeCategories.length ? activeCategories : undefined,
       estoreStatus: debStatus !== "all" ? debStatus : undefined,
       quickAccess: quick.length ? quick : undefined,
     };
   }, [
     activeQuickAccess,
+    activeCategories,
     debBrand,
     debCategory,
     debName,
@@ -538,8 +535,9 @@ export function ProductsPage({
     });
   }
 
-  const filteredCatOptions = FILTER_CATEGORIES.filter((c) =>
-    c.toLowerCase().includes(catSearch.toLowerCase())
+  // Real categories from the Catalog API (was a hardcoded mock list); filter by the search box.
+  const filteredCatOptions = categoryOptions.filter((c) =>
+    c.label.toLowerCase().includes(catSearch.toLowerCase())
   );
 
   async function runBulk(op: BulkProductOp) {
@@ -984,12 +982,6 @@ export function ProductsPage({
                 }}
               />
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className={labelFilter}>Quick Access</label>
-            <select className={inputFilter} value="__more" onChange={openMoreFilters}>
-              <option value="__more">Use “More Filters”</option>
-            </select>
           </div>
           <div className="space-y-1.5">
             <label className={labelFilter}>eStore Status</label>
@@ -1503,10 +1495,10 @@ export function ProductsPage({
                     <p className="px-1 py-2 text-xs italic text-on-surface-variant">No categories match "{catSearch}"</p>
                   ) : (
                     filteredCatOptions.map((cat) => {
-                      const checked = draftCategories.includes(cat);
+                      const checked = draftCategories.includes(cat.id);
                       return (
                         <label
-                          key={cat}
+                          key={cat.id}
                           className={`flex cursor-pointer items-center gap-3 rounded px-2 py-2 text-xs transition-colors hover:bg-surface-container-high ${
                             checked ? "font-semibold text-primary" : "text-on-surface"
                           }`}
@@ -1515,9 +1507,9 @@ export function ProductsPage({
                             type="checkbox"
                             className="h-3.5 w-3.5 accent-primary shrink-0"
                             checked={checked}
-                            onChange={() => toggleDraftCategory(cat)}
+                            onChange={() => toggleDraftCategory(cat.id)}
                           />
-                          {cat}
+                          {cat.label}
                           {checked && (
                             <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold text-primary">
                               Selected

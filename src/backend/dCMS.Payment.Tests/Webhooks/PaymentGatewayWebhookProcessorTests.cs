@@ -23,6 +23,7 @@ public sealed class PaymentGatewayWebhookProcessorTests
             orderId,
             tenantId,
             storeId,
+            "aeon",
             "cust",
             "card",
             intentId,
@@ -41,7 +42,7 @@ public sealed class PaymentGatewayWebhookProcessorTests
         var row = Row(orderId, tenantId, storeId);
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, It.IsAny<CancellationToken>()))
+        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
@@ -58,13 +59,13 @@ public sealed class PaymentGatewayWebhookProcessorTests
                 harness.Bus,
                 NullLogger<PaymentGatewayWebhookProcessor>.Instance);
 
-            var outcome = await sut.ProcessAsync(row.PaymentIntentId, succeeded: true, "ch_wh", "", CancellationToken.None);
+            var outcome = await sut.ProcessAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, succeeded: true, "ch_wh", "", CancellationToken.None);
 
             Assert.Equal(PaymentWebhookProcessResult.Ok, outcome);
             await harness.InactivityTask;
             Assert.True(await harness.Published.Any<PaymentCompletedV1>());
             Assert.False(await harness.Published.Any<PaymentFailedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, "completed", It.IsAny<CancellationToken>()), Times.Once);
+            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, "aeon", row.Provider, "completed", It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {
@@ -81,7 +82,7 @@ public sealed class PaymentGatewayWebhookProcessorTests
         var row = Row(orderId, tenantId, storeId, PaymentTransactionStatus.Succeeded);
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, It.IsAny<CancellationToken>()))
+        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
@@ -98,12 +99,12 @@ public sealed class PaymentGatewayWebhookProcessorTests
                 harness.Bus,
                 NullLogger<PaymentGatewayWebhookProcessor>.Instance);
 
-            var outcome = await sut.ProcessAsync(row.PaymentIntentId, succeeded: true, null, "", CancellationToken.None);
+            var outcome = await sut.ProcessAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, succeeded: true, null, "", CancellationToken.None);
 
             Assert.Equal(PaymentWebhookProcessResult.OkAlreadyProcessed, outcome);
             await harness.InactivityTask;
             Assert.False(await harness.Published.Any<PaymentCompletedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            repo.Verify(r => r.UpdateStatusByIdAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         }
         finally
         {
@@ -120,7 +121,7 @@ public sealed class PaymentGatewayWebhookProcessorTests
         var row = Row(orderId, tenantId, storeId);
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, It.IsAny<CancellationToken>()))
+        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
@@ -137,13 +138,13 @@ public sealed class PaymentGatewayWebhookProcessorTests
                 harness.Bus,
                 NullLogger<PaymentGatewayWebhookProcessor>.Instance);
 
-            var outcome = await sut.ProcessAsync(row.PaymentIntentId, succeeded: false, null, "card_declined", CancellationToken.None);
+            var outcome = await sut.ProcessAsync(row.PaymentIntentId, row.TenantId, "aeon", row.Provider, succeeded: false, null, "card_declined", CancellationToken.None);
 
             Assert.Equal(PaymentWebhookProcessResult.Ok, outcome);
             await harness.InactivityTask;
             Assert.True(await harness.Published.Any<PaymentFailedV1>());
             Assert.False(await harness.Published.Any<PaymentCompletedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, "failed", It.IsAny<CancellationToken>()), Times.Once);
+            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, row.TenantId, row.StoreId, "aeon", row.Provider, "failed", It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {
@@ -155,7 +156,7 @@ public sealed class PaymentGatewayWebhookProcessorTests
     public async Task ProcessAsync_when_unknown_intent_returns_UnknownIntent()
     {
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync("pi_missing", It.IsAny<CancellationToken>()))
+        repo.Setup(r => r.GetLatestByPaymentIntentIdAsync("pi_missing", It.IsAny<Guid>(), "aeon", "stub", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PaymentTransaction?)null);
 
         await using var provider = new ServiceCollection()
@@ -172,7 +173,7 @@ public sealed class PaymentGatewayWebhookProcessorTests
                 harness.Bus,
                 NullLogger<PaymentGatewayWebhookProcessor>.Instance);
 
-            var outcome = await sut.ProcessAsync("pi_missing", succeeded: true, null, "", CancellationToken.None);
+            var outcome = await sut.ProcessAsync("pi_missing", Guid.NewGuid(), "aeon", "stub", succeeded: true, null, "", CancellationToken.None);
 
             Assert.Equal(PaymentWebhookProcessResult.UnknownIntent, outcome);
         }

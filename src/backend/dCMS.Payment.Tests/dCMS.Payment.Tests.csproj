@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="MassTransit.TestFramework" Version="8.3.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
@@ -22,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\dCMS.Payment.Core\dCMS.Payment.Core.csproj" />
     <ProjectReference Include="..\dCMS.Payment.Infrastructure\dCMS.Payment.Infrastructure.csproj" />
+    <ProjectReference Include="..\dCMS.Payment.Api\dCMS.Payment.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>

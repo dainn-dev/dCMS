@@ -151,6 +151,10 @@ public static class OrderReportRoutes
             return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "membershipType filter is available after PR3 (Loyalty Membership domain rollout).");
         if (!string.IsNullOrWhiteSpace(membershipTier))
             return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "membershipTier filter is available after PR3 (Loyalty Membership domain rollout).");
+        // paymentMethod lives in the Payment DB (PaymentTransactions) which the details query does not join;
+        // reject explicitly instead of silently returning all rows. Use paymentType for the in-Order composition.
+        if (!string.IsNullOrWhiteSpace(paymentMethod))
+            return EnvelopeError(400, "FILTER_NOT_AVAILABLE", "paymentMethod filter is not yet available; use paymentType instead.");
 
         var filter = new TransactionDetailFilter(
             MemberQuery: memberQuery,
@@ -172,15 +176,31 @@ public static class OrderReportRoutes
         [FromServices] OrderReportQueryStore reports,
         [FromQuery] string? dateFrom,
         [FromQuery] string? dateTo,
+        [FromQuery] string? orderNumber,
+        [FromQuery] string? referenceNumber,
+        [FromQuery] string? gatewayName,
         [FromQuery] string? paymentMethod,
+        [FromQuery] string? paymentStatus,
+        [FromQuery] decimal? amountMin,
+        [FromQuery] decimal? amountMax,
         CancellationToken ct)
     {
+        // Ecommerce Payments BRD §2 search criteria. Payment Date range is required.
         if (!TryGetTenantStore(http, out var tenantId, out var storeId))
             return EnvelopeError(400, "MISSING_TENANT", "X-Tenant-Id header is required.");
         if (!TryParseDateRange(dateFrom, dateTo, out var df, out var dt))
             return EnvelopeError(400, "INVALID_DATE_RANGE", "dateFrom and dateTo query params are required (yyyy-MM-dd).");
 
-        var rows = await reports.GetEcommercePaymentsAsync(tenantId, storeId, df, dt, paymentMethod, ct).ConfigureAwait(false);
+        var filter = new EcommercePaymentFilter(
+            OrderNumber: orderNumber,
+            ReferenceNumber: referenceNumber,
+            GatewayName: gatewayName,
+            PaymentMethod: paymentMethod,
+            PaymentStatus: paymentStatus,
+            AmountMin: amountMin,
+            AmountMax: amountMax);
+
+        var rows = await reports.GetEcommercePaymentsAsync(tenantId, storeId, df, dt, filter, ct).ConfigureAwait(false);
         return EnvelopeOk(rows);
     }
 

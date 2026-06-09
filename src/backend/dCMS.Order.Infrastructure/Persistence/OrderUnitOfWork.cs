@@ -1082,7 +1082,7 @@ public sealed class OrderUnitOfWork : IAsyncDisposable
         const string insertHeader = """
             INSERT INTO "Returns" ("Id","OrderId","TenantId","StoreId","IdempotencyKey","Status","Reason","Notes","CreatedAt")
             VALUES (@Id, @OrderId, @TenantId, @StoreId, @IdempotencyKey, 'Pending', @Reason, @Notes, @Now)
-            ON CONFLICT ("TenantId","StoreId","OrderId","IdempotencyKey")
+            ON CONFLICT ("TenantId","StoreId","OrderId","IdempotencyKey") WHERE "IdempotencyKey" IS NOT NULL
             DO NOTHING
             RETURNING "Id"::uuid
             """;

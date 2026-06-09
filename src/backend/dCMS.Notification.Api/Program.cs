@@ -42,6 +42,10 @@ builder.Services.AddSingleton<TemplateRepository>();
 builder.Services.AddSingleton<ITemplateRenderer, ScribanTemplateRenderer>();
 builder.Services.AddSingleton<NotificationEventsRepository>();
 
+// DAI-687: admin-managed catalog of template types (DB-backed, seeded from config defaults).
+builder.Services.Configure<TemplateCatalogOptions>(builder.Configuration.GetSection("TemplateCatalog"));
+builder.Services.AddSingleton<TemplateDefinitionRepository>();
+
 var app = builder.Build();
 
 app.UseSwagger();
@@ -58,6 +62,7 @@ app.MapHealthChecks("/health");
 app.MapDcmsPrometheusMetrics();
 
 app.MapTemplateRoutes();
+app.MapTemplateCatalogRoutes();
 app.MapNotificationFeedRoutes();
 
 app.MapGet("/", () => Results.Text("dCMS.Notification.Api\n", "text/plain"));

@@ -110,6 +110,8 @@ public static class ProductRoutes
         string? filters,
         string? status,
         string? brand,
+        string? categories,
+        string? quickAccess,
         CancellationToken cancellationToken)
     {
         var redisConfigured = !string.IsNullOrWhiteSpace(configuration.GetConnectionString("Redis"));
@@ -132,9 +134,32 @@ public static class ProductRoutes
         // created products are visible before publish. The eStore Status filter narrows this set.
         var statuses = MapAdminStatuses(status);
         var brandFilter = string.IsNullOrWhiteSpace(brand) ? null : brand.Trim();
+
+        // "More Filters": multi-category + quick-access toggles.
+        var categoryIds = (categories ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => int.TryParse(s, out var v) ? v : 0)
+            .Where(v => v > 0)
+            .Distinct()
+            .ToArray();
+        var quick = (quickAccess ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => s.ToLowerInvariant())
+            .ToHashSet();
+        // "0 Quantity" = total qty exactly 0; "Re-stock needed" = low-stock band (0 < qty <= threshold). Disjoint lists.
+        var outOfStock = quick.Contains("zero-qty");
+        var lowStock = quick.Contains("restock");
+        var lowStockThreshold = configuration.GetValue<int?>("Catalog:LowStockThreshold") ?? 5;
+        // "Sell on eStore" / "eStore Only": no dedicated channel field in the index — best
+        // available signal is the product being live (status=active).
+        if (quick.Contains("sell-on-estore") || quick.Contains("estore-only"))
+            statuses = new[] { "active" };
+
         var result = await search
             .SearchAsync(new ProductSearchQuery(tenantId, storeId, q, inStock, category, ps, cursor, minPrice, maxPrice,
-                sortEnum, attrFilters, facets == true, statuses, brandFilter), cancellationToken)
+                sortEnum, attrFilters, facets == true, statuses, brandFilter,
+                CategoryAncestorIds: categoryIds, OutOfStockOnly: outOfStock,
+                LowStockOnly: lowStock, LowStockThreshold: lowStockThreshold), cancellationToken)
             .ConfigureAwait(false);
         var items = result.Items.Select(i => new
         {

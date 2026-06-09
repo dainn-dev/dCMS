@@ -4,6 +4,7 @@ using dCMS.Payment.Infrastructure.Messaging;
 using dCMS.Payment.Infrastructure.Persistence;
 using MassTransit;
 using MassTransit.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 
@@ -24,6 +25,7 @@ public sealed class RefundPaymentConsumerTests
             orderId,
             tenantId,
             storeId,
+            "aeon",
             "cust",
             "card",
             intentId,
@@ -47,11 +49,13 @@ public sealed class RefundPaymentConsumerTests
             .ReturnsAsync(new RefundPaymentGatewayResult.Succeeded("re_1"));
 
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, tenantId, "aeon", "stub", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
             .AddSingleton(gateway.Object)
             .AddSingleton(repo.Object)
+            .AddSingleton<IConfiguration>(TestConfiguration())
             .AddLogging()
             .AddMassTransitTestHarness(ConfigureHarness)
             .BuildServiceProvider(true);
@@ -72,7 +76,7 @@ public sealed class RefundPaymentConsumerTests
             await harness.InactivityTask;
 
             Assert.True(await harness.Published.Any<PaymentRefundedV1>());
-            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, "refunded", It.IsAny<CancellationToken>()), Times.Once);
+            repo.Verify(r => r.UpdateStatusByIdAsync(row.Id, tenantId, storeId, "aeon", "stub", "refunded", It.IsAny<CancellationToken>()), Times.Once);
         }
         finally
         {
@@ -90,11 +94,13 @@ public sealed class RefundPaymentConsumerTests
 
         var gateway = new Mock<IPaymentGateway>();
         var repo = new Mock<IPaymentTransactionRepository>();
-        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, It.IsAny<CancellationToken>())).ReturnsAsync(row);
+        repo.Setup(r => r.GetLatestByOrderIdAsync(orderId, tenantId, "aeon", "stub", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
 
         await using var provider = new ServiceCollection()
             .AddSingleton(gateway.Object)
             .AddSingleton(repo.Object)
+            .AddSingleton<IConfiguration>(TestConfiguration())
             .AddLogging()
             .AddMassTransitTestHarness(ConfigureHarness)
             .BuildServiceProvider(true);
@@ -124,4 +130,12 @@ public sealed class RefundPaymentConsumerTests
             await harness.Stop();
         }
     }
+
+    private static IConfiguration TestConfiguration() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Dcms:Client:Id"] = "aeon",
+            })
+            .Build();
 }

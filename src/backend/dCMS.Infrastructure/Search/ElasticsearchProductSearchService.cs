@@ -24,6 +24,17 @@ public sealed class ElasticsearchProductSearchService(
         var index = ElasticsearchIndexNames.Products(query.TenantId);
         var searchAfter = DecodeSearchAfter(query.SearchAfterCursor);
 
+        // Admin numbered pagination (jump to page N) sends a plain integer offset cursor.
+        // Keyset (search_after) only supports next/prev, so for a numeric cursor page via
+        // from/size instead. The opaque base64 keyset cursor (storefront) still uses search_after.
+        int? from = null;
+        if (searchAfter is null
+            && int.TryParse((query.SearchAfterCursor ?? string.Empty).Trim(), out var offset)
+            && offset > 0)
+        {
+            from = Math.Min(offset, 10_000);
+        }
+
         var filters = new List<Query>
         {
             Query.Term(new TermQuery(Field.FromString("storeId")!) { Value = FieldValue.String(query.StoreId) }),
@@ -48,8 +59,36 @@ public sealed class ElasticsearchProductSearchService(
         if (query.InStockOnly == true)
             filters.Add(Query.Term(new TermQuery(Field.FromString("hasInStockVariant")!) { Value = FieldValue.Boolean(true) }));
 
-        if (query.CategoryAncestorId is int cid && cid > 0)
-            filters.Add(Query.Term(new TermQuery(Field.FromString("categoryAncestors")!) { Value = FieldValue.Long(cid) }));
+        // Quick-access stock filters on totalAvailableQty:
+        //   "0 Quantity"      → qty == 0
+        //   "Re-stock needed" → 0 < qty <= threshold (low stock)
+        // When BOTH are selected the user wants the union (everything needing attention) → 0 <= qty <= threshold,
+        // so collapse to a single range instead of two ANDed clauses (which would never match).
+        if (query.OutOfStockOnly || query.LowStockOnly)
+        {
+            var qtyField = Field.FromString("totalAvailableQty")!;
+            var threshold = Math.Max(1, query.LowStockThreshold);
+            if (query.OutOfStockOnly && query.LowStockOnly)
+                filters.Add(Query.Range(new NumberRangeQuery(qtyField) { Gte = 0, Lte = threshold }));
+            else if (query.OutOfStockOnly)
+                filters.Add(Query.Term(new TermQuery(qtyField) { Value = FieldValue.Long(0) }));
+            else
+                filters.Add(Query.Range(new NumberRangeQuery(qtyField) { Gt = 0, Lte = threshold }));
+        }
+
+        // Category filter: union of the single id + the multi-select list; match ANY ancestor.
+        var categoryIds = new HashSet<long>();
+        if (query.CategoryAncestorId is int cid && cid > 0) categoryIds.Add(cid);
+        if (query.CategoryAncestorIds is { Count: > 0 } multi)
+            foreach (var mc in multi)
+                if (mc > 0) categoryIds.Add(mc);
+        if (categoryIds.Count > 0)
+        {
+            var categoryShould = categoryIds
+                .Select(c => Query.Term(new TermQuery(Field.FromString("categoryAncestors")!) { Value = FieldValue.Long(c) }))
+                .ToList();
+            filters.Add(Query.Bool(new BoolQuery { Should = categoryShould, MinimumShouldMatch = 1 }));
+        }
 
         if (!string.IsNullOrWhiteSpace(query.BrandId))
             filters.Add(Query.Term(new TermQuery(Field.FromString("brandId")!) { Value = FieldValue.String(query.BrandId.Trim()) }));
@@ -138,6 +177,7 @@ public sealed class ElasticsearchProductSearchService(
 
         var searchRequest = new SearchRequest(index)
         {
+            From = from,
             Size = size,
             TrackTotalHits = new TrackHits(true),
             Query = boolQuery,

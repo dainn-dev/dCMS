@@ -40,6 +40,7 @@ public sealed class ProductDocumentBuilderTests
         doc.SnapshotVersion.Should().Be(2);
         doc.Attributes["material"].Should().Be("cotton");
         doc.HasInStockVariant.Should().BeTrue();
+        doc.TotalAvailableQty.Should().Be(5); // var_1 (0) + var_2 (5)
         doc.MinBasePrice.Amount.Should().Be(1_000_000);
         doc.Variants.Single(x => x.VariantId == "var_1").BasePrice.Amount.Should().Be(1_000_000);
         doc.Variants.Single(x => x.VariantId == "var_2").BasePrice.Amount.Should().Be(2_000_000);

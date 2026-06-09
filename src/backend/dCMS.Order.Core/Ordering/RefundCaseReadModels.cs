@@ -11,6 +11,8 @@ public sealed record RefundCaseDetail(
     string TenantId,
     string StoreId,
     string CustomerId,
+    string CustomerName,
+    string CustomerEmail,
     decimal Amount,
     string Currency,
     string PaymentMethod,

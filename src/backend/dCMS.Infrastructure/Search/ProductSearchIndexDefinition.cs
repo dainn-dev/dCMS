@@ -99,6 +99,7 @@ public static class ProductSearchIndexDefinition
                         }
                     },
                     { "hasInStockVariant", new BooleanProperty() },
+                    { "totalAvailableQty", new IntegerNumberProperty() },
                     {
                         "minBasePrice", new ObjectProperty
                         {

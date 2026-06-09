@@ -38,6 +38,21 @@ function hdr(token?: string): Record<string, string> {
   return h;
 }
 
+/** A unique key for the `Idempotency-Key` header the Catalog/Promotions/Voucher write endpoints require. */
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    // fall through to the timestamp-based fallback
+  }
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** `hdr` plus a fresh `Idempotency-Key` — required on every approve/reject (mutating) request. */
+function writeHdr(token?: string): Record<string, string> {
+  return { ...hdr(token), "Idempotency-Key": newIdempotencyKey() };
+}
+
 async function parseJsonEnvelope<TData, TMeta = unknown>(res: Response): Promise<ApiEnvelope<TData, TMeta>> {
   let body: ApiEnvelope<TData, TMeta>;
   try {
@@ -90,7 +105,8 @@ function formatDateShort(iso: string | undefined): string {
 function productFromPendingDto(d: PendingProductItemDto): ProductApprovalRow {
   return {
     id: d.id,
-    productName: d.name ?? "",
+    // Backend returns the localized Name JSON (e.g. {"en":"…","vi":"…"}); render a single locale.
+    productName: parseNameJson(d.name ?? "") || (d.name ?? ""),
     brand: d.brandName ?? "",
     category: d.categoryPath ?? "",
     submittedBy: d.submittedByUserId ?? "—",
@@ -131,7 +147,7 @@ export async function approveProduct(
 ): Promise<void> {
   const res = await fetch(
     `${CATALOG}/tenants/${encodeURIComponent(tenantId)}/stores/${encodeURIComponent(storeId)}/products/${encodeURIComponent(productId)}/approve`,
-    { method: "POST", credentials: "same-origin", headers: hdr(token), body: "{}" }
+    { method: "POST", credentials: "same-origin", headers: writeHdr(token), body: "{}" }
   );
   await parseJsonEnvelope<unknown>(res);
 }
@@ -148,7 +164,7 @@ export async function rejectProduct(
     {
       method: "POST",
       credentials: "same-origin",
-      headers: hdr(token),
+      headers: writeHdr(token),
       body: JSON.stringify({ comment }),
     }
   );
@@ -230,7 +246,7 @@ export async function fetchPendingCampaigns(
 export async function approveCampaign(tenantId: string, campaignId: string, token?: string): Promise<void> {
   const res = await fetch(
     `${PROMOTIONS}/tenants/${encodeURIComponent(tenantId)}/campaigns/${encodeURIComponent(campaignId)}/approve`,
-    { method: "POST", credentials: "same-origin", headers: hdr(token), body: "{}" }
+    { method: "POST", credentials: "same-origin", headers: writeHdr(token), body: "{}" }
   );
   await parseJsonEnvelope<unknown>(res);
 }
@@ -246,7 +262,7 @@ export async function rejectCampaign(
     {
       method: "POST",
       credentials: "same-origin",
-      headers: hdr(token),
+      headers: writeHdr(token),
       body: JSON.stringify({ comment }),
     }
   );
@@ -310,10 +326,65 @@ export async function fetchPendingPromoCodes(
   return { items: (body.data ?? []).map(promoToApprovalRow), total };
 }
 
+// ── Load-all helpers ──────────────────────────────────────────────────────────
+// Page through the FULL pending set (cursor or page based) so large approval
+// queues aren't silently truncated at the first batch. The UI then paginates the
+// accumulated rows client-side. Safety-capped to avoid runaway loops.
+
+export async function fetchAllPendingProducts(
+  tenantId: string,
+  storeId: string,
+  token?: string
+): Promise<{ items: ProductApprovalRow[]; total: number }> {
+  const all: ProductApprovalRow[] = [];
+  let cursor: string | null | undefined;
+  let total = 0;
+  for (let i = 0; i < 500; i++) {
+    const res = await fetchPendingProducts(tenantId, storeId, { cursor, limit: 100 }, token);
+    all.push(...res.items);
+    total = res.total || all.length;
+    if (!res.nextCursor || res.items.length === 0) break;
+    cursor = res.nextCursor;
+  }
+  return { items: all, total };
+}
+
+export async function fetchAllPendingCampaigns(
+  tenantId: string,
+  token?: string
+): Promise<{ items: CampaignApprovalRow[]; total: number }> {
+  const all: CampaignApprovalRow[] = [];
+  const pageSize = 200;
+  let total = 0;
+  for (let page = 1; page <= 500; page++) {
+    const res = await fetchPendingCampaigns(tenantId, { page, pageSize }, token);
+    all.push(...res.items);
+    total = res.total || all.length;
+    if (res.items.length < pageSize || all.length >= total) break;
+  }
+  return { items: all, total };
+}
+
+export async function fetchAllPendingPromoCodes(
+  tenantId: string,
+  token?: string
+): Promise<{ items: PromoCodeApprovalRow[]; total: number }> {
+  const all: PromoCodeApprovalRow[] = [];
+  const pageSize = 200;
+  let total = 0;
+  for (let page = 1; page <= 500; page++) {
+    const res = await fetchPendingPromoCodes(tenantId, { page, pageSize }, token);
+    all.push(...res.items);
+    total = res.total || all.length;
+    if (res.items.length < pageSize || all.length >= total) break;
+  }
+  return { items: all, total };
+}
+
 export async function approvePromoCode(tenantId: string, promoCodeId: string, token?: string): Promise<void> {
   const res = await fetch(
     `${PROMOTIONS}/tenants/${encodeURIComponent(tenantId)}/promo-codes/${encodeURIComponent(promoCodeId)}/approve`,
-    { method: "POST", credentials: "same-origin", headers: hdr(token), body: "{}" }
+    { method: "POST", credentials: "same-origin", headers: writeHdr(token), body: "{}" }
   );
   await parseJsonEnvelope<unknown>(res);
 }
@@ -329,7 +400,7 @@ export async function rejectPromoCode(
     {
       method: "POST",
       credentials: "same-origin",
-      headers: hdr(token),
+      headers: writeHdr(token),
       body: JSON.stringify({ comment }),
     }
   );
