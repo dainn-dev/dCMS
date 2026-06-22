@@ -14,6 +14,7 @@ using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 var fulfillmentCs = builder.Configuration.GetConnectionString("Fulfillment");
 if (string.IsNullOrWhiteSpace(fulfillmentCs))

@@ -10,6 +10,7 @@ using MassTransit;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 // Bind timestamptz columns to DateTimeOffset (incl. positional records). See DapperTypeHandlers.
 dCMS.Infrastructure.Persistence.DapperTypeHandlers.Register();

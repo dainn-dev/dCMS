@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using dCMS.AspNetCore.Auth;
 using dCMS.Gateway;
 using dCMS.Infrastructure.Billing;
 using dCMS.Infrastructure.Routing;
@@ -9,6 +10,7 @@ using Swashbuckle.AspNetCore.SwaggerUI;
 using dCMS.Infrastructure.Web;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 // ── Options ───────────────────────────────────────────────────────────────────
 var authOpt = builder.Configuration

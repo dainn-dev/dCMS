@@ -11,6 +11,7 @@ using dCMS.Approval.Api.Routes.Subjects;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 var approvalCs = builder.Configuration.GetConnectionString("Approval");
 if (string.IsNullOrWhiteSpace(approvalCs))

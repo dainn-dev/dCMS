@@ -19,6 +19,7 @@ using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 var promotionsCs = builder.Configuration.GetConnectionString("Promotions");
 if (string.IsNullOrWhiteSpace(promotionsCs))

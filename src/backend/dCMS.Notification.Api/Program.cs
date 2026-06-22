@@ -8,6 +8,7 @@ using dCMS.Notification.Api.Routes;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 var notificationCs = builder.Configuration.GetConnectionString("Notification");
 if (string.IsNullOrWhiteSpace(notificationCs))

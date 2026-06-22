@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 
 namespace dCMS.AspNetCore.Auth;
@@ -14,6 +15,15 @@ public static class DcmsJwtAuthExtensions
 {
     public static bool IsDcmsAuthEnabled(this IConfiguration configuration) =>
         configuration.GetSection(DcmsAuthOptions.SectionName).GetValue<bool?>(nameof(DcmsAuthOptions.Enabled)) ?? true;
+
+    /// <summary>DAI-175 — throws at startup if auth is disabled in Production environment.</summary>
+    public static void EnsureProductionAuthGuard(this IConfiguration configuration, IHostEnvironment environment)
+    {
+        if (environment.IsProduction() && !configuration.IsDcmsAuthEnabled())
+            throw new InvalidOperationException(
+                "Auth is disabled (Auth:Enabled=false) but ASPNETCORE_ENVIRONMENT=Production. " +
+                "Authentication must be enabled in production.");
+    }
 
     public static IServiceCollection AddDcmsJwtAuthentication(this IServiceCollection services, IConfiguration configuration)
     {

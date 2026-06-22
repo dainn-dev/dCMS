@@ -24,6 +24,7 @@ using Microsoft.Extensions.DependencyInjection;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 var inventoryCs = builder.Configuration.GetConnectionString("Inventory");
 if (string.IsNullOrWhiteSpace(inventoryCs))

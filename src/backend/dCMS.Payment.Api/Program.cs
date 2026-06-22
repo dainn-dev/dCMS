@@ -10,6 +10,7 @@ using dCMS.Payment.Infrastructure;
 using dCMS.Payment.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 builder.Services.AddHealthChecks();
 builder.Services.AddPaymentInfrastructure(builder.Configuration);
 builder.Services.AddRabbitMqDlqMonitoring(builder.Configuration, "payment");

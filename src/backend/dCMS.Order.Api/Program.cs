@@ -11,6 +11,7 @@ using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 if (builder.Configuration.IsDcmsAuthEnabled())
     builder.Services.AddDcmsJwtAuthentication(builder.Configuration);

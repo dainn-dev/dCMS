@@ -7,6 +7,7 @@ using dCMS.Reports.Api.Routes;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.EnsureProductionAuthGuard(builder.Environment);
 
 // Auth: align with other services (Order/Catalog/etc).
 if (builder.Configuration.IsDcmsAuthEnabled())
