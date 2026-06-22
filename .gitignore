@@ -21,8 +21,7 @@ src/backend/dCMS.Catalog.Api/bin/
 src/backend/dCMS.Catalog.Api/obj/
 src/backend/dCMS.Catalog.Worker/bin/
 src/backend/dCMS.Catalog.Worker/obj/
-src/backend/dCMS.Core/bin/
-src/backend/dCMS.Core/obj/
+src/backend/Backup/
 src/backend/dCMS.Infrastructure/bin/
 src/backend/dCMS.Infrastructure/obj/
 src/backend/dCMS.Inventory.Api/bin/
